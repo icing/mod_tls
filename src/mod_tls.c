@@ -13,13 +13,15 @@
 #include <http_core.h>
 #include <http_log.h>
 
+#include <crustls.h>
+
 #include "mod_tls.h"
 #include "mod_tls_config.h"
 #include "mod_tls_version.h"
 
 static void tls_hooks(apr_pool_t *pool);
 
-AP_DECLARE_MODULE(md) = {
+AP_DECLARE_MODULE(tls) = {
     STANDARD20_MODULE_STUFF,
     NULL,                  /* create per dir config */
     NULL,                  /* merge per dir config */
@@ -32,6 +34,16 @@ AP_DECLARE_MODULE(md) = {
 #endif
 };
 
+static const char* crustls_version(apr_pool_t *p)
+{
+    char buffer[1024];
+    size_t len;
+
+    memset(buffer, 0, sizeof(buffer));
+    len = rustls_version(buffer, sizeof(buffer)-1);
+    return apr_pstrndup(p, buffer, len);
+}
+
 static apr_status_t tls_post_config(apr_pool_t *p, apr_pool_t *plog,
                                     apr_pool_t *ptemp, server_rec *s)
 {
@@ -40,7 +52,6 @@ static apr_status_t tls_post_config(apr_pool_t *p, apr_pool_t *plog,
     void *data = NULL;
 
     (void)p;
-    (void)ptemp;
     (void)plog;
 
     apr_pool_userdata_get(&data, tls_init_key, s->process->pool);
@@ -56,7 +67,8 @@ static apr_status_t tls_post_config(apr_pool_t *p, apr_pool_t *plog,
     }
     else {
         ap_log_error(APLOG_MARK, APLOG_INFO, 0, s, APLOGNO()
-                     "mod_tls (v%s), initializing...", MOD_TLS_VERSION);
+                     "mod_tls (v%s, crustls=%s), initializing...",
+                     MOD_TLS_VERSION, crustls_version(ptemp));
     }
 
     return APR_SUCCESS;

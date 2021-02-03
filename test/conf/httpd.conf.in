@@ -1,0 +1,34 @@
+Include "conf/modules.conf"
+
+ServerName localhost
+ServerRoot "@SERVER_DIR@"
+DocumentRoot "@SERVER_DIR@/htdocs"
+
+Listen @HTTP_PORT@
+
+LogLevel tls:debug
+
+<Location "/server-status">
+    SetHandler server-status
+</Location>
+
+<VirtualHost *:@HTTP_PORT@>
+    ServerName localhost
+    DocumentRoot "@SERVER_DIR@/htdocs"
+</VirtualHost>
+
+<VirtualHost *:@HTTP_PORT@>
+    ServerName a.mod-tls.test
+    DocumentRoot "@SERVER_DIR@/htdocs/a.mod-tls.test"
+</VirtualHost>
+
+<VirtualHost *:@HTTP_PORT@>
+    ServerName b.mod-tls.test
+    DocumentRoot "@SERVER_DIR@/htdocs/b.mod-tls.test"
+</VirtualHost>
+
+<IfModule log_config_module>
+    LogFormat "%h %l %u %t \"%r\" %>s %O \"%{Referer}i\" \"%{User-Agent}i\" %k" combined
+    LogFormat "%h %l %u %t \"%r\" %>s %b" common
+    CustomLog "logs/access_log" combined
+</IfModule>

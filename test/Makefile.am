@@ -29,11 +29,20 @@ unit_tests: $(TESTS)
 	@echo "no unit tests so far"
         
 test: $(SERVER_DIR)/.test-setup unit_tests
-	pytest
+	@pytest
 
 $(SERVER_DIR)/.test-setup: \
+	$(wildcard conf/*) \
+	$(wildcard htdocs/*) \
+	$(wildcard htdocs/*/*)
+	@mkdir -p $(SERVER_DIR)/htdocs
+	@rsync -a htdocs/* $(SERVER_DIR)/htdocs
+	@mkdir -p $(SERVER_DIR)/conf/ssl
+	@mkdir -p $(SERVER_DIR)/logs
+	rsync -a --exclude="*.in" conf/* $(SERVER_DIR)/conf
 	@touch $@
 
+
 clean-local:
-	rm -rf *.pyc __pycache__
+	rm -rf *.pyc __pycache__ conf/http.conf conf/modules.conf
 	rm -rf $(SERVER_DIR)

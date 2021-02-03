@@ -149,40 +149,53 @@ prefix="$($APXS -q prefix)"
 prefix="${prefix:-/usr}"
 export PREFIX="${prefix}"
 LDFLAGS="$LDFLAGS -L$($APXS -q libdir)"
-CPPFLAGS="$CPPFLAGS -I$($APXS -q includedir) -I$($APXS -q APR_INCLUDEDIR)"
+
+AP_INC=$($APXS -q includedir)
+CPPFLAGS="$CPPFLAGS -I$AP_INC"
+APR_INC=$($APXS -q APR_INCLUDEDIR)
+if test "$APR_INC" != "$AP_INC"; then
+    CPPFLAGS="$CPPFLAGS -I$APR_INC"
+fi
 export SYSCONF_DIR="$($APXS -q sysconfdir)"
 export LIBEXEC_DIR="$($APXS -q LIBEXECDIR)"
 
 HTTPD_VERSION="$($APXS -q HTTPD_VERSION)"
 
-# We need crypto to be in our link path, check for it.
-#
-AC_CHECK_LIB([crypto], [SHA256_Init], , [AC_MSG_ERROR("library crypto not found")])
 
 AC_CHECK_LIB([apr-1], [apr_pool_create_ex], [LIB_APR=apr-1], [AC_MSG_ERROR("library apr-1 not found")])
 AC_SUBST(LIB_APR)
 AC_CHECK_LIB([aprutil-1], [apr_brigade_create], [LIB_APRUTIL=aprutil-1], [AC_MSG_ERROR("library aprutil-1 not found")])
 AC_SUBST(LIB_APRUTIL)
 
-if test x"$request_crustls" = "xcheck"; then
-    OPENSSL_BIN="${prefix}/bin/openssl"
-    if test -x "$OPENSSL_BIN"; then
-        : # all fine
-    else
-        OPENSSL_BIN=openssl
-        AC_CHECK_PROG([FOUND_OPENSS_BIN],[$OPENSSL_BIN],[yes],[no])
-    fi
-else
+if test x"$request_crustls" != "xcheck"; then
     LDFLAGS="$LDFLAGS -L$request_crustls/lib";
     CFLAGS="$CFLAGS -I$request_crustls/include";
     CPPFLAGS="$CPPFLAGS -I$request_crustls/include";
 fi
+
+# Need some additional things for crustls linkage. This seems platform specific.
+if test $(uname) = "Darwin"; then
+    CRUSTLS_LDFLAGS="-Wl,-dead_strip -framework Security -framework Foundation"
+else
+    CRUSTLS_LDFLAGS="-Wl,--gc-sections -lpthread -ldl"
+fi
+LDFLAGS="$LDFLAGS $CRUSTLS_LDFLAGS"
+
+# verify that we can link crustls now
+AC_CHECK_LIB([crustls], [rustls_version], [AC_MSG_NOTICE("crustls found.")], [AC_MSG_ERROR("library crustls not found")])
 
 # Checks for header files.
 AC_CHECK_HEADERS([ \
     assert.h \
     stddef.h \
 ])
+
+# for now, we assume these are installed somewhere in our path
+CURL_BIN = "curl"
+OPENSSL_BIN = "openssl"
+
+AC_SUBST(CURL_BIN)
+AC_SUBST(OPENSSL_BIN)
 
 # Checks for typedefs, structures, and compiler characteristics.
 AC_TYPE_INT32_T
@@ -205,6 +218,9 @@ AC_CONFIG_FILES([
     src/mod_tls_version.h
     src/Makefile
     test/Makefile
+    test/conf/httpd.conf
+    test/conf/modules.conf
+    test/test.ini
 ])
 
 AC_OUTPUT
@@ -238,6 +254,5 @@ AC_MSG_NOTICE([summary of build options:
     CFLAGS:         ${CFLAGS}
     WARNCFLAGS:     ${WERROR_CFLAGS}
     LDFLAGS:        ${LDFLAGS}
-    LIBS:           ${LIBS}
     CPPFLAGS:       ${CPPFLAGS}
 ])

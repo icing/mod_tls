@@ -11,9 +11,12 @@ extern const command_rec tls_config_cmds[];
 
 typedef struct {
     const server_rec *s;               /* server this config belongs to */
+    const char *name;
 } tls_config_srv_t;
 
 void *tls_config_create_svr(apr_pool_t *pool, server_rec *s);
 void *tls_config_merge_svr(apr_pool_t *pool, void *basev, void *addv);
+
+tls_config_srv_t *tls_config_get(server_rec *s);
 
 #endif /* mod_tls_config_h */
