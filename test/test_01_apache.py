@@ -1,5 +1,5 @@
 from test_env import TlsTestEnv
-
+from test_conf import TlsTestConf
 
 class TestApache:
 
@@ -7,6 +7,7 @@ class TestApache:
 
     @classmethod
     def setup_class(cls):
+        TlsTestConf(env=cls.env).write()
         assert cls.env.apache_restart() == 0
 
     @classmethod

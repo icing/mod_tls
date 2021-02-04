@@ -66,6 +66,7 @@ AC_SUBST(SERVER_DIR)
 HTTP_PORT=5010
 AC_SUBST(HTTP_PORT)
 HTTPS_PORT=5011
+AC_SUBST(HTTPS_PORT)
 
 MODULE_SRC="$PWD/src"
 AC_SUBST(MODULE_SRC)
@@ -215,7 +216,7 @@ AC_SUBST(LIBEXEC_DIR)
 
 AC_CONFIG_FILES([
     Makefile
-    src/mod_tls_version.h
+    src/tls_version.h
     src/Makefile
     test/Makefile
     test/conf/httpd.conf

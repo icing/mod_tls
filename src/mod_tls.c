@@ -16,8 +16,9 @@
 #include <crustls.h>
 
 #include "mod_tls.h"
-#include "mod_tls_config.h"
-#include "mod_tls_version.h"
+#include "tls_defs.h"
+#include "tls_conf.h"
+#include "tls_version.h"
 
 static void tls_hooks(apr_pool_t *pool);
 
@@ -25,9 +26,9 @@ AP_DECLARE_MODULE(tls) = {
     STANDARD20_MODULE_STUFF,
     NULL,                  /* create per dir config */
     NULL,                  /* merge per dir config */
-    tls_config_create_svr, /* create per server config */
-    tls_config_merge_svr,  /* merge per server config (inheritance) */
-    tls_config_cmds,       /* command handlers */
+    tls_conf_create_svr,   /* create per server config */
+    tls_conf_merge_svr,    /* merge per server config (inheritance) */
+    tls_conf_cmds,         /* command handlers */
     tls_hooks,
 #if defined(AP_MODULE_FLAG_NONE)
     AP_MODULE_FLAG_ALWAYS_MERGE

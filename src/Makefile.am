@@ -27,12 +27,15 @@ mod_tls_la_LDFLAGS  = -lcrustls -module -export-symbols-regex tls_module
 
 
 OBJECTS = \
-    mod_tls_config.c \
-    mod_tls.c
+    mod_tls.c \
+    tls_conf.c \
+    tls_util.c
 
 HFILES = \
-    mod_tls_config.h \
-    mod_tls.h
+    mod_tls.h \
+    tls_conf.h \
+    tls_defs.h \
+    tls_util.h
 
 mod_tls_la_SOURCES = $(HFILES) $(OBJECTS)
 

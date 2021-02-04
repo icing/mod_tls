@@ -49,6 +49,7 @@ class TlsTestEnv:
         self._prefix = config.get('global', 'prefix')
         self._gen_dir = config.get('global', 'gen_dir')
         self._server_dir = config.get('global', 'server_dir')
+        self._server_conf_dir = os.path.join(self._server_dir, "conf")
 
         self._apachectl = os.path.join(self._prefix, 'bin', 'apachectl')
         self._http_port = config.get('global', 'http_port')
@@ -64,6 +65,14 @@ class TlsTestEnv:
     def http_base_url(self) -> str:
         return self._httpd_url
 
+    @property
+    def server_dir(self) -> str:
+        return self._server_dir
+
+    @property
+    def server_conf_dir(self) -> str:
+        return self._server_conf_dir
+
     @staticmethod
     def run(args: List[str]) -> ExecResult:
         p = subprocess.run(args, capture_output=True, text=True)
@@ -72,12 +81,12 @@ class TlsTestEnv:
 
     # --------- HTTP ---------
 
-    @staticmethod
-    def is_live(url, timeout: timedelta = None):
+    def is_live(self, url: str = None, timeout: timedelta = None):
+        url = url if url else self._httpd_check_url
         server = urlparse(url)
         timeout = timeout if timeout is not None else timedelta(seconds=20)
         try_until = time.time() + timeout.total_seconds()
-        print("checking reachability of %s" % url)
+        print("checking is reachable: {url}".format(url=url))
         while time.time() < try_until:
             # noinspection PyBroadException
             try:
@@ -95,12 +104,12 @@ class TlsTestEnv:
         print("Unable to contact server after {timeout} sec".format(timeout=timeout))
         return False
 
-    @staticmethod
-    def is_dead(url, timeout: timedelta = None):
+    def is_dead(self, url: str = None, timeout: timedelta = None):
+        url = url if url else self._httpd_check_url
         server = urlparse(url)
         timeout = timeout if timeout is not None else timedelta(seconds=20)
         try_until = time.time() + timeout.total_seconds()
-        print("checking reachability of %s" % url)
+        print("checking is unreachable: {url}".format(url=url))
         while time.time() < try_until:
             # noinspection PyBroadException
             try:
@@ -125,9 +134,9 @@ class TlsTestEnv:
         if rv == 0:
             timeout = timedelta(seconds=10)
             if check_live:
-                rv = 0 if self.is_live(self._httpd_check_url, timeout) else -1
+                rv = 0 if self.is_live(timeout=timeout) else -1
             else:
-                rv = 0 if self.is_dead(self._httpd_check_url, timeout) else -1
+                rv = 0 if self.is_dead(timeout=timeout) else -1
                 print("waited for a apache.is_dead, rv=%d" % rv)
         else:
             print("exit %d, stderr: %s" % (rv, p.stderr))
@@ -145,8 +154,8 @@ class TlsTestEnv:
     def apache_fail(self):
         rv = self.apachectl("graceful", check_live=False)
         if rv != 0:
-            print("check, if dead: " + self._httpd_check_url)
-            return 0 if self.is_dead(self._httpd_check_url, timedelta(seconds=5)) else -1
+            print("graceful restart returned: {0}".format(rv))
+            return 0 if self.is_dead(timeout=timedelta(seconds=5)) else -1
         return rv
 
     def curl(self, args: List[str]) -> ExecResult:
