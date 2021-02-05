@@ -8,6 +8,7 @@
 #include <assert.h>
 #include <apr_lib.h>
 #include <apr_strings.h>
+#include <apr_version.h>
 
 #include <httpd.h>
 #include <http_core.h>
@@ -23,7 +24,7 @@
 extern module AP_MODULE_DECLARE_DATA tls_module;
 APLOG_USE_MODULE(tls);
 
-static tls_conf_global_t *conf_global_get_or_make(apr_pool_t *p, server_rec *s)
+static tls_conf_global_t *conf_global_get_or_make(apr_pool_t *pool, server_rec *s)
 {
     tls_conf_global_t *gconf;
 
@@ -37,7 +38,8 @@ static tls_conf_global_t *conf_global_get_or_make(apr_pool_t *p, server_rec *s)
         return sconf->global;
     }
 
-    gconf = apr_pcalloc(p, sizeof(*gconf));
+    gconf = apr_pcalloc(pool, sizeof(*gconf));
+
     return gconf;
 }
 
@@ -46,6 +48,16 @@ tls_conf_server_t *tls_conf_server_get(server_rec *s)
     tls_conf_server_t *sc = ap_get_module_config(s->module_config, &tls_module);
     ap_assert(sc);
     return sc;
+}
+
+tls_conf_conn_t *tls_conf_conn_get(conn_rec *c)
+{
+    return ap_get_module_config(c->conn_config, &tls_module);
+}
+
+void tls_conf_conn_set(conn_rec *c, tls_conf_conn_t *cc)
+{
+    ap_set_module_config(c->conn_config, &tls_module, cc);
 }
 
 
@@ -60,6 +72,7 @@ void *tls_conf_create_svr(apr_pool_t *pool, server_rec *s)
     conf->global = conf_global_get_or_make(pool, s);
     conf->s = s;
 
+    conf->enabled = TLS_FLAG_UNSET;
     conf->certificates = apr_array_make(pool, 3, sizeof(tls_certificate_t*));
     return conf;
 }
@@ -75,6 +88,7 @@ void *tls_conf_merge_svr(apr_pool_t *pool, void *basev, void *addv)
     nconf->s = add->s;
     nconf->global = add->global? add->global : base->global;
 
+    nconf->enabled = (add->enabled == TLS_FLAG_UNSET)? base->enabled : add->enabled;
     nconf->certificates = apr_array_append(pool, base->certificates, add->certificates);
 
     return nconf;
@@ -103,12 +117,71 @@ static const char *cmd_resolve_file(cmd_parms *cmd, const char **pfpath)
     return NULL;
 }
 
+static const char *tls_conf_add_listener(cmd_parms *cmd, void *dc, const char*v)
+{
+    tls_conf_server_t *sc = tls_conf_server_get(cmd->server);
+    tls_conf_global_t *gc = sc->global;
+    const char *err = NULL;
+    char *host, *scope_id;
+    apr_port_t port;
+    apr_sockaddr_t *sa;
+    server_addr_rec *sar;
+    apr_status_t rv;
+
+    (void)dc;
+    /* Example of use:
+     * TLSListen 443
+     * TLSListen hostname:443
+     * TLSListen 91.0.0.1:443
+     * TLSListen [::0]:443
+     */
+    rv = apr_parse_addr_port(&host, &scope_id, &port, v, cmd->pool);
+    if (APR_SUCCESS != rv) {
+        err = apr_pstrcat(cmd->pool, cmd->cmd->name,
+                          ": invalid address/port in '", v, "'", NULL);
+        goto cleanup;
+    }
+
+    /* translate host/port to a sockaddr that we can match with incoming connections */
+    rv = apr_sockaddr_info_get(&sa, host, APR_UNSPEC, port, 0, cmd->pool);
+    if (APR_SUCCESS != rv) {
+        err = apr_pstrcat(cmd->pool, cmd->cmd->name,
+                          ": unable to get sockaddr for '", host, "'", NULL);
+        goto cleanup;
+    }
+
+    if (scope_id) {
+#if APR_VERSION_AT_LEAST(1,7,0)
+        rv = apr_sockaddr_zone_set(sa, scope_id);
+        if (APR_SUCCESS != rv) {
+            err = apr_pstrcat(cmd->pool, cmd->cmd->name,
+                              ": error setting ipv6 scope id: '", scope_id, "'", NULL);
+            goto cleanup;
+        }
+#else
+        err = apr_pstrcat(cmd->pool, cmd->cmd->name,
+                          ": IPv6 scopes not supported by your APR: '", scope_id, "'", NULL);
+        goto cleanup;
+#endif
+    }
+
+    sar = apr_pcalloc(cmd->pool, sizeof(*sar));
+    sar->host_addr = sa;
+    sar->virthost = host;
+    sar->host_port = port;
+
+    sar->next = gc->tls_addresses;
+    gc->tls_addresses = sar;
+cleanup:
+    return err;
+}
+
 static const char *tls_conf_add_certificate(
     cmd_parms *cmd, void *dc, const char *cert_file, const char *key_file)
 {
-    tls_certificate_t *cert;
     tls_conf_server_t *sc = tls_conf_server_get(cmd->server);
     const char *err = NULL;
+    tls_certificate_t *cert;
 
     (void)dc;
     if (NULL != (err = cmd_resolve_file(cmd, &cert_file))
@@ -126,6 +199,10 @@ cleanup:
 
 const command_rec tls_conf_cmds[] = {
     /* none yet */
-    AP_INIT_TAKE2("TLSCertificate", tls_conf_add_certificate, NULL, RSRC_CONF, ""),
+    AP_INIT_TAKE2("TLSCertificate", tls_conf_add_certificate, NULL, RSRC_CONF,
+        "Add a certificate to the server by specifying a certificate file and"
+        "a private key file (PEM format)."),
+    AP_INIT_TAKE1("TLSListen", tls_conf_add_listener, NULL, RSRC_CONF,
+        "Specify an adress+port where the module shall handle incoming TLS connections."),
     AP_INIT_TAKE1(NULL, NULL, NULL, RSRC_CONF, NULL)
 };

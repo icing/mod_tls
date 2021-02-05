@@ -10,7 +10,9 @@
 #include <apr_file_info.h>
 #include <apr_strings.h>
 
+#include "tls_defs.h"
 #include "tls_util.h"
+
 
 int tls_util_is_file(apr_pool_t *p, const char *fpath)
 {
@@ -21,5 +23,23 @@ int tls_util_is_file(apr_pool_t *p, const char *fpath)
         && finfo.filetype == APR_REG);
 }
 
-#include "tls_util.h"
+apr_status_t tls_util_rustls_error(apr_pool_t *p, rustls_result rr, const char **perr_descr)
+{
+    char buffer[HUGE_STRING_LEN];
+    apr_size_t len = 0;
+
+    rustls_error(rr, buffer, sizeof(buffer), &len);
+    *perr_descr = apr_pstrndup(p, buffer, len);
+    return APR_SUCCESS;
+}
+
+
+apr_status_t tls_util_load_pem(
+    apr_pool_t *p, tls_certificate_t *cert, tls_util_cert_pem_t **ppem)
+{
+    (void)p;
+    (void)cert;
+    *ppem = NULL;
+    return APR_ENOTIMPL;
+}
 

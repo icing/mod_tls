@@ -18,6 +18,11 @@ class TestApache:
         if cls.env.is_live(timeout=timedelta(milliseconds=100)):
             assert cls.env.apache_stop() == 0
 
+    @classmethod
+    def setup_method(self, _method):
+        if self.env.is_live(timeout=timedelta(milliseconds=100)):
+            assert self.env.apache_stop() == 0
+
     def test_02_cert_args_missing(self):
         conf = TlsTestConf(env=self.env)
         conf.add("TLSCertificate")
@@ -44,3 +49,34 @@ class TestApache:
             with open(os.path.join(self.env.server_dir, name), "w") as fd:
                 fd.write("")
         assert self.env.apache_restart() == 0
+
+    def test_02_cert_listen_missing(self):
+        conf = TlsTestConf(env=self.env)
+        conf.add("TLSListen")
+        conf.write()
+        assert self.env.apache_fail() == 0
+
+    def test_02_cert_listen_wrong(self):
+        conf = TlsTestConf(env=self.env)
+        conf.add("TLSListen invalid")
+        conf.write()
+        assert self.env.apache_fail() == 0
+
+    def test_02_cert_listen_port(self):
+        conf = TlsTestConf(env=self.env)
+        conf.add("TLSListen 443")
+        conf.write()
+        assert self.env.apache_restart() == 0
+
+    def test_02_cert_listen_ipv4port(self):
+        conf = TlsTestConf(env=self.env)
+        conf.add("TLSListen 129.168.178.188:443")
+        conf.write()
+        assert self.env.apache_restart() == 0
+
+    def test_02_cert_listen_ipv6port(self):
+        conf = TlsTestConf(env=self.env)
+        conf.add("TLSListen [::]:443")
+        conf.write()
+        assert self.env.apache_restart() == 0
+

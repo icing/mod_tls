@@ -11,6 +11,7 @@
 #include <mpm_common.h>
 #include <httpd.h>
 #include <http_core.h>
+#include <http_connection.h>
 #include <http_log.h>
 
 #include <crustls.h>
@@ -18,6 +19,8 @@
 #include "mod_tls.h"
 #include "tls_defs.h"
 #include "tls_conf.h"
+#include "tls_core.h"
+#include "tls_filter.h"
 #include "tls_version.h"
 
 static void tls_hooks(apr_pool_t *pool);
@@ -72,7 +75,7 @@ static apr_status_t tls_post_config(apr_pool_t *p, apr_pool_t *plog,
                      MOD_TLS_VERSION, crustls_version(ptemp));
     }
 
-    return APR_SUCCESS;
+    return tls_core_init(p, ptemp, s);
 }
 
 static void tls_hooks(apr_pool_t *pool)
@@ -88,4 +91,7 @@ static void tls_hooks(apr_pool_t *pool)
      *   mod_tls runs in relation to it?
      */
     ap_hook_post_config(tls_post_config, mod_ssl, NULL, APR_HOOK_MIDDLE);
+
+    ap_hook_pre_connection(tls_filter_pre_connection, NULL, NULL, APR_HOOK_MIDDLE);
+
 }
