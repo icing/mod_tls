@@ -13,6 +13,7 @@
 #include <http_core.h>
 #include <http_connection.h>
 #include <http_log.h>
+#include <http_protocol.h>
 
 #include <crustls.h>
 
@@ -88,7 +89,7 @@ static int hook_pre_connection(conn_rec *c, void *csd)
      * Then attach a tls_conf_conn_t to it. */
     if (c->master) goto cleanup;
     cc = tls_conf_conn_get(c);
-    if (cc && cc->disabled) goto cleanup;
+    if (cc && cc->flag_disabled == TLS_FLAG_TRUE) goto cleanup;
 
     rv = tls_core_conn_init(c);
     if (OK != rv) goto cleanup;
@@ -123,7 +124,9 @@ static int hook_connection(conn_rec* c)
 
 static void tls_hooks(apr_pool_t *pool)
 {
-    static const char *const mod_ssl[] = { "mod_ssl.c", NULL};
+    /* If our request check denies further processing, certain things
+     * need to be in place for the response to be correctly generated. */
+    static const char *pre_req_check[] = { "mod_setenvif.c", NULL };
 
     ap_log_perror(APLOG_MARK, APLOG_TRACE1, 0, pool, "installing hooks");
     /* TODO: the order that config hooks run determines the order in which
@@ -135,8 +138,10 @@ static void tls_hooks(apr_pool_t *pool)
      */
     tls_filter_register(pool);
 
-    ap_hook_post_config(tls_post_config, mod_ssl, NULL, APR_HOOK_MIDDLE);
-
+    ap_hook_post_config(tls_post_config, NULL, NULL, APR_HOOK_MIDDLE);
+    /* connection things */
     ap_hook_pre_connection(hook_pre_connection, NULL, NULL, APR_HOOK_MIDDLE);
     ap_hook_process_connection(hook_connection, NULL, NULL, APR_HOOK_MIDDLE);
+    /* request things */
+    ap_hook_post_read_request(tls_core_request_check, pre_req_check, NULL, APR_HOOK_MIDDLE);
 }

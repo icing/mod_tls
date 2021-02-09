@@ -50,4 +50,12 @@ apr_status_t tls_util_brigade_copy(
     apr_bucket_brigade *dest, apr_bucket_brigade *src, apr_off_t length,
     apr_off_t *pnout);
 
+/**
+ * Return != 0 iff the given <name> matches the configured 'ServerName'
+ * or one of the 'ServerAlias' name of <s>, including wildcard patterns
+ * as understood by ap_strcasecmp_match().
+ */
+int tls_util_name_matches_server(const char *name, server_rec *s);
+
+
 #endif /* tls_util_h */

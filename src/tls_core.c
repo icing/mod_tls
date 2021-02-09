@@ -13,6 +13,7 @@
 #include <httpd.h>
 #include <http_core.h>
 #include <http_log.h>
+#include <http_vhost.h>
 
 #include "tls_defs.h"
 #include "tls_conf.h"
@@ -173,6 +174,8 @@ int tls_core_conn_init(conn_rec *c)
         /* start with the base server, SNI may update this during handshake */
         cc = apr_pcalloc(c->pool, sizeof(*cc));
         cc->s = c->base_server;
+        cc->flag_disabled = TLS_FLAG_FALSE;
+        cc->flag_vhost_found = TLS_FLAG_UNSET;
 
         rr = rustls_server_session_new(sc->rustls_config, &cc->rustls_session);
     if (rr != RUSTLS_RESULT_OK) {
@@ -189,3 +192,86 @@ cleanup:
     return rv;
 }
 
+static int find_vhost(void *sni_hostname, conn_rec *c, server_rec *s)
+{
+    tls_conf_conn_t *cc = tls_conf_conn_get(c);
+    tls_conf_server_t *sc;
+    int found = 0;
+
+    if (!tls_util_name_matches_server(sni_hostname, s)) goto cleanup;
+
+    cc->s = s;
+    found = 1;
+    sc = tls_conf_server_get(s);
+    /* TODO: set TLS parameter configured for the server, especially
+     * the certificates configured for it.
+     */
+    (void)sc;
+
+cleanup:
+    return found;
+}
+
+apr_status_t tls_core_vhost_init(conn_rec *c)
+{
+    tls_conf_conn_t *cc = tls_conf_conn_get(c);
+    rustls_result rr = RUSTLS_RESULT_OK;
+    const char *err_descr = "";
+    apr_status_t rv = APR_SUCCESS;
+
+    ap_log_cerror(APLOG_MARK, APLOG_TRACE2, 0, c, "vhost_init: start");
+    ap_assert(cc);
+    ap_assert(cc->rustls_session);
+
+    if (cc->flag_vhost_found == TLS_FLAG_UNSET) {
+        if (NULL == cc->sni_hostname) {
+            char sni_buffer[HUGE_STRING_LEN];
+            size_t blen;
+
+            rr = rustls_server_session_sni_hostname_get(cc->rustls_session, sni_buffer,
+                sizeof(sni_buffer), &blen);
+            if (RUSTLS_RESULT_OK != rr) goto cleanup;
+            if (0 == blen) {
+                /* no SNI supported by client, we stay on c->base_server. */
+                goto cleanup;
+            }
+            cc->sni_hostname = apr_pstrndup(c->pool, sni_buffer, blen);
+        }
+
+        if (ap_vhost_iterate_given_conn(c, find_vhost, (void*)cc->sni_hostname)) {
+            ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, c, APLOGNO()
+                "vhost_init: virtual host found for SNI '%s'", cc->sni_hostname);
+            cc->flag_vhost_found = TLS_FLAG_TRUE;
+            goto cleanup;
+        }
+        /* TODO: mod_md ACME challenge might provide a certificate.
+         * This atm runs via an optional hook provided by mod_ssl. That
+         * needs to become part of httpds infrastructure.
+         */
+        else {
+            ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, c, APLOGNO()
+                "vhost_init: virtual host NOT found for SNI '%s'", cc->sni_hostname);
+            /* fall through which returns APR_NOTFOUND */
+        }
+    }
+
+    rv = (cc->flag_vhost_found == TLS_FLAG_TRUE)? APR_SUCCESS : APR_NOTFOUND;
+cleanup:
+    if (rr != RUSTLS_RESULT_OK) {
+        rv = tls_util_rustls_error(c->pool, rr, &err_descr);
+    }
+    return rv;
+}
+
+int tls_core_request_check(request_rec *r)
+{
+    (void)r;
+    /* TODO: check that r->server and the vhost server are either the
+     * same or are 'compatible' (connection sharing).
+     * Also, deny any requests of clients without SNI when we
+     * have virtual hosts configured. (this is what mod_ssl calls
+     * 'SSLStrictSNIVHOstCheck on')
+     */
+
+    return DECLINED; /* we do not take over */
+}

@@ -203,3 +203,28 @@ apr_status_t tls_util_brigade_copy(
 cleanup:
     return rv;
 }
+
+int tls_util_name_matches_server(const char *name, server_rec *s)
+{
+    apr_array_header_t *names;
+    char **alias;
+    int i;
+
+    if (!strcasecmp(name, s->server_hostname)) return 1;
+
+    /* first the fast equality match, then the pattern wild_name matches */
+    names = s->names;
+    if (!names) return 0;
+    alias = (char **)names->elts;
+    for (i = 0; i < names->nelts; ++i) {
+        if (alias[i] && !strcasecmp(name, alias[i])) return 1;
+    }
+    names = s->wild_names;
+    if (!names) return 0;
+    alias = (char **)names->elts;
+    for (i = 0; i < names->nelts; ++i) {
+        if (alias[i] && !ap_strcasecmp_match(name, alias[i])) return 1;
+    }
+    return 0;
+}
+

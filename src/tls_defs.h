@@ -38,8 +38,10 @@ typedef struct {
 
 typedef struct {
     server_rec *s;                    /* the server_rec selected for this connection */
-    int disabled;                     /* someone veto'ed our handling of this conn */
+    int flag_disabled;                /* someone veto'ed our handling of this conn */
     rustls_server_session *rustls_session;  /* the established tls session. */
+    const char *sni_hostname;         /* the SNI value from the client */
+    int flag_vhost_found;             /* the virtual host selected by SNI has been found. */
 } tls_conf_conn_t;
 
 #endif /* tls_def_h */

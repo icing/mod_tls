@@ -192,17 +192,26 @@ static apr_status_t filter_do_handshake(
     apr_status_t rv = APR_SUCCESS;
     apr_read_type_e block = fctx->fin_block;
 
-    while (rustls_server_session_is_handshaking(fctx->cc->rustls_session)) {
-        if (rustls_server_session_wants_read(fctx->cc->rustls_session)) {
-            /* keep the blocking as requested for multiple handshake ping-pongs */
-            fctx->fin_block = block;
-            rv = read_tls_to_rustls(fctx, 32*1024);
-            if (APR_SUCCESS != rv) goto cleanup;
-        }
-        if (rustls_server_session_wants_write(fctx->cc->rustls_session)) {
-            rv = write_tls_from_rustls(fctx);
-            if (APR_SUCCESS != rv) goto cleanup;
-        }
+    if (rustls_server_session_is_handshaking(fctx->cc->rustls_session)) {
+        do {
+            if (rustls_server_session_wants_read(fctx->cc->rustls_session)) {
+                /* keep the blocking as requested for multiple handshake ping-pongs */
+                fctx->fin_block = block;
+                rv = read_tls_to_rustls(fctx, 32*1024);
+                if (APR_SUCCESS != rv) goto cleanup;
+            }
+            if (rustls_server_session_wants_write(fctx->cc->rustls_session)) {
+                rv = write_tls_from_rustls(fctx);
+                if (APR_SUCCESS != rv) goto cleanup;
+            }
+        } while (rustls_server_session_is_handshaking(fctx->cc->rustls_session));
+
+        /* vhost_init() returns APR_SUCCESS in case the client SNI was present
+         * and matched one of our vhosts, or APR_NOTFOUND otherwise.
+         *
+         * We continue the handshake in either case, which is what
+         * <https://tools.ietf.org/html/rfc6066#page-6> recommends. */
+        tls_core_vhost_init(fctx->c);
     }
 cleanup:
     return rv;

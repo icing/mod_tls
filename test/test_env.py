@@ -22,7 +22,7 @@ class ExecResult:
         try:
             self._json_out = json.loads(self._stdout)
         except:
-            self.json_out = None
+            self._json_out = None
 
     @property
     def exit_code(self) -> int:
@@ -196,11 +196,18 @@ class TlsTestEnv:
     def curl(self, args: List[str]) -> ExecResult:
         return self.run([self._curl] + args)
 
-    def https_get_json(self, domain, path):
-        r = self.curl(["--insecure", "-vvvvvv", "--resolve", "{domain}:{port}:127.0.0.1".format(
+    def https_get(self, domain, path, extra_args: List[str] = None):
+        args = []
+        if extra_args:
+            args.extend(extra_args)
+        args.extend(["--insecure", "-vvvvvv", "--resolve", "{domain}:{port}:127.0.0.1".format(
             domain=domain, port=self.https_port
         ), "https://{domain}:{port}{path}".format(
             domain=domain, port=self.https_port, path=path
         )])
+        return self.curl(args)
+
+    def https_get_json(self, domain, path, extra_args: List[str] = None):
+        r = self.https_get(domain=domain, path=path, extra_args=extra_args)
         assert r.exit_code == 0, r.stderr
         return r.json
