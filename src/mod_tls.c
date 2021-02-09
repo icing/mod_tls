@@ -78,6 +78,49 @@ static apr_status_t tls_post_config(apr_pool_t *p, apr_pool_t *plog,
     return tls_core_init(p, ptemp, s);
 }
 
+static int hook_pre_connection(conn_rec *c, void *csd)
+{
+    tls_conf_conn_t *cc;
+    int rv = DECLINED;
+
+    (void)csd; /* mpm specific socket data, not used */
+    /* are we on a primary connection and configured for it?
+     * Then attach a tls_conf_conn_t to it. */
+    if (c->master) goto cleanup;
+    cc = tls_conf_conn_get(c);
+    if (cc && cc->disabled) goto cleanup;
+
+    rv = tls_core_conn_init(c);
+    if (OK != rv) goto cleanup;
+
+    /* TODO: this is where mod_ssl runs its 'pre_handshake' hook.
+     * this allows mod_reqtimeout to monitor the handshake duration
+     * and abort on a stall by the client. */
+
+    /* Install out input/output filters for handling connection data */
+    rv = tls_filter_conn_init(c);
+
+cleanup:
+    return rv;
+}
+
+static int hook_connection(conn_rec* c)
+{
+    tls_conf_conn_t *cc = tls_conf_conn_get(c);
+
+    if (cc && cc->rustls_session) {
+        /* Send the initialization signal down the filter chain.
+         * This will start the TLS handshake. */
+        apr_bucket_brigade* temp = apr_brigade_create(c->pool, c->bucket_alloc);
+        ap_get_brigade(c->input_filters, temp, AP_MODE_INIT, APR_BLOCK_READ, 0);
+        apr_brigade_destroy(temp);
+    }
+    /* we do *not* take over. others may add to connection processing, e.g.
+     * the core http or the http2 connection handler. */
+    return DECLINED;
+}
+
+
 static void tls_hooks(apr_pool_t *pool)
 {
     static const char *const mod_ssl[] = { "mod_ssl.c", NULL};
@@ -90,8 +133,10 @@ static void tls_hooks(apr_pool_t *pool)
      * - coexistence: if mod_ssl is loaded as well, does in matter where
      *   mod_tls runs in relation to it?
      */
+    tls_filter_register(pool);
+
     ap_hook_post_config(tls_post_config, mod_ssl, NULL, APR_HOOK_MIDDLE);
 
-    ap_hook_pre_connection(tls_filter_pre_connection, NULL, NULL, APR_HOOK_MIDDLE);
-
+    ap_hook_pre_connection(hook_pre_connection, NULL, NULL, APR_HOOK_MIDDLE);
+    ap_hook_process_connection(hook_connection, NULL, NULL, APR_HOOK_MIDDLE);
 }

@@ -1,11 +1,12 @@
 import os
 from datetime import timedelta
 
+from test_cert import TlsTestCert
 from test_env import TlsTestEnv
 from test_conf import TlsTestConf
 
 
-class TestApache:
+class TestConf:
 
     env = TlsTestEnv()
 
@@ -18,7 +19,6 @@ class TestApache:
         if cls.env.is_live(timeout=timedelta(milliseconds=100)):
             assert cls.env.apache_stop() == 0
 
-    @classmethod
     def setup_method(self, _method):
         if self.env.is_live(timeout=timedelta(milliseconds=100)):
             assert self.env.apache_stop() == 0
@@ -80,3 +80,17 @@ class TestApache:
         conf.write()
         assert self.env.apache_restart() == 0
 
+    def test_02_cert_listen_cert(self):
+        domain = self.env.domain_a
+        conf = TlsTestConf(env=self.env)
+        conf.add("""
+  TLSListen {https}
+  <VirtualHost *:{https}>
+    ServerName {domain}
+    TLSCertificate {domain}.cert.pem {domain}.pkey.pem
+  </VirtualHost>""".format(
+            https=self.env.https_port,
+            domain=domain
+        ))
+        conf.write()
+        assert self.env.apache_restart() == 0

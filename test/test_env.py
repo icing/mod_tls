@@ -9,6 +9,8 @@ from http.client import HTTPConnection
 from typing import List, Optional, Dict
 from urllib.parse import urlparse
 
+from test_cert import TlsTestCert
+
 
 class ExecResult:
 
@@ -42,6 +44,19 @@ class ExecResult:
 
 class TlsTestEnv:
 
+    DOMAIN_A = "a.mod-tls.test"
+    DOMAIN_B = "b.mod-tls.test"
+
+    _initialized = False
+
+    @classmethod
+    def init_class(cls, base_dir: str):
+        if not cls._initialized:
+            certs = TlsTestCert()
+            for domain in [cls.DOMAIN_A, cls.DOMAIN_B]:
+                certs.create_self_signed(base_dir, domain, sans=[domain])
+            cls._initialized = True
+
     def __init__(self):
         config = ConfigParser()
         config.read('test.ini')
@@ -52,14 +67,25 @@ class TlsTestEnv:
         self._server_conf_dir = os.path.join(self._server_dir, "conf")
 
         self._apachectl = os.path.join(self._prefix, 'bin', 'apachectl')
-        self._http_port = config.get('global', 'http_port')
-        self._https_port = config.get('global', 'https_port')
+        self._http_port = int(config.get('global', 'http_port'))
+        self._https_port = int(config.get('global', 'https_port'))
 
         self._httpd_url = "http://localhost:{port}".format(port=self._http_port)
         self._httpd_check_url = self._httpd_url
 
         self._curl = config.get('global', 'curl_bin')
+        if self._curl is None or len(self._curl) == 0:
+            self._curl = "curl"
         self._openssl = config.get('global', 'openssl_bin')
+        TlsTestEnv.init_class(self._server_dir)
+
+    @property
+    def http_port(self) -> int:
+        return self._http_port
+
+    @property
+    def https_port(self) -> int:
+        return self._https_port
 
     @property
     def http_base_url(self) -> str:
@@ -73,8 +99,17 @@ class TlsTestEnv:
     def server_conf_dir(self) -> str:
         return self._server_conf_dir
 
+    @property
+    def domain_a(self) -> str:
+        return self.DOMAIN_A
+
+    @property
+    def domain_b(self) -> str:
+        return self.DOMAIN_B
+
     @staticmethod
     def run(args: List[str]) -> ExecResult:
+        print("run: {0}".format(args))
         p = subprocess.run(args, capture_output=True, text=True)
         # noinspection PyBroadException
         return ExecResult(exit_code=p.returncode, stdout=p.stdout, stderr=p.stderr)
@@ -160,3 +195,12 @@ class TlsTestEnv:
 
     def curl(self, args: List[str]) -> ExecResult:
         return self.run([self._curl] + args)
+
+    def https_get_json(self, domain, path):
+        r = self.curl(["--insecure", "-vvvvvv", "--resolve", "{domain}:{port}:127.0.0.1".format(
+            domain=domain, port=self.https_port
+        ), "https://{domain}:{port}{path}".format(
+            domain=domain, port=self.https_port, path=path
+        )])
+        assert r.exit_code == 0, r.stderr
+        return r.json

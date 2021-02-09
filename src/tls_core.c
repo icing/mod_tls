@@ -20,6 +20,10 @@
 #include "tls_util.h"
 
 
+extern module AP_MODULE_DECLARE_DATA tls_module;
+APLOG_USE_MODULE(tls);
+
+
 static int we_listen_on(tls_conf_global_t *gc, server_rec *s)
 {
     server_addr_rec *sa, *la;
@@ -68,6 +72,7 @@ apr_status_t tls_core_init(apr_pool_t *p, apr_pool_t *ptemp, server_rec *base_se
     rustls_result rr = RUSTLS_RESULT_OK;
     const char *err_descr;
 
+    ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, base_server, "tls_core_init");
     apr_pool_cleanup_register(p, base_server, tls_core_free,
                               apr_pool_cleanup_null);
 
@@ -120,21 +125,21 @@ apr_status_t tls_core_init(apr_pool_t *p, apr_pool_t *ptemp, server_rec *base_se
             tls_util_cert_pem_t *pems;
 
             rv = tls_util_load_pem(ptemp, spec, &pems);
-            if (APR_SUCCESS != rv) {
-                ap_log_error(APLOG_MARK, APLOG_ERR, rv, s, APLOGNO()
-                             "Failed to load certficate for server %s",
-                             s->server_hostname);
-                goto cleanup;
-            }
+            if (APR_SUCCESS != rv) goto cleanup;
+            ap_log_error(APLOG_MARK, APLOG_TRACE2, rv, base_server,
+                "tls_core_init: loaded pem data: %s (%ld), %s (%ld)",
+                spec->cert_file, (long)pems->cert_pem_len,
+                spec->pkey_file, (long)pems->pkey_pem_len
+                );
 
             rr = rustls_server_config_builder_set_single_cert_pem(rustls_builder,
                 pems->cert_pem_bytes, pems->cert_pem_len,
-                pems->key_pem_bytes, pems->key_pem_len);
+                pems->pkey_pem_bytes, pems->pkey_pem_len);
             if (rr != RUSTLS_RESULT_OK) {
                 rv = tls_util_rustls_error(ptemp, rr, &err_descr);
                 ap_log_error(APLOG_MARK, APLOG_ERR, rv, s, APLOGNO()
-                             "Failed to load certficates for server %s: %s",
-                             s->server_hostname, err_descr);
+                             "Failed to load certficates for server %s: [%d] %s",
+                             s->server_hostname, (int)rr, err_descr);
                 goto cleanup;
             }
         }
@@ -145,22 +150,40 @@ apr_status_t tls_core_init(apr_pool_t *p, apr_pool_t *ptemp, server_rec *base_se
 
     rv = APR_SUCCESS;
 cleanup:
+    ap_log_error(APLOG_MARK, APLOG_TRACE2, rv, base_server, "tls_core_init done.");
     return rv;
 }
 
 
 int tls_core_conn_init(conn_rec *c)
 {
-    tls_conf_conn_t *cc = tls_conf_conn_get(c);
     tls_conf_server_t *sc = tls_conf_server_get(c->base_server);
+    tls_conf_conn_t *cc = tls_conf_conn_get(c);
     int rv = DECLINED;
 
-    /* Are we configured to work on this address/port? */
-    if (sc->enabled != TLS_FLAG_TRUE) goto cleanup;
+    /* Are we configured to work here? */
+    if (!sc->rustls_config) goto cleanup;
 
-    cc = apr_pcalloc(c->pool, sizeof(*cc));
-    /* start with the base server, SNI may update this during handshake */
-    cc->s = c->base_server;
+    if (!cc) {
+        rustls_result rr;
+        const char *err_descr = NULL;
+
+        ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, c->base_server, "tls_core_conn_init on %s",
+            c->base_server->server_hostname);
+        /* start with the base server, SNI may update this during handshake */
+        cc = apr_pcalloc(c->pool, sizeof(*cc));
+        cc->s = c->base_server;
+
+        rr = rustls_server_session_new(sc->rustls_config, &cc->rustls_session);
+    if (rr != RUSTLS_RESULT_OK) {
+        rv = tls_util_rustls_error(c->pool, rr, &err_descr);
+        ap_log_error(APLOG_MARK, APLOG_ERR, rv, sc->s, APLOGNO()
+                     "Failed to init session for server %s: [%d] %s",
+                     sc->s->server_hostname, (int)rr, err_descr);
+        goto cleanup;
+        }
+        tls_conf_conn_set(c, cc);
+    }
     rv = OK;
 cleanup:
     return rv;

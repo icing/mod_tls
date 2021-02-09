@@ -1,1 +1,6 @@
+ * base filter handling performs retrieval of JSON resource file. test_03_get succeeds.
+ * mod_tls does first successful handshake with a MacOS curl (libressl) using
+   TLS v1.2 and an RSA 2048 certificate, self signed.
+ * mod_tls loads single certificate (first configured) into rustls
+ * test case creates self-signed certificate, configures it for mod_tls
  * created skeleton module and autoconf/make files.

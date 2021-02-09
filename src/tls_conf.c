@@ -177,20 +177,19 @@ cleanup:
 }
 
 static const char *tls_conf_add_certificate(
-    cmd_parms *cmd, void *dc, const char *cert_file, const char *key_file)
+    cmd_parms *cmd, void *dc, const char *cert_file, const char *pkey_file)
 {
     tls_conf_server_t *sc = tls_conf_server_get(cmd->server);
     const char *err = NULL;
     tls_certificate_t *cert;
 
     (void)dc;
-    if (NULL != (err = cmd_resolve_file(cmd, &cert_file))
-        || NULL != (err = cmd_resolve_file(cmd, &cert_file))) {
-        goto cleanup;
-    }
+    if (NULL != (err = cmd_resolve_file(cmd, &cert_file))) goto cleanup;
+    if (NULL != (err = cmd_resolve_file(cmd, &pkey_file))) goto cleanup;
+
     cert = apr_pcalloc(cmd->pool, sizeof(*cert));
     cert->cert_file = cert_file;
-    cert->key_file = key_file;
+    cert->pkey_file = pkey_file;
     *(const tls_certificate_t **)apr_array_push(sc->certificates) = cert;
 
 cleanup:

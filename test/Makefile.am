@@ -44,5 +44,5 @@ $(SERVER_DIR)/.test-setup: \
 
 
 clean-local:
-	rm -rf *.pyc __pycache__ conf/http.conf conf/modules.conf
+	rm -rf *.pyc __pycache__
 	rm -rf $(SERVER_DIR)

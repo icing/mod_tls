@@ -15,7 +15,7 @@
 
 typedef struct {
     const char *cert_file;
-    const char *key_file;
+    const char *pkey_file;
 } tls_certificate_t;
 
 #define TLS_FLAG_UNSET  (-1)
@@ -39,7 +39,7 @@ typedef struct {
 typedef struct {
     server_rec *s;                    /* the server_rec selected for this connection */
     int disabled;                     /* someone veto'ed our handling of this conn */
-    const rustls_server_session *rustls_session;  /* the established tls session. */
+    rustls_server_session *rustls_session;  /* the established tls session. */
 } tls_conf_conn_t;
 
 #endif /* tls_def_h */

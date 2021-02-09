@@ -9,7 +9,7 @@ class TlsTestConf:
     def __init__(self, env: TlsTestEnv, name: str = "test.conf"):
         self.env = env
         self.name = name
-        self._content = []
+        self._content = ["LogLevel tls:trace8"]
 
     def add(self, text: Union[List[str], str]) -> None:
         if isinstance(text, List):
