@@ -33,6 +33,7 @@ typedef struct {
 
     int enabled;
     apr_array_header_t *certificates; /* array of (tls_certificate_t*) available for server_rec */
+    int honor_client_order;           /* honor client cipher ordering */
     const rustls_server_config *rustls_config;
 } tls_conf_server_t;
 

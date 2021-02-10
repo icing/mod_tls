@@ -74,8 +74,12 @@ void *tls_conf_create_svr(apr_pool_t *pool, server_rec *s)
 
     conf->enabled = TLS_FLAG_UNSET;
     conf->certificates = apr_array_make(pool, 3, sizeof(tls_certificate_t*));
+    conf->honor_client_order = TLS_FLAG_UNSET;
     return conf;
 }
+
+#define MERGE_FLAG(base, add, field) \
+    (add->field == TLS_FLAG_UNSET)? base->field : add->field;
 
 void *tls_conf_merge_svr(apr_pool_t *pool, void *basev, void *addv)
 {
@@ -88,7 +92,8 @@ void *tls_conf_merge_svr(apr_pool_t *pool, void *basev, void *addv)
     nconf->s = add->s;
     nconf->global = add->global? add->global : base->global;
 
-    nconf->enabled = (add->enabled == TLS_FLAG_UNSET)? base->enabled : add->enabled;
+    nconf->enabled = MERGE_FLAG(base, add, enabled);
+    nconf->honor_client_order = MERGE_FLAG(base, add, honor_client_order);
     nconf->certificates = apr_array_append(pool, base->certificates, add->certificates);
 
     return nconf;
@@ -176,6 +181,25 @@ cleanup:
     return err;
 }
 
+static int flag_value(
+    const char *arg)
+{
+    if (!strcasecmp(arg, "On")) {
+        return TLS_FLAG_TRUE;
+    }
+    else if (!strcasecmp(arg, "Off")) {
+        return TLS_FLAG_FALSE;
+    }
+    return TLS_FLAG_UNSET;
+}
+
+static const char *flag_err(
+    cmd_parms *cmd, const char *v)
+{
+    return apr_pstrcat(cmd->pool, cmd->cmd->name,
+        ": value must be 'On' or 'Off': '", v, "'", NULL);
+}
+
 static const char *tls_conf_add_certificate(
     cmd_parms *cmd, void *dc, const char *cert_file, const char *pkey_file)
 {
@@ -196,11 +220,25 @@ cleanup:
     return err;
 }
 
+static const char *tls_conf_set_honor_client_order(
+    cmd_parms *cmd, void *dc, const char *v)
+{
+    tls_conf_server_t *sc = tls_conf_server_get(cmd->server);
+    int flag = flag_value(v);
+
+    (void)dc;
+    if (TLS_FLAG_UNSET == flag) return flag_err(cmd, v);
+    sc->honor_client_order = flag;
+    return NULL;
+}
+
 const command_rec tls_conf_cmds[] = {
     /* none yet */
     AP_INIT_TAKE2("TLSCertificate", tls_conf_add_certificate, NULL, RSRC_CONF,
         "Add a certificate to the server by specifying a certificate file and"
         "a private key file (PEM format)."),
+    AP_INIT_TAKE1("TLSHonorClientOrder", tls_conf_set_honor_client_order, NULL, RSRC_CONF,
+        "Set 'on' to have the server honor client preferences in cipher suites, default off."),
     AP_INIT_TAKE1("TLSListen", tls_conf_add_listener, NULL, RSRC_CONF,
         "Specify an adress+port where the module shall handle incoming TLS connections."),
     AP_INIT_TAKE1(NULL, NULL, NULL, RSRC_CONF, NULL)

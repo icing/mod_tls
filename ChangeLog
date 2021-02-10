@@ -1,3 +1,9 @@
+ * New directive `TLSHonorClientOrder on|off` with default off, to make the
+   server session honor client cipher ordering.
+ * Checks on SNI selected host against request selected host started.
+ * vhost is detected based on client supplied SNI hostname. Unknown SNI hostnames
+   are not prevented from connecting as it is the clients obligation if it trust
+   the supplied server certificate.
  * base filter handling performs retrieval of JSON resource file. test_03_get succeeds.
  * mod_tls does first successful handshake with a MacOS curl (libressl) using
    TLS v1.2 and an RSA 2048 certificate, self signed.

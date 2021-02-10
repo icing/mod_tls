@@ -110,16 +110,6 @@ apr_status_t tls_core_init(apr_pool_t *p, apr_pool_t *ptemp, server_rec *base_se
         rustls_builder = rustls_server_config_builder_new();
         if (!rustls_builder) goto cleanup;
 
-        /* TODO: not yet available
-        rr = rustls_server_config_builder_load_native_roots(rustls_builder);
-        if (rr != RUSTLS_RESULT_OK) {
-            rv = tls_util_rustls_error(ptemp, rr, &err_descr);
-            ap_log_error(APLOG_MARK, APLOG_ERR, rv, s, APLOGNO()
-                         "Failed to load local roots for server %s: %s",
-                         s->server_hostname, err_descr);
-            goto cleanup;
-        }
-        */
         /* TODO: this needs some more work */
         if (sc->certificates->nelts > 0) {
             tls_certificate_t *spec = APR_ARRAY_IDX(sc->certificates, 0, tls_certificate_t*);
@@ -144,6 +134,8 @@ apr_status_t tls_core_init(apr_pool_t *p, apr_pool_t *ptemp, server_rec *base_se
                 goto cleanup;
             }
         }
+        rustls_server_config_builder_set_ignore_client_order(rustls_builder,
+            !sc->honor_client_order);
 
         sc->rustls_config = rustls_server_config_builder_build(rustls_builder);
         if (!sc->rustls_config) goto cleanup;
@@ -228,8 +220,8 @@ apr_status_t tls_core_vhost_init(conn_rec *c)
             char sni_buffer[HUGE_STRING_LEN];
             size_t blen;
 
-            rr = rustls_server_session_sni_hostname_get(cc->rustls_session, sni_buffer,
-                sizeof(sni_buffer), &blen);
+            rr = rustls_server_session_sni_hostname_get(cc->rustls_session,
+                (unsigned char*)sni_buffer, sizeof(sni_buffer), &blen);
             if (RUSTLS_RESULT_OK != rr) goto cleanup;
             if (0 == blen) {
                 /* no SNI supported by client, we stay on c->base_server. */
