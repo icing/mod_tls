@@ -165,16 +165,16 @@ int tls_core_conn_init(conn_rec *c)
             c->base_server->server_hostname);
         /* start with the base server, SNI may update this during handshake */
         cc = apr_pcalloc(c->pool, sizeof(*cc));
-        cc->s = c->base_server;
+        cc->server = c->base_server;
         cc->flag_disabled = TLS_FLAG_FALSE;
         cc->flag_vhost_found = TLS_FLAG_UNSET;
 
         rr = rustls_server_session_new(sc->rustls_config, &cc->rustls_session);
     if (rr != RUSTLS_RESULT_OK) {
         rv = tls_util_rustls_error(c->pool, rr, &err_descr);
-        ap_log_error(APLOG_MARK, APLOG_ERR, rv, sc->s, APLOGNO()
+        ap_log_error(APLOG_MARK, APLOG_ERR, rv, sc->server, APLOGNO()
                      "Failed to init session for server %s: [%d] %s",
-                     sc->s->server_hostname, (int)rr, err_descr);
+                     sc->server->server_hostname, (int)rr, err_descr);
         goto cleanup;
         }
         tls_conf_conn_set(c, cc);
@@ -192,7 +192,7 @@ static int find_vhost(void *sni_hostname, conn_rec *c, server_rec *s)
 
     if (!tls_util_name_matches_server(sni_hostname, s)) goto cleanup;
 
-    cc->s = s;
+    cc->server = s;
     found = 1;
     sc = tls_conf_server_get(s);
     /* TODO: set TLS parameter configured for the server, especially
@@ -255,15 +255,54 @@ cleanup:
     return rv;
 }
 
+/**
+ * Return != 0, if a connection opened on <base> can also serve
+ * requests for server <other>. From our side of TLS limited point of view.
+ */
+static int tls_servers_compatible(server_rec *base, server_rec *other)
+{
+    tls_conf_server_t *bc;
+    tls_conf_server_t *oc;
+
+    /*   - differences in certificates are the responsibility of the client.
+     *     if it thinks the SNI server works for r->server, we are fine with that.
+     *   - if there are differences in requirements to client certificates, we
+     *     need to deny the request.
+     */
+    if (!base || !other) return 0;
+    if (base == other) return 1;
+    bc = tls_conf_server_get(base);
+    oc = tls_conf_server_get(other);
+    if (!bc || !oc) return 0;
+
+    if (bc->honor_client_order != oc->honor_client_order) return 0;
+    /* TODO: check config details for ciphers/protocols/client auth/etc. */
+    return 1;
+}
+
 int tls_core_request_check(request_rec *r)
 {
-    (void)r;
-    /* TODO: check that r->server and the vhost server are either the
-     * same or are 'compatible' (connection sharing).
-     * Also, deny any requests of clients without SNI when we
-     * have virtual hosts configured. (this is what mod_ssl calls
-     * 'SSLStrictSNIVHOstCheck on')
-     */
+    tls_conf_conn_t *cc = tls_conf_conn_get(r->connection);
+    int rv = DECLINED; /* do not object to the request */
 
-    return DECLINED; /* we do not take over */
+    /* If we are not enabled on this connection, leave. We are not renegotiating.
+     * Otherwise:
+     * - with vhosts configured and no SNI from the client, deny access.
+     * - are servers compatible for connection sharing?
+     */
+    if (!cc || cc->flag_disabled == TLS_FLAG_TRUE) goto cleanup;
+    if (!cc->sni_hostname && r->connection->vhost_lookup_data) {
+        rv = HTTP_FORBIDDEN; goto cleanup;
+    }
+    if (!tls_servers_compatible(cc->server, r->server)) {
+        rv = HTTP_MISDIRECTED_REQUEST;
+        ap_log_rerror(APLOG_MARK, APLOG_ERR, rv, r, APLOGNO()
+                     "Connection host %s, selected via SNI, and request host %s"
+                     " have incompatible TLS configurations.",
+                     cc->server->server_hostname, r->hostname);
+        goto cleanup;
+    }
+
+cleanup:
+    return rv;
 }

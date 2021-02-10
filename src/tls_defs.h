@@ -27,7 +27,7 @@ typedef struct {
 } tls_conf_global_t;
 
 typedef struct {
-    const server_rec *s;              /* server this config belongs to */
+    const server_rec *server;         /* server this config belongs to */
     const char *name;
     tls_conf_global_t *global;        /* global module config, singleton */
 
@@ -38,7 +38,7 @@ typedef struct {
 } tls_conf_server_t;
 
 typedef struct {
-    server_rec *s;                    /* the server_rec selected for this connection */
+    server_rec *server;               /* the server_rec selected for this connection */
     int flag_disabled;                /* someone veto'ed our handling of this conn */
     rustls_server_session *rustls_session;  /* the established tls session. */
     const char *sni_hostname;         /* the SNI value from the client */

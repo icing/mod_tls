@@ -1,6 +1,7 @@
 import os
 import time
 from datetime import timedelta
+from typing import Dict, List
 
 from test_cert import TlsTestCert
 from test_env import TlsTestEnv
@@ -11,30 +12,37 @@ class TestGet:
 
     env = TlsTestEnv()
     domain_a = None
+    domain_b = None
+
+    @staticmethod
+    def setup_vhosts(domains: List[str], env: TlsTestEnv,
+                     extras: Dict[str, str] = None):
+        extras = extras if extras is not None else {}
+        conf = TlsTestConf(env=env)
+        conf.add("""
+LogLevel tls:trace8
+TLSListen {https}
+        """.format(https=env.https_port))
+        for domain in domains:
+            conf.add("""
+    <VirtualHost *:{https}>
+      ServerName {domain}
+      DocumentRoot htdocs/{domain}
+      TLSCertificate {domain}.cert.pem {domain}.pkey.pem
+      {extras}
+    </VirtualHost>
+            """.format(
+                https=env.https_port,
+                domain=domain,
+                extras=extras[domain] if domain in extras else ""
+            ))
+        conf.write()
 
     @classmethod
     def setup_class(cls):
         cls.domain_a = cls.env.domain_a
         cls.domain_b = cls.env.domain_b
-        conf = TlsTestConf(env=cls.env)
-        conf.add("""
-        LogLevel tls:trace8
-        TLSListen {https}
-        <VirtualHost *:{https}>
-          ServerName {domain_a}
-          DocumentRoot htdocs/{domain_a}
-          TLSCertificate {domain_a}.cert.pem {domain_a}.pkey.pem
-        </VirtualHost>
-        <VirtualHost *:{https}>
-          ServerName {domain_b}
-          DocumentRoot htdocs/{domain_b}
-          TLSCertificate {domain_b}.cert.pem {domain_b}.pkey.pem
-        </VirtualHost>""".format(
-            https=cls.env.https_port,
-            domain_a=cls.domain_a,
-            domain_b=cls.domain_b,
-        ))
-        conf.write()
+        cls.setup_vhosts([cls.domain_a, cls.domain_b], env=cls.env)
         assert cls.env.apache_restart() == 0
 
     @classmethod
@@ -61,11 +69,26 @@ class TestGet:
         data = self.env.https_get_json(domain_unknown, "/index.json")
         assert data == {'domain': self.domain_a}
 
-    def test_03_sni_host_differ(self):
+    def test_03_sni_request_other_same_config(self):
         # do we see the first vhost respone for an unknown domain?
-        r = self.env.https_get(self.domain_b, "/index.json", extra_args=[
-            "-vvvv", "--header", "Host: {0}".format(self.domain_a)
+        r = self.env.https_get(self.domain_a, "/index.json", extra_args=[
+            "-vvvv", "--header", "Host: {0}".format(self.domain_b)
         ])
-        # for now, this works as we do not have checks that fail between a and b
+        # request goes through, we see the correct JSON
         assert r.exit_code == 0
-        assert r.json == {'domain': self.domain_a}
+        assert r.json == {'domain': self.domain_b}
+
+    def test_03_sni_request_other_other_honor(self):
+        # do we see the first vhost respone for an unknown domain?
+        self.setup_vhosts([self.domain_a, self.domain_b], env=self.env, extras={
+            self.domain_a : """
+    TLSHonorClientOrder on
+            """
+        })
+        assert self.env.apache_restart() == 0
+        r = self.env.https_get(self.domain_a, "/index.json", extra_args=[
+            "-vvvv", "--header", "Host: {0}".format(self.domain_b)
+        ])
+        # request denied
+        assert r.exit_code == 0
+        assert r.json == None

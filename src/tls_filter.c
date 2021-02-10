@@ -60,7 +60,7 @@ static apr_status_t read_tls_to_rustls(
     apr_status_t rv = APR_SUCCESS;
 
     if (APR_BRIGADE_EMPTY(fctx->fin_tls_bb)) {
-        ap_log_error(APLOG_MARK, APLOG_TRACE2, rv, fctx->cc->s,
+        ap_log_error(APLOG_MARK, APLOG_TRACE2, rv, fctx->cc->server,
             "read_tls_to_rustls, get data from network");
         rv = ap_get_brigade(fctx->fin_ctx->next, fctx->fin_tls_bb,
             AP_MODE_READBYTES, fctx->fin_block, len);
@@ -126,7 +126,7 @@ cleanup:
                      "read_tls_to_rustls: [%d] %s", (int)rr, err_descr);
     }
     else {
-        ap_log_error(APLOG_MARK, APLOG_TRACE2, rv, fctx->cc->s,
+        ap_log_error(APLOG_MARK, APLOG_TRACE2, rv, fctx->cc->server,
             "read_tls_to_rustls, passed %ld bytes to rustls", (long)passed);
     }
     return rv;
@@ -160,7 +160,7 @@ static apr_status_t write_tls_from_rustls(
     APR_BRIGADE_INSERT_TAIL(fctx->fout_tls_bb, b);
 
     rv = ap_pass_brigade(fctx->fout_ctx->next, fctx->fout_tls_bb);
-    ap_log_error(APLOG_MARK, APLOG_TRACE2, rv, fctx->cc->s,
+    ap_log_error(APLOG_MARK, APLOG_TRACE2, rv, fctx->cc->server,
         "write_tls_from_rustls, passed %ld bytes to network", (long)dlen);
 
     if (APR_SUCCESS == rv && fctx->c->aborted) {
@@ -248,16 +248,16 @@ static apr_status_t filter_conn_input(
     rustls_result rr = RUSTLS_RESULT_OK;
     const char *err_descr = "";
 
-    ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, fctx->cc->s,
+    ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, fctx->cc->server,
         "tls_filter_conn_input, server=%s, mode=%d, block=%d, readbytes=%ld",
-        fctx->cc->s->server_hostname, mode, block, (long)readbytes);
+        fctx->cc->server->server_hostname, mode, block, (long)readbytes);
 
     fctx->fin_block = block;
 
     if (rustls_server_session_is_handshaking(fctx->cc->rustls_session)) {
-        ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, fctx->cc->s,
+        ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, fctx->cc->server,
             "tls_filter_conn_input, server=%s, do handshake",
-            fctx->cc->s->server_hostname);
+            fctx->cc->server->server_hostname);
         rv = filter_do_handshake(fctx);
         if (APR_SUCCESS != rv) goto cleanup;
     }
@@ -360,8 +360,8 @@ static apr_status_t filter_conn_output(
     const char *err_descr = "";
     apr_off_t passed = 0;
 
-    ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, fctx->cc->s,
-        "tls_filter_conn_output, server=%s", fctx->cc->s->server_hostname);
+    ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, fctx->cc->server,
+        "tls_filter_conn_output, server=%s", fctx->cc->server->server_hostname);
 
     while (!APR_BRIGADE_EMPTY(bb)) {
         apr_bucket *b = APR_BRIGADE_FIRST(bb);

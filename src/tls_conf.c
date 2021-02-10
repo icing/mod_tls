@@ -70,7 +70,7 @@ void *tls_conf_create_svr(apr_pool_t *pool, server_rec *s)
     conf = apr_pcalloc(pool, sizeof(*conf));
     conf->name = apr_pstrcat(pool, "srv[", CONF_S_NAME(s), "]", NULL);
     conf->global = conf_global_get_or_make(pool, s);
-    conf->s = s;
+    conf->server = s;
 
     conf->enabled = TLS_FLAG_UNSET;
     conf->certificates = apr_array_make(pool, 3, sizeof(tls_certificate_t*));
@@ -88,8 +88,9 @@ void *tls_conf_merge_svr(apr_pool_t *pool, void *basev, void *addv)
     tls_conf_server_t *nconf;
 
     nconf = apr_pcalloc(pool, sizeof(*nconf));
-    nconf->name = apr_pstrcat(pool, "[", CONF_S_NAME(add->s), ", ", CONF_S_NAME(base->s), "]", NULL);
-    nconf->s = add->s;
+    nconf->name = apr_pstrcat(pool, "[", CONF_S_NAME(add->server),
+        ", ", CONF_S_NAME(base->server), "]", NULL);
+    nconf->server = add->server;
     nconf->global = add->global? add->global : base->global;
 
     nconf->enabled = MERGE_FLAG(base, add, enabled);

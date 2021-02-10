@@ -1,3 +1,9 @@
+ * First checks on connection sharing.
+   - requests against a virtual hosts server are only allowed if the client uses SNI.
+   - requests to domain B on a connection to domain A are only allowed if there
+     are no relevant differences between the TLS configurations. This does exclude
+     the certificates configured, since it is the client's repsonsibility to check
+     if B falls under the certificate from A.
  * New directive `TLSHonorClientOrder on|off` with default off, to make the
    server session honor client cipher ordering.
  * Checks on SNI selected host against request selected host started.
