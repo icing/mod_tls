@@ -83,14 +83,6 @@ class TestConf:
     def test_02_cert_listen_cert(self):
         domain = self.env.domain_a
         conf = TlsTestConf(env=self.env)
-        conf.add("""
-  TLSListen {https}
-  <VirtualHost *:{https}>
-    ServerName {domain}
-    TLSCertificate {domain}.cert.pem {domain}.pkey.pem
-  </VirtualHost>""".format(
-            https=self.env.https_port,
-            domain=domain
-        ))
+        conf.add_vhosts(domains=[domain])
         conf.write()
         assert self.env.apache_restart() == 0

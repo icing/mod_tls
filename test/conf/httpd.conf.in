@@ -7,8 +7,6 @@ DocumentRoot "@SERVER_DIR@/htdocs"
 Listen @HTTP_PORT@
 Listen @HTTPS_PORT@
 
-LogLevel tls:debug
-
 <Location "/server-status">
     SetHandler server-status
 </Location>

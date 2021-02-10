@@ -220,7 +220,7 @@ apr_status_t tls_core_vhost_init(conn_rec *c)
             char sni_buffer[HUGE_STRING_LEN];
             size_t blen;
 
-            rr = rustls_server_session_sni_hostname_get(cc->rustls_session,
+            rr = rustls_server_session_get_sni_hostname(cc->rustls_session,
                 (unsigned char*)sni_buffer, sizeof(sni_buffer), &blen);
             if (RUSTLS_RESULT_OK != rr) goto cleanup;
             if (0 == blen) {

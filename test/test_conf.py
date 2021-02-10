@@ -1,5 +1,5 @@
 import os
-from typing import List, Union
+from typing import List, Union, Dict
 
 from test_env import TlsTestEnv
 
@@ -20,3 +20,27 @@ class TlsTestConf:
     def write(self) -> None:
         with open(os.path.join(self.env.server_conf_dir, self.name), "w") as fd:
             fd.write("\n".join(self._content))
+
+    def add_vhosts(self, domains: List[str], extras: Dict[str, str] = None):
+        extras = extras if extras is not None else {}
+        self.add("""
+TLSListen {https}
+{extras}
+        """.format(
+            https=self.env.https_port,
+            extras=extras['base'] if 'base' in extras else "",
+        ))
+        for domain in domains:
+            self.add("""
+    <VirtualHost *:{https}>
+      ServerName {domain}
+      DocumentRoot htdocs/{domain}
+      TLSCertificate {domain}.cert.pem {domain}.pkey.pem
+      {extras}
+    </VirtualHost>
+            """.format(
+                https=self.env.https_port,
+                domain=domain,
+                extras=extras[domain] if domain in extras else ""
+            ))
+

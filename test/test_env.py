@@ -65,6 +65,7 @@ class TlsTestEnv:
         self._gen_dir = config.get('global', 'gen_dir')
         self._server_dir = config.get('global', 'server_dir')
         self._server_conf_dir = os.path.join(self._server_dir, "conf")
+        self._server_docs_dir = os.path.join(self._server_dir, "htdocs")
 
         self._apachectl = os.path.join(self._prefix, 'bin', 'apachectl')
         self._http_port = int(config.get('global', 'http_port'))
@@ -98,6 +99,10 @@ class TlsTestEnv:
     @property
     def server_conf_dir(self) -> str:
         return self._server_conf_dir
+
+    @property
+    def server_docs_dir(self) -> str:
+        return self._server_docs_dir
 
     @property
     def domain_a(self) -> str:
@@ -196,7 +201,7 @@ class TlsTestEnv:
     def curl(self, args: List[str]) -> ExecResult:
         return self.run([self._curl] + args)
 
-    def https_get(self, domain, path, extra_args: List[str] = None):
+    def https_get(self, domain, path, extra_args: List[str] = None) -> ExecResult:
         args = []
         if extra_args:
             args.extend(extra_args)
@@ -211,3 +216,7 @@ class TlsTestEnv:
         r = self.https_get(domain=domain, path=path, extra_args=extra_args)
         assert r.exit_code == 0, r.stderr
         return r.json
+
+    def run_diff(self, fleft: str, fright: str) -> ExecResult:
+        return self.run(['diff', '-u', fleft, fright])
+
