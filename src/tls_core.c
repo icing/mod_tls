@@ -134,6 +134,9 @@ apr_status_t tls_core_init(apr_pool_t *p, apr_pool_t *ptemp, server_rec *base_se
                 goto cleanup;
             }
         }
+        if (sc->tls_proto > TLS_PROTO_AUTO) {
+            /* TODO: set the minimum TLS protocol version to use. */
+        }
         rustls_server_config_builder_set_ignore_client_order(rustls_builder,
             !sc->honor_client_order);
 

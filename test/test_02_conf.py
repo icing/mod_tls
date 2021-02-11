@@ -1,7 +1,8 @@
 import os
 from datetime import timedelta
 
-from test_cert import TlsTestCert
+import pytest
+
 from test_env import TlsTestEnv
 from test_conf import TlsTestConf
 
@@ -23,25 +24,25 @@ class TestConf:
         if self.env.is_live(timeout=timedelta(milliseconds=100)):
             assert self.env.apache_stop() == 0
 
-    def test_02_cert_args_missing(self):
+    def test_02_conf_cert_args_missing(self):
         conf = TlsTestConf(env=self.env)
         conf.add("TLSCertificate")
         conf.write()
         assert self.env.apache_fail() == 0
 
-    def test_02_cert_single_arg(self):
+    def test_02_conf_cert_single_arg(self):
         conf = TlsTestConf(env=self.env)
         conf.add("TLSCertificate cert.pem")
         conf.write()
         assert self.env.apache_fail() == 0
 
-    def test_02_cert_file_missing(self):
+    def test_02_conf_cert_file_missing(self):
         conf = TlsTestConf(env=self.env)
         conf.add("TLSCertificate cert.pem key.pem")
         conf.write()
         assert self.env.apache_fail() == 0
 
-    def test_02_cert_file_exist(self):
+    def test_02_conf_cert_file_exist(self):
         conf = TlsTestConf(env=self.env)
         conf.add("TLSCertificate test-02-cert.pem test-02-key.pem")
         conf.write()
@@ -50,39 +51,65 @@ class TestConf:
                 fd.write("")
         assert self.env.apache_restart() == 0
 
-    def test_02_cert_listen_missing(self):
+    def test_02_conf_cert_listen_missing(self):
         conf = TlsTestConf(env=self.env)
         conf.add("TLSListen")
         conf.write()
         assert self.env.apache_fail() == 0
 
-    def test_02_cert_listen_wrong(self):
+    def test_02_conf_cert_listen_wrong(self):
         conf = TlsTestConf(env=self.env)
         conf.add("TLSListen invalid")
         conf.write()
         assert self.env.apache_fail() == 0
 
-    def test_02_cert_listen_port(self):
+    @pytest.mark.parametrize("listen", [
+        "443",
+        "129.168.178.188:443",
+        "[::]:443",
+    ])
+    def test_02_conf_cert_listen_valid(self, listen: str):
         conf = TlsTestConf(env=self.env)
-        conf.add("TLSListen 443")
+        conf.add("TLSListen {listen}".format(listen=listen))
         conf.write()
         assert self.env.apache_restart() == 0
 
-    def test_02_cert_listen_ipv4port(self):
-        conf = TlsTestConf(env=self.env)
-        conf.add("TLSListen 129.168.178.188:443")
-        conf.write()
-        assert self.env.apache_restart() == 0
-
-    def test_02_cert_listen_ipv6port(self):
-        conf = TlsTestConf(env=self.env)
-        conf.add("TLSListen [::]:443")
-        conf.write()
-        assert self.env.apache_restart() == 0
-
-    def test_02_cert_listen_cert(self):
+    def test_02_conf_cert_listen_cert(self):
         domain = self.env.domain_a
         conf = TlsTestConf(env=self.env)
         conf.add_vhosts(domains=[domain])
+        conf.write()
+        assert self.env.apache_restart() == 0
+
+    def test_02_conf_proto_wrong(self):
+        conf = TlsTestConf(env=self.env)
+        conf.add("TLSProtocol wrong")
+        conf.write()
+        assert self.env.apache_fail() == 0
+
+    @pytest.mark.parametrize("proto", [
+        "auto",
+        "v1.2+",
+        "v1.3+",
+    ])
+    def test_02_conf_proto_valid(self, proto):
+        conf = TlsTestConf(env=self.env)
+        conf.add("TLSProtocol {proto}".format(proto=proto))
+        conf.write()
+        assert self.env.apache_restart() == 0
+
+    def test_02_conf_honor_wrong(self):
+        conf = TlsTestConf(env=self.env)
+        conf.add("TLSHonorClientOrder wrong")
+        conf.write()
+        assert self.env.apache_fail() == 0
+
+    @pytest.mark.parametrize("honor", [
+        "on",
+        "OfF",
+    ])
+    def test_02_conf_honor_valid(self, honor: str):
+        conf = TlsTestConf(env=self.env)
+        conf.add("TLSHonorClientOrder {honor}".format(honor=honor))
         conf.write()
         assert self.env.apache_restart() == 0

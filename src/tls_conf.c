@@ -75,10 +75,11 @@ void *tls_conf_create_svr(apr_pool_t *pool, server_rec *s)
     conf->enabled = TLS_FLAG_UNSET;
     conf->certificates = apr_array_make(pool, 3, sizeof(tls_certificate_t*));
     conf->honor_client_order = TLS_FLAG_UNSET;
+    conf->tls_proto = TLS_FLAG_UNSET;
     return conf;
 }
 
-#define MERGE_FLAG(base, add, field) \
+#define MERGE_INT(base, add, field) \
     (add->field == TLS_FLAG_UNSET)? base->field : add->field;
 
 void *tls_conf_merge_svr(apr_pool_t *pool, void *basev, void *addv)
@@ -93,8 +94,9 @@ void *tls_conf_merge_svr(apr_pool_t *pool, void *basev, void *addv)
     nconf->server = add->server;
     nconf->global = add->global? add->global : base->global;
 
-    nconf->enabled = MERGE_FLAG(base, add, enabled);
-    nconf->honor_client_order = MERGE_FLAG(base, add, honor_client_order);
+    nconf->enabled = MERGE_INT(base, add, enabled);
+    nconf->tls_proto = MERGE_INT(base, add, tls_proto);
+    nconf->honor_client_order = MERGE_INT(base, add, honor_client_order);
     nconf->certificates = apr_array_append(pool, base->certificates, add->certificates);
 
     return nconf;
@@ -233,6 +235,25 @@ static const char *tls_conf_set_honor_client_order(
     return NULL;
 }
 
+static const char *tls_conf_set_protocol(
+    cmd_parms *cmd, void *dc, const char *v)
+{
+    tls_conf_server_t *sc = tls_conf_server_get(cmd->server);
+
+    (void)dc;
+    if (!strcasecmp(v, "auto")) {
+        sc->tls_proto = TLS_PROTO_AUTO;
+    } else if (!strcasecmp(v, "v1.2+")) {
+        sc->tls_proto = TLS_PROTO_1_2;
+    } else if (!strcasecmp(v, "v1.3+")) {
+        sc->tls_proto = TLS_PROTO_1_3;
+    } else {
+        return apr_pstrcat(cmd->pool, cmd->cmd->name,
+            ": value must be 'auto', 'v1.2+' or 'v1.3+': '", v, "'", NULL);
+    }
+    return NULL;
+}
+
 const command_rec tls_conf_cmds[] = {
     /* none yet */
     AP_INIT_TAKE2("TLSCertificate", tls_conf_add_certificate, NULL, RSRC_CONF,
@@ -242,5 +263,7 @@ const command_rec tls_conf_cmds[] = {
         "Set 'on' to have the server honor client preferences in cipher suites, default off."),
     AP_INIT_TAKE1("TLSListen", tls_conf_add_listener, NULL, RSRC_CONF,
         "Specify an adress+port where the module shall handle incoming TLS connections."),
+    AP_INIT_TAKE1("TLSProtocol", tls_conf_set_protocol, NULL, RSRC_CONF,
+        "Set the minimum TLS protocol version to support."),
     AP_INIT_TAKE1(NULL, NULL, NULL, RSRC_CONF, NULL)
 };

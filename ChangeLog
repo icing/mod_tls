@@ -1,3 +1,6 @@
+ * New directive `TLSProtocol` to set the minimum version of the TLS protocol to
+   use on a host/the server. Does not have an effect as the support in crustls
+   is not there yet.
  * Adjusting filter buffer sizes for TLS and plain data to allow generation of
    max-length TLS messages without for security and efficiency reasons.
  * Testing SNI invalid name. Proper shutdown of the connection on failures

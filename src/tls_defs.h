@@ -22,6 +22,10 @@ typedef struct {
 #define TLS_FLAG_FALSE  (0)
 #define TLS_FLAG_TRUE   (1)
 
+#define TLS_PROTO_AUTO  0
+#define TLS_PROTO_1_2   2
+#define TLS_PROTO_1_3   3
+
 typedef struct {
     server_addr_rec *tls_addresses;   /* the addresses/port we are active on */
 } tls_conf_global_t;
@@ -33,6 +37,7 @@ typedef struct {
 
     int enabled;
     apr_array_header_t *certificates; /* array of (tls_certificate_t*) available for server_rec */
+    int tls_proto;                    /* the minimum TLS protocol version */
     int honor_client_order;           /* honor client cipher ordering */
     const rustls_server_config *rustls_config;
 } tls_conf_server_t;

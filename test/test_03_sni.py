@@ -1,4 +1,3 @@
-import time
 from datetime import timedelta
 
 from test_env import TlsTestEnv
