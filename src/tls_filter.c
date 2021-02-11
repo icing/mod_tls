@@ -10,6 +10,7 @@
 #include <apr_strings.h>
 
 #include <httpd.h>
+#include <http_connection.h>
 #include <http_core.h>
 #include <http_log.h>
 
@@ -56,7 +57,6 @@ static apr_status_t read_tls_to_rustls(
     apr_size_t dlen, rlen;
     apr_off_t passed = 0;
     rustls_result rr = RUSTLS_RESULT_OK;
-    const char *err_descr = "";
     apr_status_t rv = APR_SUCCESS;
 
     if (APR_BRIGADE_EMPTY(fctx->fin_tls_bb)) {
@@ -107,23 +107,21 @@ static apr_status_t read_tls_to_rustls(
 
     if (passed > 0) {
         rr = rustls_server_session_process_new_packets(fctx->cc->rustls_session);
-        if (rr != RUSTLS_RESULT_OK) {
-            rv = tls_util_rustls_error(fctx->c->pool, rr, &err_descr);
-            goto cleanup;
-        }
+        if (rr != RUSTLS_RESULT_OK) goto cleanup;
     }
 
 cleanup:
     if (rr != RUSTLS_RESULT_OK) {
+        const char *err_descr = "";
+
         rv = tls_util_rustls_error(fctx->c->pool, rr, &err_descr);
+        rv = APR_ECONNRESET;
+        ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, fctx->c, APLOGNO()
+                     "read_tls_to_rustls: [%d] %s", (int)rr, err_descr);
     }
-    if (APR_STATUS_IS_EOF(rv) && passed > 0) {
+    else if (APR_STATUS_IS_EOF(rv) && passed > 0) {
         /* encountering EOF while actually having read sth is a success. */
         rv = APR_SUCCESS;
-    }
-    if (APR_SUCCESS != rv && !APR_STATUS_IS_EAGAIN(rv)) {
-        ap_log_cerror(APLOG_MARK, APLOG_ERR, rv, fctx->c, APLOGNO()
-                     "read_tls_to_rustls: [%d] %s", (int)rr, err_descr);
     }
     else {
         ap_log_error(APLOG_MARK, APLOG_TRACE2, rv, fctx->cc->server,
@@ -144,7 +142,6 @@ static apr_status_t write_tls_from_rustls(
     char data[8*1024];
     size_t dlen = sizeof(data);
     apr_status_t rv = APR_SUCCESS;
-    const char *err_descr = "";
     rustls_result rr = RUSTLS_RESULT_OK;
     apr_bucket *b;
 
@@ -170,13 +167,42 @@ static apr_status_t write_tls_from_rustls(
 
 cleanup:
     if (rr != RUSTLS_RESULT_OK) {
+        const char *err_descr = "";
         rv = tls_util_rustls_error(fctx->c->pool, rr, &err_descr);
-    }
-    if (APR_SUCCESS != rv) {
-        ap_log_cerror(APLOG_MARK, APLOG_ERR, rv, fctx->c, APLOGNO()
+        ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, fctx->c, APLOGNO()
                      "write_tls_from_rustls: [%d] %s", (int)rr, err_descr);
     }
     return rv;
+}
+
+static apr_status_t flush_tls_from_rustls(
+    tls_filter_ctx_t *fctx)
+{
+    apr_status_t rv = APR_SUCCESS;
+
+    while (rustls_server_session_wants_write(fctx->cc->rustls_session)) {
+        rv = write_tls_from_rustls(fctx);
+        if (APR_SUCCESS != rv) goto cleanup;
+    }
+cleanup:
+    return rv;
+}
+
+static apr_status_t filter_shutdown(tls_filter_ctx_t *fctx)
+{
+    apr_status_t rv = APR_SUCCESS;
+
+    rustls_server_session_send_close_notify(fctx->cc->rustls_session);
+    rv = flush_tls_from_rustls(fctx);
+    ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, fctx->c, APLOGNO() "filter_shutdown");
+
+    return rv;
+}
+
+static void filter_abort(tls_filter_ctx_t *fctx)
+{
+    fctx->c->aborted = 1;
+    ap_log_cerror(APLOG_MARK, APLOG_TRACE2, 0, fctx->c, "filter_abort");
 }
 
 /**
@@ -214,6 +240,9 @@ static apr_status_t filter_do_handshake(
         tls_core_vhost_init(fctx->c);
     }
 cleanup:
+    if (APR_SUCCESS != rv && !APR_STATUS_IS_EAGAIN(rv)) {
+        filter_abort(fctx);
+    }
     return rv;
 }
 
@@ -246,11 +275,16 @@ static apr_status_t filter_conn_input(
     apr_status_t rv = APR_SUCCESS;
     apr_off_t passed = 0;
     rustls_result rr = RUSTLS_RESULT_OK;
-    const char *err_descr = "";
 
     ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, fctx->cc->server,
         "tls_filter_conn_input, server=%s, mode=%d, block=%d, readbytes=%ld",
         fctx->cc->server->server_hostname, mode, block, (long)readbytes);
+
+    if (f->c->aborted) {
+        apr_bucket *b = apr_bucket_eos_create(f->c->bucket_alloc);
+        APR_BRIGADE_INSERT_TAIL(bb, b);
+        rv = APR_ECONNABORTED; goto cleanup;
+    }
 
     fctx->fin_block = block;
 
@@ -324,11 +358,16 @@ static apr_status_t filter_conn_input(
 
 cleanup:
     if (rr != RUSTLS_RESULT_OK) {
+        const char *err_descr = "";
+
         rv = tls_util_rustls_error(fctx->c->pool, rr, &err_descr);
-    }
-    if (APR_SUCCESS != rv) {
-        ap_log_cerror(APLOG_MARK, APLOG_ERR, rv, fctx->c, APLOGNO()
+        ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, fctx->c, APLOGNO()
                      "tls_filter_conn_input: [%d] %s", (int)rr, err_descr);
+    }
+    else if (APR_SUCCESS != rv) {
+        ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, fctx->c, APLOGNO()
+                     "tls_filter_conn_input");
+
     }
     else {
         ap_log_cerror(APLOG_MARK, APLOG_TRACE2, rv, fctx->c,
@@ -357,48 +396,58 @@ static apr_status_t filter_conn_output(
     const char *data;
     apr_size_t dlen, wlen;
     rustls_result rr = RUSTLS_RESULT_OK;
-    const char *err_descr = "";
     apr_off_t passed = 0;
 
     ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, fctx->cc->server,
         "tls_filter_conn_output, server=%s", fctx->cc->server->server_hostname);
 
+    if (f->c->aborted) {
+        apr_brigade_cleanup(bb);
+        rv = APR_ECONNABORTED; goto  cleanup;
+    }
+
     while (!APR_BRIGADE_EMPTY(bb)) {
         apr_bucket *b = APR_BRIGADE_FIRST(bb);
 
-        if (APR_BUCKET_IS_EOS(b)) {
-            rv = APR_EOF; goto cleanup;
-        }
-
-        rv = apr_bucket_read(b, &data, &dlen, APR_BLOCK_READ);
-        if (APR_STATUS_IS_EOF(rv)) {
-            apr_bucket_delete(b);
-            continue;
-        }
-        else if (APR_SUCCESS != rv) {
-            goto cleanup;
-        }
-
-        if (dlen > 0) {
-            rr = rustls_server_session_write(fctx->cc->rustls_session,
-                (unsigned char*)data, dlen, &wlen);
-            if (rr != RUSTLS_RESULT_OK) goto cleanup;
-            passed += wlen;
-            if (wlen >= dlen) {
-                apr_bucket_delete(b);
-            }
-            else {
-                b->start += wlen;
-                b->length -= wlen;
-            }
-            /* write this out at once, so that rustls does not excessive buffering */
-            while (rustls_server_session_wants_write(fctx->cc->rustls_session)) {
-                rv = write_tls_from_rustls(fctx);
+        if (APR_BUCKET_IS_METADATA(b)) {
+            if (AP_BUCKET_IS_EOC(b)) {
+                rv = filter_shutdown(fctx);
                 if (APR_SUCCESS != rv) goto cleanup;
             }
-        }
-        else if (dlen == 0) {
+            if (APR_BUCKET_IS_FLUSH(b)) {
+                rv = flush_tls_from_rustls(fctx);
+                if (APR_SUCCESS != rv) goto cleanup;
+            }
             apr_bucket_delete(b);
+        }
+        else {
+            rv = apr_bucket_read(b, &data, &dlen, APR_BLOCK_READ);
+            if (APR_STATUS_IS_EOF(rv)) {
+                apr_bucket_delete(b);
+                continue;
+            }
+            else if (APR_SUCCESS != rv) {
+                goto cleanup;
+            }
+
+            if (dlen > 0) {
+                rr = rustls_server_session_write(fctx->cc->rustls_session,
+                    (unsigned char*)data, dlen, &wlen);
+                if (rr != RUSTLS_RESULT_OK) goto cleanup;
+                passed += wlen;
+                if (wlen >= dlen) {
+                    apr_bucket_delete(b);
+                }
+                else {
+                    b->start += wlen;
+                    b->length -= wlen;
+                }
+                rv = flush_tls_from_rustls(fctx);
+                if (APR_SUCCESS != rv) goto cleanup;
+            }
+            else if (dlen == 0) {
+                apr_bucket_delete(b);
+            }
         }
     }
     /* any last words by rustls on this attempt? */
@@ -409,10 +458,9 @@ static apr_status_t filter_conn_output(
 
 cleanup:
     if (rr != RUSTLS_RESULT_OK) {
+        const char *err_descr = "";
         rv = tls_util_rustls_error(fctx->c->pool, rr, &err_descr);
-    }
-    if (APR_SUCCESS != rv) {
-        ap_log_cerror(APLOG_MARK, APLOG_ERR, rv, fctx->c, APLOGNO()
+        ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, fctx->c, APLOGNO()
                      "tls_filter_conn_output: [%d] %s", (int)rr, err_descr);
     }
     else {

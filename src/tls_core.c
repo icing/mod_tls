@@ -153,13 +153,11 @@ int tls_core_conn_init(conn_rec *c)
     tls_conf_server_t *sc = tls_conf_server_get(c->base_server);
     tls_conf_conn_t *cc = tls_conf_conn_get(c);
     int rv = DECLINED;
+    rustls_result rr = RUSTLS_RESULT_OK;
 
     /* Are we configured to work here? */
     if (!sc->rustls_config) goto cleanup;
-
     if (!cc) {
-        rustls_result rr;
-        const char *err_descr = NULL;
 
         ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, c->base_server, "tls_core_conn_init on %s",
             c->base_server->server_hostname);
@@ -170,17 +168,22 @@ int tls_core_conn_init(conn_rec *c)
         cc->flag_vhost_found = TLS_FLAG_UNSET;
 
         rr = rustls_server_session_new(sc->rustls_config, &cc->rustls_session);
-    if (rr != RUSTLS_RESULT_OK) {
-        rv = tls_util_rustls_error(c->pool, rr, &err_descr);
-        ap_log_error(APLOG_MARK, APLOG_ERR, rv, sc->server, APLOGNO()
-                     "Failed to init session for server %s: [%d] %s",
-                     sc->server->server_hostname, (int)rr, err_descr);
-        goto cleanup;
-        }
+        if (rr != RUSTLS_RESULT_OK) goto cleanup;
+
         tls_conf_conn_set(c, cc);
     }
     rv = OK;
 cleanup:
+    if (rr != RUSTLS_RESULT_OK) {
+        const char *err_descr = NULL;
+
+        rv = tls_util_rustls_error(c->pool, rr, &err_descr);
+        ap_log_error(APLOG_MARK, APLOG_ERR, rv, sc->server, APLOGNO()
+                     "Failed to init session for server %s: [%d] %s",
+                     sc->server->server_hostname, (int)rr, err_descr);
+        c->aborted = 1;
+        goto cleanup;
+    }
     return rv;
 }
 

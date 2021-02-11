@@ -25,6 +25,7 @@ class TlsTestConf:
         extras = extras if extras is not None else {}
         self.add("""
 TLSListen {https}
+LogLevel tls:trace4
 {extras}
         """.format(
             https=self.env.https_port,

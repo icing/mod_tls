@@ -1,3 +1,5 @@
+ * Testing SNI invalid name. Proper shutdown of the connection on failures
+   during handshake implemented.
  * First checks on connection sharing.
    - requests against a virtual hosts server are only allowed if the client uses SNI.
    - requests to domain B on a connection to domain A are only allowed if there
