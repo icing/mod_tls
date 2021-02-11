@@ -1,3 +1,5 @@
+ * Adjusting filter buffer sizes for TLS and plain data to allow generation of
+   max-length TLS messages without for security and efficiency reasons.
  * Testing SNI invalid name. Proper shutdown of the connection on failures
    during handshake implemented.
  * First checks on connection sharing.
