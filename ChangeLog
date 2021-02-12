@@ -1,3 +1,6 @@
+ * Using python module "trustme" to generate certificates from a local CA. Using
+   the CA to verify TLS connections in curl and get rid of the "--insecure" setting
+   that disables several other checks as well.
  * New directive `TLSProtocol` to set the minimum version of the TLS protocol to
    use on a host/the server. Does not have an effect as the support in crustls
    is not there yet.

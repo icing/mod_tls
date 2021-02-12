@@ -1,5 +1,7 @@
 from datetime import timedelta
 
+import pytest
+
 from test_env import TlsTestEnv
 from test_conf import TlsTestConf
 
@@ -32,16 +34,17 @@ class TestSni:
         data = self.env.https_get_json(self.domain_a, "/index.json")
         assert data == {'domain': self.domain_a}
 
+    @pytest.mark.skipif(TlsTestEnv.SNI_CERT_BROKEN, reason="not implemented yet")
     def test_03_sni_get_b(self):
         # do we see the correct json for the domain_a?
         data = self.env.https_get_json(self.domain_b, "/index.json")
         assert data == {'domain': self.domain_b}
 
     def test_03_sni_unknown(self):
-        # do we see the first vhost respone for an unknown domain?
+        # connection will be denied as cert does not cover this domain
         domain_unknown = "unknown.test"
-        data = self.env.https_get_json(domain_unknown, "/index.json")
-        assert data == {'domain': self.domain_a}
+        r = self.env.https_get(domain_unknown, "/index.json")
+        assert r.exit_code != 0
 
     def test_03_sni_request_other_same_config(self):
         # do we see the first vhost respone for an unknown domain?

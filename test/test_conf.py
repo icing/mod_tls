@@ -32,16 +32,21 @@ LogLevel tls:trace4
             extras=extras['base'] if 'base' in extras else "",
         ))
         for domain in domains:
+            cert_file, pkey_file = self.env.cert_files_for(domain)
+            cert_file = os.path.relpath(cert_file, self.env.server_dir)
+            pkey_file = os.path.relpath(pkey_file, self.env.server_dir)
             self.add("""
     <VirtualHost *:{https}>
       ServerName {domain}
       DocumentRoot htdocs/{domain}
-      TLSCertificate {domain}.cert.pem {domain}.pkey.pem
+      TLSCertificate {cert_file} {pkey_file}
       {extras}
     </VirtualHost>
             """.format(
                 https=self.env.https_port,
                 domain=domain,
+                cert_file=cert_file,
+                pkey_file=pkey_file,
                 extras=extras[domain] if domain in extras else ""
             ))
 

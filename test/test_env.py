@@ -3,13 +3,14 @@ import os
 import subprocess
 import sys
 import time
+
 from configparser import ConfigParser
 from datetime import timedelta
 from http.client import HTTPConnection
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Tuple
 from urllib.parse import urlparse
 
-from test_cert import TlsTestCert
+from test_cert import TlsTestCA
 
 
 class ExecResult:
@@ -47,14 +48,18 @@ class TlsTestEnv:
     DOMAIN_A = "a.mod-tls.test"
     DOMAIN_B = "b.mod-tls.test"
 
-    _initialized = False
+    CERT_FILES = {}
+    CA = None
+
+    SNI_CERT_BROKEN = True  # cerrtificate selection based on SNI not implemented
 
     @classmethod
     def init_class(cls, base_dir: str):
-        if not cls._initialized:
-            certs = TlsTestCert()
+        if cls.CA is None:
+            cls.CA = TlsTestCA(ca_dir=os.path.join(base_dir, 'ca'))
+            cls.CERT_FILES['ca'] = cls.CA.ca_cert_file, None
             for domain in [cls.DOMAIN_A, cls.DOMAIN_B]:
-                certs.create_self_signed(base_dir, domain, sans=[domain])
+                cls.CERT_FILES[domain] = cls.CA.create_cert(domains=[domain])
             cls._initialized = True
 
     def __init__(self):
@@ -111,6 +116,13 @@ class TlsTestEnv:
     @property
     def domain_b(self) -> str:
         return self.DOMAIN_B
+
+    @property
+    def ca_cert(self) -> str:
+        return self.CERT_FILES['ca'][0]
+
+    def cert_files_for(self, domain: str) -> Tuple[str, str]:
+        return self.CERT_FILES[domain]
 
     @staticmethod
     def run(args: List[str]) -> ExecResult:
@@ -205,7 +217,7 @@ class TlsTestEnv:
         args = []
         if extra_args:
             args.extend(extra_args)
-        args.extend(["--insecure", "-vvvvvv", "--resolve", "{domain}:{port}:127.0.0.1".format(
+        args.extend(["--cacert", self.ca_cert, "--resolve", "{domain}:{port}:127.0.0.1".format(
             domain=domain, port=self.https_port
         ), "https://{domain}:{port}{path}".format(
             domain=domain, port=self.https_port, path=path

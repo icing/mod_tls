@@ -32,3 +32,12 @@ Aimed for:
  * Apache 2.4.x (some patches or a newer release will most likely be necessary.)
  * OS: anything you can run apache and build rustls on
  * build system: autoconf/automake (for now)
+
+### Installation from source
+
+### Test Suite
+
+If you want to run the test suite, you need:
+
+ * `curl` and `openssl` in your path
+ * Some Python packages: `pytest`, `trustme`, `pyopenssl`
