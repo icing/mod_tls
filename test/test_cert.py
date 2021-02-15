@@ -1,82 +1,250 @@
 import os
+import re
 from datetime import timedelta, datetime
-from typing import List, Tuple
+from typing import List, Tuple, Any, Optional
 
-import OpenSSL
-import trustme
+from cryptography import x509
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
+from cryptography.hazmat.primitives.serialization.base import Encoding, PrivateFormat, NoEncryption
+from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+
+
+EC_SUPPORTED = {}
+EC_SUPPORTED.update([(curve.name.upper(), curve) for curve in [
+    ec.BrainpoolP256R1,
+    ec.BrainpoolP384R1,
+    ec.BrainpoolP512R1,
+    ec.SECP192R1,
+    ec.SECP224R1,
+    ec.SECP256R1,
+    ec.SECP384R1,
+]])
+
+
+def _private_key(key_type):
+    if isinstance(key_type, str):
+        key_type = key_type.upper()
+        m = re.match(r'^(RSA)?(\d+)$', key_type)
+        if m:
+            key_type = int(m.group(2))
+
+    if isinstance(key_type, int):
+        return rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=key_type,
+            backend=default_backend()
+        )
+    if not isinstance(key_type, ec.EllipticCurve) and key_type in EC_SUPPORTED:
+        key_type = EC_SUPPORTED[key_type]
+    return ec.generate_private_key(
+        curve=key_type,
+        backend=default_backend()
+    )
+
+
+class Credentials:
+
+    def __init__(self, name: str, cert: Any, pkey: Any, key_type: str,
+                 issuer: 'Credentials' = None):
+        self._name = name
+        self._cert = cert
+        self._pkey = pkey
+        self._key_type = key_type
+        self._issuer = issuer
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def private_key(self) -> Any:
+        return self._pkey
+
+    @property
+    def certificate(self) -> Any:
+        return self._cert
+
+    @property
+    def cert_pem(self) -> bytes:
+        return self._cert.public_bytes(Encoding.PEM)
+
+    @property
+    def pkey_pem(self) -> bytes:
+        return self._pkey.private_bytes(
+            Encoding.PEM,
+            PrivateFormat.TraditionalOpenSSL if self._key_type.startswith('rsa') else PrivateFormat.PKCS8,
+            NoEncryption())
+
+
+class CertStore:
+
+    def __init__(self, fpath: str):
+        self._store_dir = fpath
+        if not os.path.exists(self._store_dir):
+            os.makedirs(self._store_dir)
+
+    def save(self, creds: Credentials, name: str = None) -> Tuple[str, str]:
+        name = name if name is not None else creds.name
+        cert_file, pkey_file = self._fpaths_for(name)
+        with open(cert_file, "wb") as fd:
+            fd.write(creds.cert_pem)
+        with open(pkey_file, "wb") as fd:
+            fd.write(creds.pkey_pem)
+        return cert_file, pkey_file
+
+    def _fpaths_for(self, name: str):
+        return os.path.join(self._store_dir, '{dname}.cert.pem'.format(dname=name)),\
+               os.path.join(self._store_dir, '{dname}.pkey.pem'.format(dname=name))
 
 
 class TlsTestCA:
 
     def __init__(self, ca_dir: str = ".", key_type: str = None):
-        self._ca_dir = ca_dir
-        self._ca = trustme.CA(
-            organization_name="abetterinternet-mod_tls",
-        )
-        if not os.path.exists(self._ca_dir):
-            os.makedirs(self._ca_dir)
-        self._ca_cert_file, ca_pkey_file = self._fpaths_for('ca')
-        self._ca.cert_pem.write_to_path(self._ca_cert_file)
-        self._ca.private_key_pem.write_to_path(ca_pkey_file)
+        self._certs = {}
+        self._def_key_type = key_type if key_type is not None else "rsa2048"
+        self._store = CertStore(fpath=ca_dir)
+        self._name = "abetterinternet-mod_tls"
+        self._root = None
+        self._root = self._make_ca_credentials(name=self._name, key_type=self._def_key_type)
+        self._certs[self._name] = self._root
+        self._ca_cert_file, _ = self._store.save(self._root, name="ca")
 
     @property
     def ca_cert_file(self):
         return self._ca_cert_file
 
-    def _fpaths_for(self, domain: str):
-        return os.path.join(self._ca_dir, '{dname}.cert.pem'.format(dname=domain)),\
-               os.path.join(self._ca_dir, '{dname}.pkey.pem'.format(dname=domain))
-
-    def create_cert(self, domains: List[str]) -> Tuple[str, str]:
+    def create_cert(self, domains: List[str], key_type: str = None) -> Tuple[str, str]:
         """Create a certificate signed by this CA for the given domains.
         :returns: the certificate and private key PEM file paths
         """
-        dname = domains[0]
-        cert_file, pkey_file = self._fpaths_for(dname)
+        creds = self._make_leaf_credentials(domains=domains,
+                                            issuer=self._root,
+                                            key_type=key_type)
+        return self._store.save(creds)
 
-        cert = self._ca.issue_cert(" ".join(domains))
-        for idx, blob in enumerate(cert.cert_chain_pems):
-            blob.write_to_path(cert_file, append=(idx > 0))
-        cert.private_key_pem.write_to_path(pkey_file)
-        return cert_file, pkey_file
-
-    def create_self_signed_cert(self, domains: List[str]) -> Tuple[str, str]:
-        """Create a self signed certificate signed by this CA for the given domains.
-        :returns: the certificate and private key PEM file paths
-        """
-        dname = domains[0]
-        cert_file, pkey_file = self._fpaths_for(dname)
-        # create a key pair
-        if os.path.exists(pkey_file):
-            key_buffer = open(pkey_file, 'rt').read()
-            k = OpenSSL.crypto.load_privatekey(OpenSSL.crypto.FILETYPE_PEM, key_buffer)
-        else:
-            k = OpenSSL.crypto.PKey()
-            k.generate_key(OpenSSL.crypto.TYPE_RSA, 2048)
-
-        # create a self-signed cert
-        cert = OpenSSL.crypto.X509()
-        cert.get_subject().C = "US"
-        cert.get_subject().ST = "CA"
-        cert.get_subject().L = "San Francisco"
-        cert.get_subject().O = "Internet Security Research Group"
-        cert.get_subject().CN = dname
-        cert.set_serial_number(int(datetime.now().timestamp()*100))
-        cert.gmtime_adj_notBefore(int(timedelta(days=-1).total_seconds()))
-        cert.gmtime_adj_notAfter(int(timedelta(days=89).total_seconds()))
-        cert.set_issuer(cert.get_subject())
-
-        cert.add_extensions([OpenSSL.crypto.X509Extension(
-            b"subjectAltName", False, b", ".join(map(
-                lambda n: b"DNS:" + n.encode(), domains)
+    @staticmethod
+    def _make_x509_name(name: str, org_name: str, common_name: str = None) -> x509.Name:
+        name_pieces = [
+            x509.NameAttribute(
+                NameOID.ORGANIZATION_NAME, org_name
+            ),
+            x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, name),
+        ]
+        if common_name is not None:
+            name_pieces.append(
+                x509.NameAttribute(NameOID.COMMON_NAME, common_name)
             )
-        )])
-        cert.set_pubkey(k)
-        # noinspection PyTypeChecker
-        cert.sign(k, 'sha1')
+        return x509.Name(name_pieces)
 
-        open(cert_file, "wt").write(
-            OpenSSL.crypto.dump_certificate(OpenSSL.crypto.FILETYPE_PEM, cert).decode('utf-8'))
-        open(pkey_file, "wt").write(
-            OpenSSL.crypto.dump_privatekey(OpenSSL.crypto.FILETYPE_PEM, k).decode('utf-8'))
-        return cert_file, pkey_file
+    def _make_csr(
+            self,
+            name: str,
+            pkey: Any,
+            issuer_subject: Optional[Credentials],
+            valid_from_delta: timedelta = None,
+            valid_until_delta: timedelta = None
+    ):
+        subject = self._make_x509_name(name=name, org_name="test", common_name=name)
+        pubkey = pkey.public_key()
+        issuer_subject = issuer_subject if issuer_subject is not None else subject
+
+        valid_from = datetime.now()
+        if valid_until_delta is not None:
+            valid_from += valid_from_delta
+        valid_until = datetime.now()
+        if valid_until_delta is not None:
+            valid_until += valid_until_delta
+
+        return (
+            x509.CertificateBuilder()
+            .subject_name(subject)
+            .issuer_name(issuer_subject)
+            .public_key(pubkey)
+            .not_valid_before(valid_from)
+            .not_valid_after(valid_until)
+            .serial_number(x509.random_serial_number())
+            .add_extension(
+                x509.SubjectKeyIdentifier.from_public_key(pubkey),
+                critical=False,
+            )
+        )
+
+    def _add_ca_usages(self, csr: Any) -> Any:
+        csr.add_extension(
+            x509.KeyUsage(
+                digital_signature=False,
+                content_commitment=False,
+                key_encipherment=False,
+                data_encipherment=False,
+                key_agreement=False,
+                key_cert_sign=True,
+                crl_sign=True,
+                encipher_only=False,
+                decipher_only=False),
+            critical=True
+        )
+        csr.add_extension(
+            x509.ExtendedKeyUsage([
+                ExtendedKeyUsageOID.CLIENT_AUTH,
+                ExtendedKeyUsageOID.SERVER_AUTH,
+                ExtendedKeyUsageOID.CODE_SIGNING,
+            ]),
+            critical=True
+        )
+        return csr
+
+    def _add_leaf_usages(self, csr: Any, domains: List[str], issuer: Credentials) -> Any:
+        csr.add_extension(
+            x509.BasicConstraints(ca=False, path_length=None),
+            critical=True,
+        )
+        csr.add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_subject_key_identifier(
+                issuer.certificate.extensions.get_extension_for_class(
+                    x509.SubjectKeyIdentifier).value),
+            critical=False)
+        csr.add_extension(
+            x509.SubjectAlternativeName([x509.DNSName(domain) for domain in domains]),
+            critical=True,
+        )
+        return csr
+
+    def _make_ca_credentials(self, name, key_type: Any = None,
+                             issuer: Credentials = None) -> Credentials:
+        key_type = key_type if key_type is not None else self._def_key_type
+        pkey = _private_key(key_type=key_type)
+        if issuer is not None:
+            issuer_subject = issuer.certificate.subject
+            issuer_key = issuer.private_key
+        else:
+            issuer_subject = None
+            issuer_key = pkey
+        csr = self._make_csr(name=name,
+                             issuer_subject=issuer_subject,
+                             pkey=pkey,
+                             valid_from_delta=timedelta(days=-1),
+                             valid_until_delta=timedelta(days=89))
+        csr = self._add_ca_usages(csr)
+        cert = csr.sign(private_key=issuer_key,
+                        algorithm=hashes.SHA256(),
+                        backend=default_backend())
+        return Credentials(name=name, cert=cert, pkey=pkey, key_type=key_type)
+
+    def _make_leaf_credentials(self, domains: List[str],
+                               issuer: Credentials,
+                               key_type: Any = None) -> Credentials:
+        name = domains[0]
+        key_type = key_type if key_type is not None else self._def_key_type
+        pkey = _private_key(key_type=key_type)
+        csr = self._make_csr(name,
+                             issuer_subject=issuer.certificate.subject,
+                             pkey=pkey,
+                             valid_from_delta=timedelta(days=-1),
+                             valid_until_delta=timedelta(days=89))
+        csr = self._add_leaf_usages(csr, domains=domains, issuer=issuer)
+        cert = csr.sign(private_key=issuer.private_key,
+                        algorithm=hashes.SHA256(),
+                        backend=default_backend())
+        return Credentials(name=name, cert=cert, pkey=pkey, key_type=key_type)

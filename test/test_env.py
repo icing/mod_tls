@@ -48,6 +48,9 @@ class TlsTestEnv:
     DOMAIN_A = "a.mod-tls.test"
     DOMAIN_B = "b.mod-tls.test"
 
+    KEY_TYPES = {
+        DOMAIN_B: "secp256r1"
+    }
     CERT_FILES = {}
     CA = None
 
@@ -59,7 +62,8 @@ class TlsTestEnv:
             cls.CA = TlsTestCA(ca_dir=os.path.join(base_dir, 'ca'))
             cls.CERT_FILES['ca'] = cls.CA.ca_cert_file, None
             for domain in [cls.DOMAIN_A, cls.DOMAIN_B]:
-                cls.CERT_FILES[domain] = cls.CA.create_cert(domains=[domain])
+                key_type = cls.KEY_TYPES[domain] if domain in cls.KEY_TYPES else None
+                cls.CERT_FILES[domain] = cls.CA.create_cert(domains=[domain], key_type=key_type)
             cls._initialized = True
 
     def __init__(self):
