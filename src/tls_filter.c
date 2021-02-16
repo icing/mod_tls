@@ -31,6 +31,7 @@ typedef struct {
 
     ap_filter_t *fin_ctx;                /* Apache's entry into the input filter chain */
     apr_bucket_brigade *fin_tls_bb;      /* TLS encrypted, incoming network data */
+    apr_bucket_brigade *fin_tls_buffer_bb; /* TLS encrypted, incoming network data buffering */
     apr_bucket_brigade *fin_plain_bb;    /* decrypted, incoming traffic data */
     apr_read_type_e fin_block;           /* Do we block on input reads or not? */
 
@@ -78,6 +79,9 @@ static apr_status_t read_tls_to_rustls(
         apr_bucket *b = APR_BRIGADE_FIRST(fctx->fin_tls_bb);
 
         if (APR_BUCKET_IS_EOS(b)) {
+            if (fctx->fin_tls_buffer_bb) {
+                APR_BRIGADE_INSERT_TAIL(fctx->fin_tls_buffer_bb, b);
+            }
             rv = APR_EOF; goto cleanup;
         }
 
@@ -98,6 +102,9 @@ static apr_status_t read_tls_to_rustls(
                 (unsigned char*)data, dlen, &rlen);
             if (rr != RUSTLS_RESULT_OK) goto cleanup;
 
+            if (fctx->fin_tls_buffer_bb) {
+                apr_brigade_write(fctx->fin_tls_buffer_bb, NULL, NULL, data, rlen);
+            }
             if (rlen >= dlen) {
                 apr_bucket_delete(b);
             }
@@ -209,52 +216,97 @@ static apr_status_t filter_shutdown(tls_filter_ctx_t *fctx)
 {
     apr_status_t rv = APR_SUCCESS;
 
-    rustls_server_session_send_close_notify(fctx->cc->rustls_session);
-    rv = flush_tls_from_rustls(fctx);
-    ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, fctx->c, APLOGNO() "filter_shutdown");
-
+    if (TLS_CONN_ST_NOTIFIED != fctx->cc->state && TLS_CONN_ST_DONE != fctx->cc->state) {
+        rustls_server_session_send_close_notify(fctx->cc->rustls_session);
+        rv = flush_tls_from_rustls(fctx);
+        fctx->cc->state = TLS_CONN_ST_NOTIFIED;
+        ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, fctx->c, APLOGNO() "filter_shutdown");
+    }
     return rv;
 }
 
 static void filter_abort(tls_filter_ctx_t *fctx)
 {
     fctx->c->aborted = 1;
+    fctx->cc->state = TLS_CONN_ST_DONE;
     ap_log_cerror(APLOG_MARK, APLOG_TRACE2, 0, fctx->c, "filter_abort");
+}
+
+static int rustls_server_sesssion_seen_client_hello(rustls_server_session *session)
+{
+    /* TODO: this needs something new in crustls */
+    (void)session;
+    return 1;
+}
+
+/**
+ *
+ */
+static apr_status_t filter_do_pre_handshake(
+    tls_filter_ctx_t *fctx)
+{
+    apr_status_t rv = APR_SUCCESS;
+
+    if (rustls_server_session_is_handshaking(fctx->cc->rustls_session)) {
+        apr_bucket_brigade *bb;
+
+        fctx->fin_tls_buffer_bb = apr_brigade_create(fctx->c->pool, fctx->c->bucket_alloc);
+        do {
+            if (rustls_server_session_wants_read(fctx->cc->rustls_session)) {
+                /* keep the blocking as requested for multiple handshake ping-pongs */
+                fctx->fin_block = APR_BLOCK_READ;
+                rv = read_tls_to_rustls(fctx, fctx->max_rustls_tls_in);
+                /* TODO: atm rustls throws a fit since we have no certs installed in the pre_session */
+                if (APR_SUCCESS != rv) {
+                    break;
+                }
+            }
+            /* Notice: we never write here to the client. */
+
+            /* At some stage, the ClientHello should be complete and rustls
+             * should invoke our ResolvesServerCert implementation. */
+        } while (rustls_server_session_is_handshaking(fctx->cc->rustls_session)
+            && !rustls_server_sesssion_seen_client_hello(fctx->cc->rustls_session));
+
+        /* We have seen the client hello and selected the server (vhost) to use
+         * on this connection. Set up the 'real' rustls_session based on the
+         * servers 'real' rustls_config. */
+        rv = tls_core_conn_server_init(fctx->c);
+
+        bb = fctx->fin_tls_bb; /* data we have to yet fed to rustls */
+        fctx->fin_tls_bb = fctx->fin_tls_buffer_bb; /* data we have fed to the pre_session */
+        fctx->fin_tls_buffer_bb = NULL;
+        APR_BRIGADE_CONCAT(fctx->fin_tls_bb, bb); /* all tls data seen so far */
+        apr_brigade_destroy(bb);
+        rv = APR_SUCCESS;
+    }
+
+    if (APR_SUCCESS != rv && !APR_STATUS_IS_EAGAIN(rv)) {
+        filter_abort(fctx);
+    }
+    return rv;
 }
 
 /**
  * While <fctx->cc->rustls_session> indicates that a handshake is ongoing,
  * write TLS data from and read network TLS data to the server session.
- *
- * This is safe to call at any time. When it returns ARP_SUCCESS,
- * actual traffic data is ready to be processed.
  */
 static apr_status_t filter_do_handshake(
     tls_filter_ctx_t *fctx)
 {
     apr_status_t rv = APR_SUCCESS;
-    apr_read_type_e block = fctx->fin_block;
 
-    if (rustls_server_session_is_handshaking(fctx->cc->rustls_session)) {
-        do {
-            if (rustls_server_session_wants_read(fctx->cc->rustls_session)) {
-                /* keep the blocking as requested for multiple handshake ping-pongs */
-                fctx->fin_block = block;
-                rv = read_tls_to_rustls(fctx, fctx->max_rustls_tls_in);
-                if (APR_SUCCESS != rv) goto cleanup;
-            }
-            if (rustls_server_session_wants_write(fctx->cc->rustls_session)) {
-                rv = flush_tls_from_rustls(fctx);
-                if (APR_SUCCESS != rv) goto cleanup;
-            }
-        } while (rustls_server_session_is_handshaking(fctx->cc->rustls_session));
-
-        /* vhost_init() returns APR_SUCCESS in case the client SNI was present
-         * and matched one of our vhosts, or APR_NOTFOUND otherwise.
-         *
-         * We continue the handshake in either case, which is what
-         * <https://tools.ietf.org/html/rfc6066#page-6> recommends. */
-        tls_core_vhost_init(fctx->c);
+    while (rustls_server_session_is_handshaking(fctx->cc->rustls_session)) {
+        if (rustls_server_session_wants_read(fctx->cc->rustls_session)) {
+            /* keep the blocking as initially requested for multiple handshake ping-pongs */
+            fctx->fin_block = APR_BLOCK_READ;
+            rv = read_tls_to_rustls(fctx, fctx->max_rustls_tls_in);
+            if (APR_SUCCESS != rv) goto cleanup;
+        }
+        if (rustls_server_session_wants_write(fctx->cc->rustls_session)) {
+            rv = flush_tls_from_rustls(fctx);
+            if (APR_SUCCESS != rv) goto cleanup;
+        }
     }
 cleanup:
     if (APR_SUCCESS != rv && !APR_STATUS_IS_EAGAIN(rv)) {
@@ -305,12 +357,21 @@ static apr_status_t filter_conn_input(
 
     fctx->fin_block = block;
 
-    if (rustls_server_session_is_handshaking(fctx->cc->rustls_session)) {
+    if (TLS_CONN_ST_PRE_HANDSHAKE == fctx->cc->state) {
+        ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, fctx->cc->server,
+            "tls_filter_conn_input, server=%s, do pre_handshake",
+            fctx->cc->server->server_hostname);
+        rv = filter_do_pre_handshake(fctx);
+        if (APR_SUCCESS != rv) goto cleanup;
+        fctx->cc->state = TLS_CONN_ST_HANDSHAKE;
+    }
+    if (TLS_CONN_ST_HANDSHAKE == fctx->cc->state) {
         ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, fctx->cc->server,
             "tls_filter_conn_input, server=%s, do handshake",
             fctx->cc->server->server_hostname);
         rv = filter_do_handshake(fctx);
         if (APR_SUCCESS != rv) goto cleanup;
+        fctx->cc->state = TLS_CONN_ST_TRAFFIC;
     }
 
     if (AP_MODE_INIT == mode) {
@@ -592,6 +653,7 @@ int tls_filter_conn_init(conn_rec *c)
      */
     fctx->fin_ctx = ap_add_input_filter(TLS_FILTER_RAW, fctx, NULL, c);
     fctx->fin_tls_bb = apr_brigade_create(c->pool, c->bucket_alloc);
+    fctx->fin_tls_buffer_bb = NULL;
     fctx->fin_plain_bb = apr_brigade_create(c->pool, c->bucket_alloc);
     fctx->fout_ctx = ap_add_output_filter(TLS_FILTER_RAW, fctx, NULL, c);
     fctx->fout_tls_bb = apr_brigade_create(c->pool, c->bucket_alloc);

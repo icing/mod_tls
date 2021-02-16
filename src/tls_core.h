@@ -20,17 +20,17 @@
 apr_status_t tls_core_init(apr_pool_t *p, apr_pool_t *ptemp, server_rec *base_server);
 
 /**
- * Initialize the module for the new connection. The connection might not be
- * for TLS, but if we feel responsible, this will trigger the TLS handshake.
+ * Initialize the module for the new connection based on 'c->base_server'.
+ * The connection might not be for TLS which is then rememberd at the config.
  */
-int tls_core_conn_init(conn_rec *c);
+int tls_core_conn_base_init(conn_rec *c);
 
 /**
- * After the TLS hands shook on <c>, we need to check on supplied/missing
- * SNI hostnames and try to detect which virtual host was selected by it.
- * This is later used to check the "Host:" in incoming requests.
+ * Decide upon the real server_rec (vhost) to use on this connection,
+ * initialize the module's connection settings, instantiated the real
+ * rustls session, etc.
  */
-apr_status_t tls_core_vhost_init(conn_rec *c);
+apr_status_t tls_core_conn_server_init(conn_rec *c);
 
 /**
  * After a request has been read, but before processing is started, we

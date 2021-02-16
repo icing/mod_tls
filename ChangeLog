@@ -1,3 +1,6 @@
+ * SNI host selection implemented. Foundation in place for vhost specific TLS settings.
+   Missing: ALPN handling, selection from several certificates for a vhost, adding
+   of dynamic certificates.
  * Extending our Test CA to create also Elliptic Curve keys for ECDSA certificates.
  * Mixing old-skool OpenSSL PEM format for RSA and newer PKCS8 PEM for EC keys
    to have variety on what rustls is able to parse.

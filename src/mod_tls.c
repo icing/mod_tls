@@ -88,17 +88,15 @@ static int hook_pre_connection(conn_rec *c, void *csd)
     /* are we on a primary connection and configured for it?
      * Then attach a tls_conf_conn_t to it. */
     if (c->master) goto cleanup;
-    cc = tls_conf_conn_get(c);
-    if (cc && cc->flag_disabled == TLS_FLAG_TRUE) goto cleanup;
 
-    rv = tls_core_conn_init(c);
+    cc = tls_conf_conn_get(c);
+    if (cc && TLS_CONN_ST_IGNORED == cc->state) goto cleanup;
+
+    rv = tls_core_conn_base_init(c);
     if (OK != rv) goto cleanup;
 
-    /* TODO: this is where mod_ssl runs its 'pre_handshake' hook.
-     * this allows mod_reqtimeout to monitor the handshake duration
-     * and abort on a stall by the client. */
-
-    /* Install out input/output filters for handling connection data */
+    /* Install out input/output filters for handling handshake and
+     * afterwards connection data */
     rv = tls_filter_conn_init(c);
 
 cleanup:

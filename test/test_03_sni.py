@@ -1,7 +1,5 @@
 from datetime import timedelta
 
-import pytest
-
 from test_env import TlsTestEnv
 from test_conf import TlsTestConf
 
@@ -34,7 +32,6 @@ class TestSni:
         data = self.env.https_get_json(self.domain_a, "/index.json")
         assert data == {'domain': self.domain_a}
 
-    @pytest.mark.skipif(TlsTestEnv.SNI_CERT_BROKEN, reason="not implemented yet")
     def test_03_sni_get_b(self):
         # do we see the correct json for the domain_a?
         data = self.env.https_get_json(self.domain_b, "/index.json")
@@ -76,6 +73,6 @@ class TestSni:
         # curl checks hostnames we give it, but the openssl client
         # does not. Good for us, since we need to test it.
         r = self.env.run(["openssl", "s_client", "-connect",
-                     "localhost:{0}".format(self.env.https_port),
-                     "-servername", b'x\x2f.y'])
+                          "localhost:{0}".format(self.env.https_port),
+                          "-servername", b'x\x2f.y'])
         assert r.exit_code == 1, r.stderr

@@ -39,13 +39,25 @@ typedef struct {
     apr_array_header_t *certificates; /* array of (tls_certificate_t*) available for server_rec */
     int tls_proto;                    /* the minimum TLS protocol version */
     int honor_client_order;           /* honor client cipher ordering */
-    const rustls_server_config *rustls_config;
+    const rustls_server_config *pre_config; /* config to create the connection's pre_session */
+    const rustls_server_config *rustls_config; /* config to use for TLS against this very server */
 } tls_conf_server_t;
 
+
+typedef enum {
+    TLS_CONN_ST_IGNORED,
+    TLS_CONN_ST_PRE_HANDSHAKE,
+    TLS_CONN_ST_HANDSHAKE,
+    TLS_CONN_ST_TRAFFIC,
+    TLS_CONN_ST_NOTIFIED,
+    TLS_CONN_ST_DONE,
+} tls_conn_state_t;
+
 typedef struct {
-    server_rec *server;               /* the server_rec selected for this connection */
-    int flag_disabled;                /* someone veto'ed our handling of this conn */
-    rustls_server_session *rustls_session;  /* the established tls session. */
+    server_rec *server;               /* the server_rec selected for this connection,
+                                       * initially c->base_server, to be negotiated. */
+    tls_conn_state_t state;
+    rustls_server_session *rustls_session;
     const char *sni_hostname;         /* the SNI value from the client */
     int flag_vhost_found;             /* the virtual host selected by SNI has been found. */
 } tls_conf_conn_t;
