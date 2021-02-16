@@ -1,3 +1,4 @@
+ * Experimental client hello C callback implemented in local crustls version.
  * SNI host selection implemented. Foundation in place for vhost specific TLS settings.
    Missing: ALPN handling, selection from several certificates for a vhost, adding
    of dynamic certificates.

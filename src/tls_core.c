@@ -53,10 +53,6 @@ static apr_status_t tls_core_free(void *data)
     for (s = base_server; s; s = s->next) {
         sc = tls_conf_server_get(s);
         if (sc) {
-            if (sc->pre_config) {
-                rustls_server_config_free(sc->pre_config);
-                sc->pre_config = NULL;
-            }
             if (sc->rustls_config) {
                 rustls_server_config_free(sc->rustls_config);
                 sc->rustls_config = NULL;
@@ -70,34 +66,12 @@ static apr_status_t tls_core_free(void *data)
 static apr_status_t server_conf_setup(
     apr_pool_t *p, apr_pool_t *ptemp, tls_conf_server_t *sc)
 {
-    rustls_server_config_builder *rustls_builder, *pre_builder;
+    rustls_server_config_builder *rustls_builder;
     rustls_result rr = RUSTLS_RESULT_OK;
     apr_status_t rv = APR_SUCCESS;
 
     (void)p;
     if (!sc || sc->enabled != TLS_FLAG_TRUE) goto cleanup;
-
-    /* We set up 2 rustls_config:
-     * - 'pre_config': with all rustls default values and a ClientHello resolver
-     *   that just looks at supplied SNI server_name, ALPN and sigschemes to determine
-     *   which server_rec will actually be used, what ALPN protocol is to be negotiated
-     *   and which certificate to select.
-     * - 'rustls_config': which is the real configuration to be used against *this*
-     *   very server_rec.
-     *
-     *   In preconfig we use rustls default values to allow for all protocol versions and supported
-     *   ciphers to be initially enabled. The SNI might then switch us to a server config
-     *   that has restricted ciphers or protocols or client auth, etc.
-     */
-    pre_builder = rustls_server_config_builder_new();
-    if (!pre_builder) {
-        rv = APR_ENOMEM; goto cleanup;
-    }
-    /* TODO: install our special client hello callback */
-    sc->pre_config = rustls_server_config_builder_build(pre_builder);
-    if (!sc->pre_config) {
-        rv = APR_ENOMEM; goto cleanup;
-    }
 
     rustls_builder = rustls_server_config_builder_new();
     if (!rustls_builder) {
@@ -132,15 +106,16 @@ static apr_status_t server_conf_setup(
     if (!sc->rustls_config) {
         rv = APR_ENOMEM; goto cleanup;
     }
+
 cleanup:
-        if (RUSTLS_RESULT_OK != rr) {
-            const char *err_descr;
-            rv = tls_util_rustls_error(ptemp, rr, &err_descr);
-            ap_log_error(APLOG_MARK, APLOG_ERR, rv, sc->server, APLOGNO()
-                         "Failed to configure serverr %s: [%d] %s",
-                         sc->server->server_hostname, (int)rr, err_descr);
-            goto cleanup;
-        }
+    if (RUSTLS_RESULT_OK != rr) {
+        const char *err_descr;
+        rv = tls_util_rustls_error(ptemp, rr, &err_descr);
+        ap_log_error(APLOG_MARK, APLOG_ERR, rv, sc->server, APLOGNO()
+                     "Failed to configure serverr %s: [%d] %s",
+                     sc->server->server_hostname, (int)rr, err_descr);
+        goto cleanup;
+    }
     return rv;
 }
 
@@ -206,6 +181,23 @@ static apr_status_t tls_core_conn_free(void *data)
     return APR_SUCCESS;
 }
 
+static void tls_conn_hello_cb(void* data, const unsigned char *sni_name, size_t sni_len)
+{
+    conn_rec *c = data;
+    tls_conf_conn_t *cc = tls_conf_conn_get(c);
+
+    if (cc) {
+        if (sni_name && sni_len > 0) {
+            cc->sni_hostname = apr_pstrndup(c->pool, (const char *)sni_name, sni_len);
+            ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, c, "sni detected: %s", cc->sni_hostname);
+        }
+        else {
+            cc->sni_hostname = NULL;
+            ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, c, "no sni from client");
+        }
+    }
+}
+
 int tls_core_conn_base_init(conn_rec *c)
 {
     tls_conf_server_t *sc = tls_conf_server_get(c->base_server);
@@ -214,21 +206,36 @@ int tls_core_conn_base_init(conn_rec *c)
     rustls_result rr = RUSTLS_RESULT_OK;
 
     /* Are we configured to work here? */
-    if (!sc->pre_config) goto cleanup;
+    if (!sc->rustls_config) goto cleanup;
     if (!cc) {
+        rustls_server_config_builder *builder;
+        const rustls_server_config *config;
+
         ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, c->base_server, "tls_core_conn_init on %s",
             c->base_server->server_hostname);
         cc = apr_pcalloc(c->pool, sizeof(*cc));
+        cc->server = c->base_server;
+        cc->state = TLS_CONN_ST_PRE_HANDSHAKE;
+        tls_conf_conn_set(c, cc);
         apr_pool_cleanup_register(c->pool, cc, tls_core_conn_free,
                                   apr_pool_cleanup_null);
 
-        /* start with the base server's pre_config, SNI may update this during handshake. */
-        cc->server = c->base_server;
-        cc->state = TLS_CONN_ST_PRE_HANDSHAKE;
-        rr = rustls_server_session_new(sc->pre_config, &cc->rustls_session);
+        /* Use a generic rustls_session with its defaults, which we feed
+         * the first TLS bytes from the client. Its Hello message will trigger
+         * our callback where we can inspect the (possibly) supplied SNI and
+         * select another server.
+         */
+        builder = rustls_server_config_builder_new();
+        if (!builder) {
+            rr = RUSTLS_RESULT_PANIC; goto cleanup;
+        }
+        rustls_server_config_builder_set_hello_callback(builder, tls_conn_hello_cb, c);
+        config = rustls_server_config_builder_build(builder);
+        if (!config) {
+            rr = RUSTLS_RESULT_PANIC; goto cleanup;
+        }
+        rr = rustls_server_session_new(config, &cc->rustls_session);
         if (RUSTLS_RESULT_OK != rr) goto cleanup;
-
-        tls_conf_conn_set(c, cc);
     }
 
     rv = OK;
@@ -237,7 +244,7 @@ cleanup:
         const char *err_descr = NULL;
         rv = tls_util_rustls_error(c->pool, rr, &err_descr);
         ap_log_error(APLOG_MARK, APLOG_ERR, rv, sc->server, APLOGNO()
-                     "Failed to init session for server %s: [%d] %s",
+                     "Failed to init pre_session for server %s: [%d] %s",
                      sc->server->server_hostname, (int)rr, err_descr);
         c->aborted = 1;
         goto cleanup;
@@ -260,55 +267,49 @@ apr_status_t tls_core_conn_server_init(conn_rec *c)
     tls_conf_conn_t *cc = tls_conf_conn_get(c);
     tls_conf_server_t *sc;
     rustls_result rr = RUSTLS_RESULT_OK;
-    const char *err_descr = "";
     apr_status_t rv = APR_SUCCESS;
 
-    ap_log_cerror(APLOG_MARK, APLOG_TRACE2, 0, c, "vhost_init: start");
     ap_assert(cc);
     ap_assert(cc->rustls_session);
 
     if (TLS_CONN_ST_PRE_HANDSHAKE == cc->state) {
-        if (NULL == cc->sni_hostname) {
-            char sni_buffer[HUGE_STRING_LEN];
-            size_t blen;
-
-            rr = rustls_server_session_get_sni_hostname(cc->rustls_session,
-                (unsigned char*)sni_buffer, sizeof(sni_buffer), &blen);
-            if (RUSTLS_RESULT_OK != rr) goto cleanup;
-            if (0 == blen) {
-                /* no SNI supported by client, we stay on c->base_server. */
-                goto cleanup;
+        if (cc->sni_hostname) {
+            if (ap_vhost_iterate_given_conn(c, find_vhost, (void*)cc->sni_hostname)) {
+                ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, c, APLOGNO()
+                    "vhost_init: virtual host found for SNI '%s'", cc->sni_hostname);
             }
-            cc->sni_hostname = apr_pstrndup(c->pool, sni_buffer, blen);
-        }
-
-        if (ap_vhost_iterate_given_conn(c, find_vhost, (void*)cc->sni_hostname)) {
-            ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, c, APLOGNO()
-                "vhost_init: virtual host found for SNI '%s'", cc->sni_hostname);
+            else {
+                ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, c, APLOGNO()
+                    "vhost_init: virtual host NOT found for SNI '%s'", cc->sni_hostname);
+                rv = APR_NOTFOUND; goto cleanup;
+            }
         }
         else {
-            ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, c, APLOGNO()
-                "vhost_init: virtual host NOT found for SNI '%s'", cc->sni_hostname);
-            /* fall through which returns APR_NOTFOUND */
+            ap_log_cerror(APLOG_MARK, APLOG_DEBUG, 0, c, APLOGNO()
+                "vhost_init: no SNI hostname provided by client");
         }
 
         /* if found or not, cc->server will be the server we use now to do
          * the real handshake and, if successful, the traffic after that.
-         * Free the things from (c->base_server)->pre_config and create
-         * the real session for the selectd server. */
+         * Free the current session and create the real one for the
+         * selected server. */
         rustls_server_session_free(cc->rustls_session);
         cc->rustls_session = NULL;
 
         sc = tls_conf_server_get(cc->server);
         rr = rustls_server_session_new(sc->rustls_config, &cc->rustls_session);
         if (RUSTLS_RESULT_OK != rr) goto cleanup;
-        cc->state = TLS_CONN_ST_HANDSHAKE;
     }
 
-    rv = (cc->flag_vhost_found == TLS_FLAG_TRUE)? APR_SUCCESS : APR_NOTFOUND;
 cleanup:
     if (rr != RUSTLS_RESULT_OK) {
+        const char *err_descr = NULL;
         rv = tls_util_rustls_error(c->pool, rr, &err_descr);
+        ap_log_error(APLOG_MARK, APLOG_ERR, rv, sc->server, APLOGNO()
+                     "Failed to init session for server %s: [%d] %s",
+                     sc->server->server_hostname, (int)rr, err_descr);
+        c->aborted = 1;
+        goto cleanup;
     }
     return rv;
 }

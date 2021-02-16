@@ -39,7 +39,6 @@ typedef struct {
     apr_array_header_t *certificates; /* array of (tls_certificate_t*) available for server_rec */
     int tls_proto;                    /* the minimum TLS protocol version */
     int honor_client_order;           /* honor client cipher ordering */
-    const rustls_server_config *pre_config; /* config to create the connection's pre_session */
     const rustls_server_config *rustls_config; /* config to use for TLS against this very server */
 } tls_conf_server_t;
 

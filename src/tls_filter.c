@@ -272,6 +272,7 @@ static apr_status_t filter_do_pre_handshake(
          * on this connection. Set up the 'real' rustls_session based on the
          * servers 'real' rustls_config. */
         rv = tls_core_conn_server_init(fctx->c);
+        if (APR_SUCCESS != rv) goto cleanup;
 
         bb = fctx->fin_tls_bb; /* data we have to yet fed to rustls */
         fctx->fin_tls_bb = fctx->fin_tls_buffer_bb; /* data we have fed to the pre_session */
@@ -281,6 +282,7 @@ static apr_status_t filter_do_pre_handshake(
         rv = APR_SUCCESS;
     }
 
+cleanup:
     if (APR_SUCCESS != rv && !APR_STATUS_IS_EAGAIN(rv)) {
         filter_abort(fctx);
     }
@@ -362,16 +364,16 @@ static apr_status_t filter_conn_input(
             "tls_filter_conn_input, server=%s, do pre_handshake",
             fctx->cc->server->server_hostname);
         rv = filter_do_pre_handshake(fctx);
-        if (APR_SUCCESS != rv) goto cleanup;
         fctx->cc->state = TLS_CONN_ST_HANDSHAKE;
+        if (APR_SUCCESS != rv) goto cleanup;
     }
     if (TLS_CONN_ST_HANDSHAKE == fctx->cc->state) {
         ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, fctx->cc->server,
             "tls_filter_conn_input, server=%s, do handshake",
             fctx->cc->server->server_hostname);
         rv = filter_do_handshake(fctx);
-        if (APR_SUCCESS != rv) goto cleanup;
         fctx->cc->state = TLS_CONN_ST_TRAFFIC;
+        if (APR_SUCCESS != rv) goto cleanup;
     }
 
     if (AP_MODE_INIT == mode) {
