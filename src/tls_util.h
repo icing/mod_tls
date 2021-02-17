@@ -7,17 +7,29 @@
 #ifndef tls_util_h
 #define tls_util_h
 
-/* Return != 0 if fpath is a 'real' file */
+/**
+ * Return != 0 if fpath is a 'real' file.
+ */
 int tls_util_is_file(apr_pool_t *p, const char *fpath);
 
+/**
+ * Inspect a 'rustls_result', retrieve the error description for it and
+ * return the apr_status_t to use as our error status.
+ */
 apr_status_t tls_util_rustls_error(apr_pool_t *p, rustls_result rr, const char **perr_descr);
 
-
+/**
+ *  Load up to `max_len` bytes into a buffer allocated from the pool.
+ *  @return ARP_SUCCESS on successful load.
+ *          APR_EINVAL when the file was not a regular file or is too large.
+ */
 apr_status_t tls_util_file_load(
     apr_pool_t *p, const char *fpath, size_t min_len, size_t max_len,
     unsigned char **pbuffer, apr_size_t *plen);
 
-
+/**
+ * The PEM data of a certificate and its key.
+ */
 typedef struct {
     unsigned char *cert_pem_bytes;
     size_t cert_pem_len;
@@ -25,9 +37,11 @@ typedef struct {
     size_t pkey_pem_len;
 } tls_util_cert_pem_t;
 
+/**
+ * Load the PEM data for a certificate file and key file as given in `cert`.
+ */
 apr_status_t tls_util_load_pem(apr_pool_t *p, tls_certificate_t *cert,
     tls_util_cert_pem_t **ppem);
-
 
 /**
  * Transfer up to <length> bytes from <src> to <dest>, including all

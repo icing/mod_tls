@@ -9,11 +9,16 @@
 
 #define TLS_FILTER_RAW    "TLS raw"
 
+/**
+ * Register the in-/output filters for converting TLS to application data and vice versa.
+ */
 void tls_filter_register(apr_pool_t *pool);
 
+/**
+ * Initialize all internal data structure needed for handling TLS in-/output
+ * on a given connection.
+ */
 int tls_filter_conn_init(conn_rec *c);
-
-int tls_filter_pre_connection(conn_rec *c, void *csd);
 
 /*
  * <https://tools.ietf.org/html/rfc8449> says:

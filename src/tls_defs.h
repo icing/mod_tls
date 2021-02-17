@@ -18,18 +18,27 @@ typedef struct {
     const char *pkey_file;
 } tls_certificate_t;
 
+/* Configuration flags */
 #define TLS_FLAG_UNSET  (-1)
 #define TLS_FLAG_FALSE  (0)
 #define TLS_FLAG_TRUE   (1)
 
+/* The minimal TLS protocol version to use */
 #define TLS_PROTO_AUTO  0
 #define TLS_PROTO_1_2   2
 #define TLS_PROTO_1_3   3
 
+/* The global module configuration, created after post-config
+ * and then readonly.
+ */
 typedef struct {
     server_addr_rec *tls_addresses;   /* the addresses/port we are active on */
 } tls_conf_global_t;
 
+/* The module configuration for a server (vhost).
+ * Populated during config parsing, merged and completed
+ * in the post config phase. Readonly after that.
+ */
 typedef struct {
     const server_rec *server;         /* server this config belongs to */
     const char *name;
@@ -43,6 +52,8 @@ typedef struct {
 } tls_conf_server_t;
 
 
+/* The module's state handling of a connection in normal chronological order,
+ */
 typedef enum {
     TLS_CONN_ST_IGNORED,
     TLS_CONN_ST_PRE_HANDSHAKE,
@@ -52,13 +63,17 @@ typedef enum {
     TLS_CONN_ST_DONE,
 } tls_conn_state_t;
 
+/* The modules configuration for a connection. Created at connection
+ * start and mutable during the lifetime of the connection.
+ * (A conn_rec is only ever processed by one thread at a time.)
+ */
 typedef struct {
     server_rec *server;               /* the server_rec selected for this connection,
                                        * initially c->base_server, to be negotiated. */
     tls_conn_state_t state;
     rustls_server_session *rustls_session;
-    const char *sni_hostname;         /* the SNI value from the client */
-    int flag_vhost_found;             /* the virtual host selected by SNI has been found. */
+    int client_hello_seen;            /* the client hello has been inspected */
+    const char *sni_hostname;         /* the SNI value from the client hello, if present */
 } tls_conf_conn_t;
 
 #endif /* tls_def_h */

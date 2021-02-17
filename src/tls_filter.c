@@ -232,13 +232,6 @@ static void filter_abort(tls_filter_ctx_t *fctx)
     ap_log_cerror(APLOG_MARK, APLOG_TRACE2, 0, fctx->c, "filter_abort");
 }
 
-static int rustls_server_sesssion_seen_client_hello(rustls_server_session *session)
-{
-    /* TODO: this needs something new in crustls */
-    (void)session;
-    return 1;
-}
-
 /**
  *
  */
@@ -253,20 +246,22 @@ static apr_status_t filter_do_pre_handshake(
         fctx->fin_tls_buffer_bb = apr_brigade_create(fctx->c->pool, fctx->c->bucket_alloc);
         do {
             if (rustls_server_session_wants_read(fctx->cc->rustls_session)) {
-                /* keep the blocking as requested for multiple handshake ping-pongs */
                 fctx->fin_block = APR_BLOCK_READ;
                 rv = read_tls_to_rustls(fctx, fctx->max_rustls_tls_in);
-                /* TODO: atm rustls throws a fit since we have no certs installed in the pre_session */
                 if (APR_SUCCESS != rv) {
-                    break;
+                    if (!fctx->cc->client_hello_seen) {
+                        /* Something went wrong before we saw the client hello.
+                         * This is a real error on which we should not continue. */
+                        goto cleanup;
+                    }
                 }
             }
-            /* Notice: we never write here to the client. */
+            /* Notice: we never write here to the client. We just want to inspect
+             * the client hello. */
 
-            /* At some stage, the ClientHello should be complete and rustls
-             * should invoke our ResolvesServerCert implementation. */
-        } while (rustls_server_session_is_handshaking(fctx->cc->rustls_session)
-            && !rustls_server_sesssion_seen_client_hello(fctx->cc->rustls_session));
+            /* TODO: check that handshake timeout supervision by mod_reqtimeout
+             * can work here as well. */
+        } while (!fctx->cc->client_hello_seen);
 
         /* We have seen the client hello and selected the server (vhost) to use
          * on this connection. Set up the 'real' rustls_session based on the
@@ -274,10 +269,10 @@ static apr_status_t filter_do_pre_handshake(
         rv = tls_core_conn_server_init(fctx->c);
         if (APR_SUCCESS != rv) goto cleanup;
 
-        bb = fctx->fin_tls_bb; /* data we have to yet fed to rustls */
-        fctx->fin_tls_bb = fctx->fin_tls_buffer_bb; /* data we have fed to the pre_session */
+        bb = fctx->fin_tls_bb; /* data we have yet to feed to rustls */
+        fctx->fin_tls_bb = fctx->fin_tls_buffer_bb; /* data we already fed to the pre_session */
         fctx->fin_tls_buffer_bb = NULL;
-        APR_BRIGADE_CONCAT(fctx->fin_tls_bb, bb); /* all tls data seen so far */
+        APR_BRIGADE_CONCAT(fctx->fin_tls_bb, bb); /* all tls data from the cleint so far, reloaded */
         apr_brigade_destroy(bb);
         rv = APR_SUCCESS;
     }
@@ -292,6 +287,8 @@ cleanup:
 /**
  * While <fctx->cc->rustls_session> indicates that a handshake is ongoing,
  * write TLS data from and read network TLS data to the server session.
+ *
+ * @return APR_SUCCESS when the handshake is completed
  */
 static apr_status_t filter_do_handshake(
     tls_filter_ctx_t *fctx)
@@ -300,7 +297,6 @@ static apr_status_t filter_do_handshake(
 
     while (rustls_server_session_is_handshaking(fctx->cc->rustls_session)) {
         if (rustls_server_session_wants_read(fctx->cc->rustls_session)) {
-            /* keep the blocking as initially requested for multiple handshake ping-pongs */
             fctx->fin_block = APR_BLOCK_READ;
             rv = read_tls_to_rustls(fctx, fctx->max_rustls_tls_in);
             if (APR_SUCCESS != rv) goto cleanup;
@@ -662,9 +658,8 @@ int tls_filter_conn_init(conn_rec *c)
 
     /* Let the filters have 2 max-length TLS Messages in the rustls buffers.
      * The effects we would like to achieve here are:
-     * 1. if we pass data out so that every bucket becomes its own TLS message,
-     *    this could be security relevant. Depending how the application writes,
-     *    this could expose lengths of credentials, for example.
+     * 1. pass data out, so that every bucket becomes its own TLS message.
+     *    This hides, if possible, the length of response parts.
      *    If we give rustls enough plain data, it will use the max TLS message
      *    size and things are more hidden. But we can only write what the application
      *    or protocol gives us.

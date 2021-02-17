@@ -85,20 +85,21 @@ static int hook_pre_connection(conn_rec *c, void *csd)
     int rv = DECLINED;
 
     (void)csd; /* mpm specific socket data, not used */
-    /* are we on a primary connection and configured for it?
-     * Then attach a tls_conf_conn_t to it. */
+
+    /* are we on a primary connection? */
     if (c->master) goto cleanup;
 
+    /* Are we configured active here? */
     cc = tls_conf_conn_get(c);
     if (cc && TLS_CONN_ST_IGNORED == cc->state) goto cleanup;
 
+    /* Configure settings for the base server. We have not seen any
+     * client hello yet and do not know for which vhost this is intended. */
     rv = tls_core_conn_base_init(c);
     if (OK != rv) goto cleanup;
 
-    /* Install out input/output filters for handling handshake and
-     * afterwards connection data */
+    /* Install our input/output filters for handling TLS/application data */
     rv = tls_filter_conn_init(c);
-
 cleanup:
     return rv;
 }
@@ -107,18 +108,15 @@ static int hook_connection(conn_rec* c)
 {
     tls_conf_conn_t *cc = tls_conf_conn_get(c);
 
-    if (cc && cc->rustls_session) {
-        /* Send the initialization signal down the filter chain.
-         * This will start the TLS handshake. */
+    if (cc && TLS_CONN_ST_PRE_HANDSHAKE == cc->state) {
+        /* Send the initialization signal down the filter chain. */
         apr_bucket_brigade* temp = apr_brigade_create(c->pool, c->bucket_alloc);
         ap_get_brigade(c->input_filters, temp, AP_MODE_INIT, APR_BLOCK_READ, 0);
         apr_brigade_destroy(temp);
     }
-    /* we do *not* take over. others may add to connection processing, e.g.
-     * the core http or the http2 connection handler. */
+    /* we do *not* take over. we are not processing requests. */
     return DECLINED;
 }
-
 
 static void tls_hooks(apr_pool_t *pool)
 {

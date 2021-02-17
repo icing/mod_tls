@@ -186,15 +186,15 @@ static void tls_conn_hello_cb(void* data, const unsigned char *sni_name, size_t 
     conn_rec *c = data;
     tls_conf_conn_t *cc = tls_conf_conn_get(c);
 
-    if (cc) {
-        if (sni_name && sni_len > 0) {
-            cc->sni_hostname = apr_pstrndup(c->pool, (const char *)sni_name, sni_len);
-            ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, c, "sni detected: %s", cc->sni_hostname);
-        }
-        else {
-            cc->sni_hostname = NULL;
-            ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, c, "no sni from client");
-        }
+    if (!cc) return;
+    cc->client_hello_seen = 1;
+    if (sni_name && sni_len > 0) {
+        cc->sni_hostname = apr_pstrndup(c->pool, (const char *)sni_name, sni_len);
+        ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, c, "sni detected: %s", cc->sni_hostname);
+    }
+    else {
+        cc->sni_hostname = NULL;
+        ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, c, "no sni from client");
     }
 }
 
@@ -272,7 +272,7 @@ apr_status_t tls_core_conn_server_init(conn_rec *c)
     ap_assert(cc);
     ap_assert(cc->rustls_session);
 
-    if (TLS_CONN_ST_PRE_HANDSHAKE == cc->state) {
+    if (cc->client_hello_seen) {
         if (cc->sni_hostname) {
             if (ap_vhost_iterate_given_conn(c, find_vhost, (void*)cc->sni_hostname)) {
                 ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, c, APLOGNO()
