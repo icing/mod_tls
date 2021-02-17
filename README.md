@@ -37,9 +37,27 @@ Aimed for:
 
 ### Installation from source
 
+Run the usual autoconf/automake magic incantations. You need the Apache httpd development version (commonly called `apache2-dev` in distributions) and an installed crustls from <https://github.com/abetterinternet/crustls>.
+
+***Caveat***: As development of `crustls` and `mod_tls` is ongoing, not every master/main branch will work with each other.
+
+Run the usual autoconf/automake magic incantations.
+
+```
+> autoreconf -i
+> automake
+> autoconf
+> ./configure --with-apxs=<path to apxs>
+> make
+```
+
 ### Test Suite
 
 If you want to run the test suite, you need:
 
  * `curl` and `openssl` in your path
  * Some Python packages: `pytest`, `pyopenssl`
+
+```
+> make test
+```
