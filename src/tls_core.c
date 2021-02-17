@@ -181,21 +181,32 @@ static apr_status_t tls_core_conn_free(void *data)
     return APR_SUCCESS;
 }
 
-static void tls_conn_hello_cb(void* data, const unsigned char *sni_name, size_t sni_len)
+static rustls_result tls_conn_hello_cb(void* userdata, const rustls_client_hello *hello)
 {
-    conn_rec *c = data;
+    conn_rec *c = userdata;
     tls_conf_conn_t *cc = tls_conf_conn_get(c);
+    char buffer[HUGE_STRING_LEN];
 
-    if (!cc) return;
+    if (!cc) goto cleanup;
     cc->client_hello_seen = 1;
-    if (sni_name && sni_len > 0) {
-        cc->sni_hostname = apr_pstrndup(c->pool, (const char *)sni_name, sni_len);
+    if (hello->sni_name && hello->sni_name_len > 0) {
+        cc->sni_hostname = apr_pstrndup(c->pool, hello->sni_name, hello->sni_name_len);
         ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, c, "sni detected: %s", cc->sni_hostname);
     }
     else {
         cc->sni_hostname = NULL;
         ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, c, "no sni from client");
     }
+    if (hello->signature_schemes &&  hello->signature_schemes_len > 0) {
+        size_t i, len;
+        for (i = 0; i < hello->signature_schemes_len; ++i) {
+            rustls_signature_scheme_name(hello->signature_schemes[i], buffer, sizeof(buffer), &len);
+            ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, c,
+                "client supports sig: %.*s", (int)len, buffer);
+        }
+    }
+cleanup:
+    return RUSTLS_RESULT_OK;
 }
 
 int tls_core_conn_base_init(conn_rec *c)
@@ -229,7 +240,7 @@ int tls_core_conn_base_init(conn_rec *c)
         if (!builder) {
             rr = RUSTLS_RESULT_PANIC; goto cleanup;
         }
-        rustls_server_config_builder_set_hello_callback(builder, tls_conn_hello_cb, c);
+        rustls_server_config_builder_set_hello_callback(builder, tls_conn_hello_cb, c, 1);
         config = rustls_server_config_builder_build(builder);
         if (!config) {
             rr = RUSTLS_RESULT_PANIC; goto cleanup;
