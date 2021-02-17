@@ -8,6 +8,10 @@ This project is sponsored by the [ISRG](https://www.abetterinternet.org).
 [Read what they said about it.](https://www.abetterinternet.org/post/memory-safe-tls-apache/).
 
 
+## Status
+
+In development.
+
 ## Goals
 
 Vital:
@@ -15,17 +19,15 @@ Vital:
  * ```https:``` connectivity for Apache virtual hosts, supporting SNI and ALPN.
  * Own configuration directives with secure defaults. The module will not be a drop-in
    replacement for ```mod_ssl```.
- * A test suite with a good coverage of the support TLS features.
+ * A test suite with a good coverage of the supported TLS features.
  * A load test giving some performance indicators.
- * User manual on how to deploy/configure.
+ * User documentation on how to deploy/configure.
 
 Aimed for:
 
- * Coexistence with ```mod_ssl```. There are setups where it is desirable to use
-   ```mod_tls``` for frontend connections and ```mod_ssl``` for conections to backends.
-   It is not intended to have a mixed configuration on frontends.
- * Provide OCSP Stapling via the [```mod_md```](https://github.com/icing/mod_md) module.
- * Provide use of ```mod_tls``` for back backend https: connections.
+* Coexistence with ```mod_ssl```. There are setups where it is desirable to use ```mod_tls``` for frontend connections and ```mod_ssl``` for conections to backends.
+* Provide Certificates and OCSP Stapling via the [```mod_md```](https://github.com/icing/mod_md) module.
+* Provide use of ```mod_tls``` for back backend https: connections.
 
 ## Platforms
 
@@ -40,4 +42,4 @@ Aimed for:
 If you want to run the test suite, you need:
 
  * `curl` and `openssl` in your path
- * Some Python packages: `pytest`, `trustme`, `pyopenssl`
+ * Some Python packages: `pytest`, `pyopenssl`
