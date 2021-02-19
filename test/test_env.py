@@ -49,7 +49,7 @@ class TlsTestEnv:
     DOMAIN_B = "b.mod-tls.test"
 
     KEY_TYPES = {
-        DOMAIN_B: "secp256r1"
+        DOMAIN_B: [ "secp256r1", "rsa4096" ]
     }
     CERT_FILES = {}
     CA = None
@@ -61,9 +61,14 @@ class TlsTestEnv:
         if cls.CA is None:
             cls.CA = TlsTestCA(ca_dir=os.path.join(base_dir, 'ca'))
             cls.CERT_FILES['ca'] = cls.CA.ca_cert_file, None
+            certs = []
             for domain in [cls.DOMAIN_A, cls.DOMAIN_B]:
-                key_type = cls.KEY_TYPES[domain] if domain in cls.KEY_TYPES else None
-                cls.CERT_FILES[domain] = cls.CA.create_cert(domains=[domain], key_type=key_type)
+                if domain in cls.KEY_TYPES:
+                    for key_type in cls.KEY_TYPES[domain]:
+                        certs.append(cls.CA.create_cert(domains=[domain], key_type=key_type))
+                    cls.CERT_FILES[domain] = certs
+                else:
+                    cls.CERT_FILES[domain] = [cls.CA.create_cert(domains=[domain], key_type=None)]
             cls._initialized = True
 
     def __init__(self):
@@ -125,7 +130,7 @@ class TlsTestEnv:
     def ca_cert(self) -> str:
         return self.CERT_FILES['ca'][0]
 
-    def cert_files_for(self, domain: str) -> Tuple[str, str]:
+    def cert_files_for(self, domain: str) -> List[Tuple[str, str]]:
         return self.CERT_FILES[domain]
 
     @staticmethod

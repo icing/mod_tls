@@ -69,6 +69,8 @@ static apr_status_t server_conf_setup(
     rustls_server_config_builder *rustls_builder;
     rustls_result rr = RUSTLS_RESULT_OK;
     apr_status_t rv = APR_SUCCESS;
+    int i;
+    apr_array_header_t *certified_keys = NULL;
 
     (void)p;
     if (!sc || sc->enabled != TLS_FLAG_TRUE) goto cleanup;
@@ -78,24 +80,36 @@ static apr_status_t server_conf_setup(
         rv = APR_ENOMEM; goto cleanup;
     }
 
-    /* TODO: this needs some more work */
     if (sc->certificates->nelts > 0) {
-        tls_certificate_t *spec = APR_ARRAY_IDX(sc->certificates, 0, tls_certificate_t*);
-        tls_util_cert_pem_t *pems;
+        certified_keys = apr_array_make(p, 2, sizeof(rustls_cipher_certified_key *));
+        for (i = 0; i < sc->certificates->nelts; ++i) {
+            tls_certificate_t *spec = APR_ARRAY_IDX(sc->certificates, i, tls_certificate_t*);
+            tls_util_cert_pem_t *pems;
+            const rustls_cipher_certified_key *ckey = NULL;
 
-        rv = tls_util_load_pem(ptemp, spec, &pems);
-        if (APR_SUCCESS != rv) goto cleanup;
-        ap_log_error(APLOG_MARK, APLOG_TRACE2, rv, sc->server,
-            "tls_core_init: loaded pem data: %s (%ld), %s (%ld)",
-            spec->cert_file, (long)pems->cert_pem_len,
-            spec->pkey_file, (long)pems->pkey_pem_len
-            );
+            rv = tls_util_load_pem(ptemp, spec, &pems);
+            if (APR_SUCCESS != rv) goto cleanup;
+            ap_log_error(APLOG_MARK, APLOG_TRACE2, rv, sc->server,
+                "tls_core_init: loaded pem data: %s (%ld), %s (%ld)",
+                spec->cert_file, (long)pems->cert_pem_len,
+                spec->pkey_file, (long)pems->pkey_pem_len
+                );
 
-        rr = rustls_server_config_builder_set_single_cert_pem(rustls_builder,
-            pems->cert_pem_bytes, pems->cert_pem_len,
-            pems->pkey_pem_bytes, pems->pkey_pem_len);
+            rr = rustls_cipher_certified_key_build(
+                pems->cert_pem_bytes, pems->cert_pem_len,
+                pems->pkey_pem_bytes, pems->pkey_pem_len,
+                &ckey);
+            if (RUSTLS_RESULT_OK != rr) goto cleanup;
+            APR_ARRAY_PUSH(certified_keys, const rustls_cipher_certified_key*) = ckey;
+        }
+
+        rr = rustls_server_config_builder_set_certified_keys(
+            rustls_builder,
+            (const rustls_cipher_certified_key**)certified_keys->elts,
+            (size_t)certified_keys->nelts);
         if (RUSTLS_RESULT_OK != rr) goto cleanup;
     }
+
     if (sc->tls_proto > TLS_PROTO_AUTO) {
         /* TODO: set the minimum TLS protocol version to use. */
     }
@@ -108,6 +122,14 @@ static apr_status_t server_conf_setup(
     }
 
 cleanup:
+    if (certified_keys != NULL) {
+        for (i = 0; i < certified_keys->nelts; ++i) {
+            rustls_cipher_certified_key *ckey = APR_ARRAY_IDX(
+                certified_keys, i, rustls_cipher_certified_key*);
+            rustls_cipher_certified_key_free(ckey);
+        }
+        apr_array_clear(certified_keys);
+    }
     if (RUSTLS_RESULT_OK != rr) {
         const char *err_descr;
         rv = tls_util_rustls_error(ptemp, rr, &err_descr);
@@ -181,14 +203,15 @@ static apr_status_t tls_core_conn_free(void *data)
     return APR_SUCCESS;
 }
 
-static void tls_conn_hello_cb(void* userdata, const rustls_client_hello *hello)
+static const rustls_cipher_certified_key *tls_conn_hello_cb(
+    void* userdata, const rustls_client_hello *hello)
 {
     conn_rec *c = userdata;
     tls_conf_conn_t *cc = tls_conf_conn_get(c);
     char buffer[HUGE_STRING_LEN];
     size_t i, len;
     unsigned short n;
-    const rustls_string *rs;
+    const rustls_bytes *rs;
 
     if (!cc) goto cleanup;
     cc->client_hello_seen = 1;
@@ -216,7 +239,7 @@ static void tls_conn_hello_cb(void* userdata, const rustls_client_hello *hello)
         }
     }
 cleanup:
-    return;
+    return NULL;
 }
 
 int tls_core_conn_base_init(conn_rec *c)

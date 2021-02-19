@@ -59,6 +59,10 @@ class Credentials:
         return self._name
 
     @property
+    def key_type(self):
+        return self._key_type
+
+    @property
     def private_key(self) -> Any:
         return self._pkey
 
@@ -87,16 +91,19 @@ class CertStore:
 
     def save(self, creds: Credentials, name: str = None) -> Tuple[str, str]:
         name = name if name is not None else creds.name
-        cert_file, pkey_file = self._fpaths_for(name)
+        cert_file, pkey_file = self._fpaths_for(name, creds)
         with open(cert_file, "wb") as fd:
             fd.write(creds.cert_pem)
         with open(pkey_file, "wb") as fd:
             fd.write(creds.pkey_pem)
         return cert_file, pkey_file
 
-    def _fpaths_for(self, name: str):
-        return os.path.join(self._store_dir, '{dname}.cert.pem'.format(dname=name)),\
-               os.path.join(self._store_dir, '{dname}.pkey.pem'.format(dname=name))
+    def _fpaths_for(self, name: str, creds: Credentials):
+        key_infix = ".{0}".format(creds.key_type) if creds.key_type is not None else ""
+        return os.path.join(self._store_dir, '{dname}{key_infix}.cert.pem'.format(
+            dname=name, key_infix=key_infix)),\
+               os.path.join(self._store_dir, '{dname}{key_infix}.pkey.pem'.format(
+                   dname=name, key_infix=key_infix))
 
 
 class TlsTestCA:

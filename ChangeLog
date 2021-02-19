@@ -1,3 +1,7 @@
+ * rustls_cipher_certified_keys are used when configuring sessions, so that more
+   than one certificate can be configured for a server. The rustls session will
+   select the first certificate that is compatible with the clients hello
+   settings.
  * Experimental client hello C callback implemented in local crustls version.
  * SNI host selection implemented. Foundation in place for vhost specific TLS settings.
    Missing: ALPN handling, selection from several certificates for a vhost, adding
