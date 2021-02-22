@@ -211,7 +211,7 @@ static const rustls_cipher_certified_key *tls_conn_hello_cb(
     char buffer[HUGE_STRING_LEN];
     size_t i, len;
     unsigned short n;
-    const rustls_bytes *rs;
+    const rustls_slice_bytes *rs;
 
     if (!cc) goto cleanup;
     cc->client_hello_seen = 1;
@@ -232,6 +232,8 @@ static const rustls_cipher_certified_key *tls_conn_hello_cb(
         }
     }
     if (hello->alpn.len > 0) {
+        ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, c,
+            "client proposes %d alpn values", (int)hello->alpn.len);
         for (i = 0; i < hello->alpn.len; ++i) {
             rs = &hello->alpn.data[i];
             ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, c,
