@@ -52,29 +52,5 @@ typedef struct {
 } tls_conf_server_t;
 
 
-/* The module's state handling of a connection in normal chronological order,
- */
-typedef enum {
-    TLS_CONN_ST_IGNORED,
-    TLS_CONN_ST_PRE_HANDSHAKE,
-    TLS_CONN_ST_HANDSHAKE,
-    TLS_CONN_ST_TRAFFIC,
-    TLS_CONN_ST_NOTIFIED,
-    TLS_CONN_ST_DONE,
-} tls_conn_state_t;
-
-/* The modules configuration for a connection. Created at connection
- * start and mutable during the lifetime of the connection.
- * (A conn_rec is only ever processed by one thread at a time.)
- */
-typedef struct {
-    server_rec *server;               /* the server_rec selected for this connection,
-                                       * initially c->base_server, to be negotiated. */
-    tls_conn_state_t state;
-    rustls_server_session *rustls_session;
-    int client_hello_seen;            /* the client hello has been inspected */
-    const char *sni_hostname;         /* the SNI value from the client hello, if present */
-} tls_conf_conn_t;
-
 #endif /* tls_def_h */
 

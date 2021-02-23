@@ -23,10 +23,4 @@ void *tls_conf_merge_svr(apr_pool_t *pool, void *basev, void *addv);
 /* Get the server specific module configuration. */
 tls_conf_server_t *tls_conf_server_get(server_rec *s);
 
-/* Get the connection specific module configuration. */
-tls_conf_conn_t *tls_conf_conn_get(conn_rec *c);
-
-/* Set the module configuration for a connection. */
-void tls_conf_conn_set(conn_rec *c, tls_conf_conn_t *cc);
-
 #endif /* tls_conf_h */

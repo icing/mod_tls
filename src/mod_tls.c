@@ -22,6 +22,7 @@
 #include "tls_conf.h"
 #include "tls_core.h"
 #include "tls_filter.h"
+#include "tls_var.h"
 #include "tls_version.h"
 
 static void tls_hooks(apr_pool_t *pool);
@@ -118,6 +119,17 @@ static int hook_connection(conn_rec* c)
     return DECLINED;
 }
 
+static int tls_conn_is_ssl(conn_rec *c)
+{
+    tls_conf_conn_t *cc = tls_conf_conn_get(c);
+    if (cc && TLS_CONN_ST_IGNORED != cc->state) {
+        return OK;
+    }
+    return DECLINED;
+}
+
+static const char* const mod_http2[]        = { "mod_http2.c", NULL};
+
 static void tls_hooks(apr_pool_t *pool)
 {
     /* If our request check denies further processing, certain things
@@ -137,7 +149,10 @@ static void tls_hooks(apr_pool_t *pool)
     ap_hook_post_config(tls_post_config, NULL, NULL, APR_HOOK_MIDDLE);
     /* connection things */
     ap_hook_pre_connection(hook_pre_connection, NULL, NULL, APR_HOOK_MIDDLE);
-    ap_hook_process_connection(hook_connection, NULL, NULL, APR_HOOK_MIDDLE);
+    ap_hook_process_connection(hook_connection, NULL, mod_http2, APR_HOOK_MIDDLE);
     /* request things */
     ap_hook_post_read_request(tls_core_request_check, pre_req_check, NULL, APR_HOOK_MIDDLE);
+
+    ap_hook_ssl_conn_is_ssl(tls_conn_is_ssl, NULL, NULL, APR_HOOK_MIDDLE);
+    ap_hook_ssl_var_lookup(tls_var_lookup, NULL, NULL, APR_HOOK_MIDDLE);
 }

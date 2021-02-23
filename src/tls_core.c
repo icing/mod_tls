@@ -13,6 +13,7 @@
 #include <httpd.h>
 #include <http_core.h>
 #include <http_log.h>
+#include <http_protocol.h>
 #include <http_vhost.h>
 
 #include "tls_defs.h"
@@ -24,6 +25,15 @@
 extern module AP_MODULE_DECLARE_DATA tls_module;
 APLOG_USE_MODULE(tls);
 
+tls_conf_conn_t *tls_conf_conn_get(conn_rec *c)
+{
+    return ap_get_module_config(c->conn_config, &tls_module);
+}
+
+void tls_conf_conn_set(conn_rec *c, tls_conf_conn_t *cc)
+{
+    ap_set_module_config(c->conn_config, &tls_module, cc);
+}
 
 static int we_listen_on(tls_conf_global_t *gc, server_rec *s)
 {
@@ -113,8 +123,19 @@ static apr_status_t server_conf_setup(
     if (sc->tls_proto > TLS_PROTO_AUTO) {
         /* TODO: set the minimum TLS protocol version to use. */
     }
-    rustls_server_config_builder_set_ignore_client_order(rustls_builder,
+
+    rr = rustls_server_config_builder_set_ignore_client_order(rustls_builder,
         !sc->honor_client_order);
+    if (RUSTLS_RESULT_OK != rr) goto cleanup;
+
+    {
+        rustls_slice_bytes rsb = {
+            (const unsigned char*)"http/1.1",
+            sizeof("http/1.1")-1,
+        };
+        rr = rustls_server_config_builder_set_protocols(rustls_builder, &rsb, 1);
+        if (RUSTLS_RESULT_OK != rr) goto cleanup;
+    }
 
     sc->rustls_config = rustls_server_config_builder_build(rustls_builder);
     if (!sc->rustls_config) {
@@ -232,13 +253,18 @@ static const rustls_cipher_certified_key *tls_conn_hello_cb(
         }
     }
     if (hello->alpn.len > 0) {
+        apr_array_header_t *alpn = apr_array_make(c->pool, 5, sizeof(const char*));
+        const char *protocol;
         ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, c,
-            "client proposes %d alpn values", (int)hello->alpn.len);
+            "ALPN: client proposes %d protocols", (int)hello->alpn.len);
         for (i = 0; i < hello->alpn.len; ++i) {
             rs = &hello->alpn.data[i];
+            protocol = apr_pstrndup(c->pool, (const char*)rs->data, rs->len);
+            APR_ARRAY_PUSH(alpn, const char*) = protocol;
             ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, c,
-                "client proposes alpn: %.*s", (int)rs->len, rs->data);
+                "ALPN: client proposes `%s`", protocol);
         }
+        cc->alpn = alpn;
     }
 cleanup:
     return NULL;
@@ -312,17 +338,21 @@ apr_status_t tls_core_conn_server_init(conn_rec *c)
 {
     tls_conf_conn_t *cc = tls_conf_conn_get(c);
     tls_conf_server_t *sc;
+    rustls_server_config_builder *builder = NULL;
+    const rustls_server_config *config = NULL;
     rustls_result rr = RUSTLS_RESULT_OK;
     apr_status_t rv = APR_SUCCESS;
 
     ap_assert(cc);
-    ap_assert(cc->rustls_session);
+    sc = tls_conf_server_get(cc->server);
 
     if (cc->client_hello_seen) {
         if (cc->sni_hostname) {
             if (ap_vhost_iterate_given_conn(c, find_vhost, (void*)cc->sni_hostname)) {
                 ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, c, APLOGNO()
                     "vhost_init: virtual host found for SNI '%s'", cc->sni_hostname);
+                /* reinit, we might have a new server selected */
+                sc = tls_conf_server_get(cc->server);
             }
             else {
                 ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, c, APLOGNO()
@@ -335,6 +365,52 @@ apr_status_t tls_core_conn_server_init(conn_rec *c)
                 "vhost_init: no SNI hostname provided by client");
         }
 
+        ap_assert(sc->rustls_config);
+        builder = rustls_server_config_builder_from_config(sc->rustls_config);
+        if (NULL == builder) {
+            rv = APR_ENOMEM; goto cleanup;
+        }
+
+        if (cc->alpn && cc->alpn->nelts > 0) {
+            const char *proposed = ap_select_protocol(c, NULL, cc->server, cc->alpn);
+            rustls_slice_bytes rsb;
+
+            ap_log_cerror(APLOG_MARK, APLOG_TRACE2, rv, c,
+                "ALPN: selected protocol `%s` for connection", proposed? proposed : ap_get_protocol(c));
+            if (proposed && strcmp(proposed, ap_get_protocol(c))) {
+                /* something else than our default has been selected. switch! */
+                rv = ap_switch_protocol(c, NULL, cc->server, proposed);
+                if (APR_SUCCESS != rv) goto cleanup;
+
+                ap_log_cerror(APLOG_MARK, APLOG_TRACE2, rv, c,
+                    "ALPN: switched connection to protocol `%s`", proposed);
+                rsb.data = (const unsigned char*)proposed;
+                rsb.len = strlen(proposed);
+                rr = rustls_server_config_builder_set_protocols(builder, &rsb, 1);
+                if (RUSTLS_RESULT_OK != rr) goto cleanup;
+
+                /* protocol was switched, this could be a challenge protocol
+                 * such as "acme-tls/1". Give handlers the opportunity to
+                 * override the certificate for this connection. */
+                if (strcmp("h2", proposed)) {
+                    /*
+                     * TODO: the current callbacks pass an OpenSSL struct, which we
+                     * need to change to a filename.
+                    X509 *cert;
+                    EVP_PKEY *key;
+
+                    if (ssl_is_challenge(c, servername, &cert, &key)) {
+                        if (set_challenge_creds(c, servername, ssl, cert, key) != APR_SUCCESS) {
+                            return SSL_TLSEXT_ERR_ALERT_FATAL;
+                        }
+                        SSL_set_verify(ssl, SSL_VERIFY_NONE, ssl_callback_SSLVerify);
+                    }
+                    */
+                }
+
+            }
+        }
+
         /* if found or not, cc->server will be the server we use now to do
          * the real handshake and, if successful, the traffic after that.
          * Free the current session and create the real one for the
@@ -342,12 +418,20 @@ apr_status_t tls_core_conn_server_init(conn_rec *c)
         rustls_server_session_free(cc->rustls_session);
         cc->rustls_session = NULL;
 
-        sc = tls_conf_server_get(cc->server);
-        rr = rustls_server_session_new(sc->rustls_config, &cc->rustls_session);
+        config = rustls_server_config_builder_build(builder);
+        builder = NULL;
+        rr = rustls_server_session_new(config, &cc->rustls_session);
         if (RUSTLS_RESULT_OK != rr) goto cleanup;
+        config = NULL;
     }
 
 cleanup:
+    if (builder != NULL) {
+        rustls_server_config_builder_free(builder);
+    }
+    if (config != NULL) {
+        rustls_server_config_free(config);
+    }
     if (rr != RUSTLS_RESULT_OK) {
         const char *err_descr = NULL;
         rv = tls_util_rustls_error(c->pool, rr, &err_descr);

@@ -50,16 +50,6 @@ tls_conf_server_t *tls_conf_server_get(server_rec *s)
     return sc;
 }
 
-tls_conf_conn_t *tls_conf_conn_get(conn_rec *c)
-{
-    return ap_get_module_config(c->conn_config, &tls_module);
-}
-
-void tls_conf_conn_set(conn_rec *c, tls_conf_conn_t *cc)
-{
-    ap_set_module_config(c->conn_config, &tls_module, cc);
-}
-
 
 #define CONF_S_NAME(s)  (s && s->server_hostname? s->server_hostname : "default")
 

@@ -138,6 +138,9 @@ cleanup:
         /* encountering EOF while actually having read sth is a success. */
         rv = APR_SUCCESS;
     }
+    else if (APR_SUCCESS == rv && passed == 0 && fctx->fin_block == APR_NONBLOCK_READ) {
+        rv = APR_EAGAIN;
+    }
     else {
         ap_log_error(APLOG_MARK, APLOG_TRACE2, rv, fctx->cc->server,
             "read_tls_to_rustls, passed %ld bytes to rustls", (long)passed);
@@ -353,8 +356,6 @@ static apr_status_t filter_conn_input(
         rv = APR_ECONNABORTED; goto cleanup;
     }
 
-    fctx->fin_block = block;
-
     if (TLS_CONN_ST_PRE_HANDSHAKE == fctx->cc->state) {
         ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, fctx->cc->server,
             "tls_filter_conn_input, server=%s, do pre_handshake",
@@ -377,6 +378,8 @@ static apr_status_t filter_conn_input(
          * not intended to produce any data. */
         goto cleanup;
     }
+
+    fctx->fin_block = block;
 
     /* If we have nothing buffered, ask the rustls_session for more plain data. */
     while (APR_BRIGADE_EMPTY(fctx->fin_plain_bb)) {

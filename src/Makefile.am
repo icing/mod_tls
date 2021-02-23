@@ -31,7 +31,8 @@ OBJECTS = \
     tls_conf.c \
     tls_core.c \
     tls_filter.c \
-    tls_util.c
+    tls_util.c \
+    tls_var.c
 
 HFILES = \
     mod_tls.h \
@@ -39,7 +40,8 @@ HFILES = \
     tls_core.h \
     tls_defs.h \
     tls_filter.h \
-    tls_util.h
+    tls_util.h \
+    tls_var.h
 
 mod_tls_la_SOURCES = $(HFILES) $(OBJECTS)
 

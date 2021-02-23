@@ -31,7 +31,7 @@ Vital:
 
 Aimed for:
 
-* Coexistence with ```mod_ssl```. There are setups where it is desirable to use ```mod_tls``` for frontend connections and ```mod_ssl``` for connections to backends. (*Ongoing*)
+* Coexistence with ```mod_ssl```. There are setups where it is desirable to use ```mod_tls``` for frontend connections and ```mod_ssl``` for conections to backends. (*Ongoing*)
 * Provide Certificates and OCSP Stapling via the [```mod_md```](https://github.com/icing/mod_md) module.
 * Provide use of ```mod_tls``` for back backend https: connections.
 

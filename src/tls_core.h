@@ -7,6 +7,38 @@
 #ifndef tls_core_h
 #define tls_core_h
 
+/* The module's state handling of a connection in normal chronological order,
+ */
+typedef enum {
+    TLS_CONN_ST_IGNORED,
+    TLS_CONN_ST_PRE_HANDSHAKE,
+    TLS_CONN_ST_HANDSHAKE,
+    TLS_CONN_ST_TRAFFIC,
+    TLS_CONN_ST_NOTIFIED,
+    TLS_CONN_ST_DONE,
+} tls_conn_state_t;
+
+/* The modules configuration for a connection. Created at connection
+ * start and mutable during the lifetime of the connection.
+ * (A conn_rec is only ever processed by one thread at a time.)
+ */
+typedef struct {
+    server_rec *server;               /* the server_rec selected for this connection,
+                                       * initially c->base_server, to be negotiated. */
+    tls_conn_state_t state;
+    rustls_server_session *rustls_session;
+    int client_hello_seen;            /* the client hello has been inspected */
+    const char *sni_hostname;         /* the SNI value from the client hello, if present */
+    const apr_array_header_t *alpn;   /* the protocols proposed via ALPN by the client */
+} tls_conf_conn_t;
+
+/* Get the connection specific module configuration. */
+tls_conf_conn_t *tls_conf_conn_get(conn_rec *c);
+
+/* Set the module configuration for a connection. */
+void tls_conf_conn_set(conn_rec *c, tls_conf_conn_t *cc);
+
+
 /**
  * Initialize the module's global and server specific settings. This runs
  * in Apache's "post-config" phase, meaning the configuration has been read
