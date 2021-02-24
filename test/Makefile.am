@@ -13,8 +13,8 @@
 # limitations under the License.
 #
 
-SERVER_DIR     = @SERVER_DIR@
 GEN            = gen
+SERVER_DIR     = gen/apache
 
 .phony: unit_tests
 

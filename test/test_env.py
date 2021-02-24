@@ -1,3 +1,4 @@
+import inspect
 import json
 import os
 import subprocess
@@ -72,12 +73,12 @@ class TlsTestEnv:
             cls._initialized = True
 
     def __init__(self):
+        our_dir = os.path.dirname(inspect.getfile(TlsTestEnv))
         config = ConfigParser()
-        config.read('test.ini')
-
+        config.read(os.path.join(our_dir, 'test.ini'))
         self._prefix = config.get('global', 'prefix')
-        self._gen_dir = config.get('global', 'gen_dir')
-        self._server_dir = config.get('global', 'server_dir')
+        self._gen_dir = os.path.join(our_dir, 'gen')
+        self._server_dir = os.path.join(self._gen_dir, 'apache')
         self._server_conf_dir = os.path.join(self._server_dir, "conf")
         self._server_docs_dir = os.path.join(self._server_dir, "htdocs")
 

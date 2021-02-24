@@ -1,8 +1,8 @@
 Include "conf/modules.conf"
 
 ServerName localhost
-ServerRoot "@SERVER_DIR@"
-DocumentRoot "@SERVER_DIR@/htdocs"
+ServerRoot "@GEN_DIR@/apache"
+DocumentRoot "htdocs"
 
 Listen @HTTP_PORT@
 Listen @HTTPS_PORT@
@@ -13,17 +13,17 @@ Listen @HTTPS_PORT@
 
 <VirtualHost *:@HTTP_PORT@>
     ServerName localhost
-    DocumentRoot "@SERVER_DIR@/htdocs"
+    DocumentRoot "htdocs"
 </VirtualHost>
 
 <VirtualHost *:@HTTP_PORT@>
     ServerName a.mod-tls.test
-    DocumentRoot "@SERVER_DIR@/htdocs/a.mod-tls.test"
+    DocumentRoot "htdocs/a.mod-tls.test"
 </VirtualHost>
 
 <VirtualHost *:@HTTP_PORT@>
     ServerName b.mod-tls.test
-    DocumentRoot "@SERVER_DIR@/htdocs/b.mod-tls.test"
+    DocumentRoot "htdocs/b.mod-tls.test"
 </VirtualHost>
 
 <IfModule log_config_module>
