@@ -1,4 +1,5 @@
 import os
+import time
 from datetime import timedelta
 
 import pytest
@@ -30,7 +31,11 @@ class TestGet:
         cls.domain_a = cls.env.domain_a
         cls.domain_b = cls.env.domain_b
         conf = TlsTestConf(env=cls.env)
-        conf.add_vhosts(domains=[cls.domain_a, cls.domain_b])
+        conf.add_vhosts(domains=[cls.domain_a, cls.domain_b], extras={
+            'base': """
+            LogLevel tls:trace8
+            """,
+        })
         conf.write()
         docs_a = os.path.join(cls.env.server_docs_dir, cls.domain_a)
         cls.mk_text_file(os.path.join(docs_a, "1k.txt"), 8)
@@ -67,3 +72,18 @@ class TestGet:
             fd.write(r.stdout)
         dr = self.env.run_diff(pref, pout)
         assert dr.exit_code == 0, "differences found:\n{0}".format(dr.stdout)
+
+    @pytest.mark.parametrize("fname, flen", [
+        ("1k.txt", 1024),
+    ])
+    def test_04_double_get(self, fname, flen):
+        # we'd like to check that we can do >1 requests on the same connection
+        # however curl hides that from us, unless we analyze its verbose output
+        # TODO: should we?
+        docs_a = os.path.join(self.env.server_docs_dir, self.domain_a)
+        r = self.env.https_get(self.domain_a, paths=[
+            "/{0}".format(fname),
+            "/{0}".format(fname)
+        ])
+        assert r.exit_code == 0
+        assert len(r.stdout) == 2*flen

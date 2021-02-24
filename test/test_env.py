@@ -8,7 +8,7 @@ import time
 from configparser import ConfigParser
 from datetime import timedelta
 from http.client import HTTPConnection
-from typing import List, Optional, Dict, Tuple
+from typing import List, Optional, Dict, Tuple, Union
 from urllib.parse import urlparse
 
 from test_cert import TlsTestCA
@@ -50,7 +50,7 @@ class TlsTestEnv:
     DOMAIN_B = "b.mod-tls.test"
 
     KEY_TYPES = {
-        DOMAIN_B: [ "secp256r1", "rsa4096" ]
+        DOMAIN_B: ["secp256r1", "rsa4096"]
     }
     CERT_FILES = {}
     CA = None
@@ -86,8 +86,9 @@ class TlsTestEnv:
         self._http_port = int(config.get('global', 'http_port'))
         self._https_port = int(config.get('global', 'https_port'))
 
-        self._httpd_url = "http://localhost:{port}".format(port=self._http_port)
-        self._httpd_check_url = self._httpd_url
+        self._http_base = "http://localhost:{port}".format(port=self._http_port)
+        self._httpd_check_url = self._http_base
+        self._https_base = "https://localhost:{port}".format(port=self._https_port)
 
         self._curl = config.get('global', 'curl_bin')
         if self._curl is None or len(self._curl) == 0:
@@ -105,7 +106,11 @@ class TlsTestEnv:
 
     @property
     def http_base_url(self) -> str:
-        return self._httpd_url
+        return self._http_base
+
+    @property
+    def https_base_url(self) -> str:
+        return self._https_base
 
     @property
     def server_dir(self) -> str:
@@ -223,22 +228,24 @@ class TlsTestEnv:
     def curl(self, args: List[str]) -> ExecResult:
         return self.run([self._curl] + args)
 
-    def https_get(self, domain, path, extra_args: List[str] = None) -> ExecResult:
+    def https_get(self, domain, paths: Union[str, List[str]], extra_args: List[str] = None) -> ExecResult:
         args = []
         if extra_args:
             args.extend(extra_args)
         args.extend(["--cacert", self.ca_cert, "--resolve", "{domain}:{port}:127.0.0.1".format(
             domain=domain, port=self.https_port
-        ), "https://{domain}:{port}{path}".format(
-            domain=domain, port=self.https_port, path=path
         )])
+        if isinstance(paths, str):
+            paths = [paths]
+        for path in paths:
+            args.append("https://{domain}:{port}{path}".format(
+                domain=domain, port=self.https_port, path=path))
         return self.curl(args)
 
     def https_get_json(self, domain, path, extra_args: List[str] = None):
-        r = self.https_get(domain=domain, path=path, extra_args=extra_args)
+        r = self.https_get(domain=domain, paths=path, extra_args=extra_args)
         assert r.exit_code == 0, r.stderr
         return r.json
 
     def run_diff(self, fleft: str, fright: str) -> ExecResult:
         return self.run(['diff', '-u', fleft, fright])
-

@@ -9,6 +9,27 @@
 
 #define TLS_FILTER_RAW    "TLS raw"
 
+typedef struct tls_filter_ctx_t tls_filter_ctx_t;
+
+struct tls_filter_ctx_t {
+    conn_rec *c;                         /* connection this context is for */
+    tls_conf_conn_t *cc;                 /* tls module configuration of connection */
+
+    ap_filter_t *fin_ctx;                /* Apache's entry into the input filter chain */
+    apr_bucket_brigade *fin_tls_bb;      /* TLS encrypted, incoming network data */
+    apr_bucket_brigade *fin_tls_buffer_bb; /* TLS encrypted, incoming network data buffering */
+    apr_bucket_brigade *fin_plain_bb;    /* decrypted, incoming traffic data */
+    apr_read_type_e fin_block;           /* Do we block on input reads or not? */
+
+    ap_filter_t *fout_ctx;               /* Apache's entry into the output filter chain */
+    apr_bucket_brigade *fout_tls_bb;     /* TLS encrypted, outgoing network data */
+
+    apr_off_t fin_rustls_bytes;          /* # of input TLS bytes in rustls_session */
+    apr_off_t fout_rustls_bytes;         /* # of output plain bytes in rustls_session */
+    apr_off_t max_rustls_out;            /* how much plain bytes we like to give to rustls */
+    apr_off_t max_rustls_tls_in;         /* how much tls we like to read into rustls */
+};
+
 /**
  * Register the in-/output filters for converting TLS to application data and vice versa.
  */
@@ -41,6 +62,8 @@ int tls_filter_conn_init(conn_rec *c);
  * we defined something which should be "large enough", but not overly
  * so.
  */
-#define TLS_PREF_TLS_WRITE_SIZE   (TLS_PREF_WRITE_SIZE + 64)
+#define TLS_PREF_TLS_WRITE_SIZE   (TLS_PREF_WRITE_SIZE + 1024)
+
+#define TLS_MAX_BUCKET_SIZE       (4 * TLS_PREF_TLS_WRITE_SIZE)
 
 #endif /* tls_filter_h */

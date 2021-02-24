@@ -57,3 +57,40 @@ LogLevel tls:trace4
                     extras=extras[domain] if domain in extras else ""
                 ))
 
+    def add_ssl_vhosts(self, domains: List[str], extras: Dict[str, str] = None):
+        extras = extras if extras is not None else {}
+        self.add("""
+LogLevel tls:trace4
+{extras}
+        """.format(
+            https=self.env.https_port,
+            extras=extras['base'] if 'base' in extras else "",
+        ))
+        for domain in domains:
+            self.add("""
+    <VirtualHost *:{https}>
+      ServerName {domain}
+      DocumentRoot htdocs/{domain}
+      SSLEngine on
+                 """.format(
+                    https=self.env.https_port,
+                    domain=domain))
+            for cert_file, pkey_file in self.env.cert_files_for(domain):
+                cert_file = os.path.relpath(cert_file, self.env.server_dir)
+                pkey_file = os.path.relpath(pkey_file, self.env.server_dir)
+                self.add("  SSLCertificateFile {cert_file}".format(
+                    cert_file = cert_file,
+                ))
+            self.add("  SSLCertificateKeyFile {pkey_file}".format(
+                pkey_file=pkey_file,
+            ))
+            self.add("""
+      {extras}
+    </VirtualHost>
+                """.format(
+                    https=self.env.https_port,
+                    domain=domain,
+                    cert_file=cert_file,
+                    pkey_file=pkey_file,
+                    extras=extras[domain] if domain in extras else ""
+                ))

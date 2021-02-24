@@ -204,6 +204,33 @@ cleanup:
     return rv;
 }
 
+apr_status_t tls_util_brigade_split_line(
+    apr_bucket_brigade *dest, apr_bucket_brigade *src,
+    apr_read_type_e block, apr_off_t length,
+    apr_off_t *pnout)
+{
+    apr_off_t nstart, nend;
+    apr_status_t rv;
+
+    apr_brigade_length(dest, 0, &nstart);
+    rv = apr_brigade_split_line(dest, src, block, length);
+    if (APR_SUCCESS != rv) goto cleanup;
+    apr_brigade_length(dest, 0, &nend);
+    /* apr_brigade_split_line() has the nasty habit of leaving a 0-length bucket
+     * at the start of the brigade when it transfered the whole content. Get rid of it.
+     */
+    if (!APR_BRIGADE_EMPTY(src)) {
+         apr_bucket *b = APR_BRIGADE_FIRST(src);
+        if (!APR_BUCKET_IS_METADATA(b) && 0 == b->length) {
+            APR_BUCKET_REMOVE(b);
+            apr_bucket_delete(b);
+        }
+    }
+cleanup:
+    *pnout = (APR_SUCCESS == rv)? (nend - nstart) : 0;
+    return rv;
+}
+
 int tls_util_name_matches_server(const char *name, server_rec *s)
 {
     apr_array_header_t *names;
@@ -226,5 +253,57 @@ int tls_util_name_matches_server(const char *name, server_rec *s)
         if (alias[i] && !ap_strcasecmp_match(name, alias[i])) return 1;
     }
     return 0;
+}
+
+apr_size_t tls_util_bucket_print(char *buffer, apr_size_t bmax,
+                                 apr_bucket *b, const char *sep)
+{
+    apr_size_t off = 0;
+    if (sep && *sep) {
+        off += (size_t)apr_snprintf(buffer+off, bmax-off, "%s", sep);
+    }
+
+    if (bmax <= off) {
+        return off;
+    }
+    else if (APR_BUCKET_IS_METADATA(b)) {
+        off += (size_t)apr_snprintf(buffer+off, bmax-off, "%s", b->type->name);
+    }
+    else if (bmax > off) {
+        off += (size_t)apr_snprintf(buffer+off, bmax-off, "%s[%ld]",
+                                    b->type->name, (long)(b->length == ((apr_size_t)-1)?
+                                   -1 : (int)b->length));
+    }
+    return off;
+}
+
+apr_size_t tls_util_bb_print(char *buffer, apr_size_t bmax,
+                             const char *tag, const char *sep,
+                             apr_bucket_brigade *bb)
+{
+    apr_size_t off = 0;
+    const char *sp = "";
+    apr_bucket *b;
+
+    if (bmax > 1) {
+        if (bb) {
+            memset(buffer, 0, bmax--);
+            off += (size_t)apr_snprintf(buffer+off, bmax-off, "%s(", tag);
+            for (b = APR_BRIGADE_FIRST(bb);
+                 (bmax > off) && (b != APR_BRIGADE_SENTINEL(bb));
+                 b = APR_BUCKET_NEXT(b)) {
+
+                off += tls_util_bucket_print(buffer+off, bmax-off, b, sp);
+                sp = " ";
+            }
+            if (bmax > off) {
+                off += (size_t)apr_snprintf(buffer+off, bmax-off, ")%s", sep);
+            }
+        }
+        else {
+            off += (size_t)apr_snprintf(buffer+off, bmax-off, "%s(null)%s", tag, sep);
+        }
+    }
+    return off;
 }
 

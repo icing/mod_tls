@@ -18,6 +18,8 @@ typedef enum {
     TLS_CONN_ST_DONE,
 } tls_conn_state_t;
 
+struct tls_filter_ctx_t;
+
 /* The modules configuration for a connection. Created at connection
  * start and mutable during the lifetime of the connection.
  * (A conn_rec is only ever processed by one thread at a time.)
@@ -30,6 +32,8 @@ typedef struct {
     int client_hello_seen;            /* the client hello has been inspected */
     const char *sni_hostname;         /* the SNI value from the client hello, if present */
     const apr_array_header_t *alpn;   /* the protocols proposed via ALPN by the client */
+
+    struct tls_filter_ctx_t *filter_ctx;
 } tls_conf_conn_t;
 
 /* Get the connection specific module configuration. */
