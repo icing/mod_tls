@@ -57,7 +57,9 @@ Run the usual autoconf/automake magic incantations.
 > make
 ```
 
-### Test Suite
+## Tests
+
+### Functional Tests
 
 If you want to run the test suite, you need:
 
@@ -67,3 +69,20 @@ If you want to run the test suite, you need:
 ```
 > make test
 ```
+
+### Load Tests
+
+There are load tests for putting the module und a bit of pressure and getting performance numbers.
+All benchmarks are limited in how they can be applied to reality. But they are useful in development
+to give some advice on how the design handles in certain situations. There are certainly useful in
+identifying weaknesses!
+
+Additionally the the functional tests, you need:
+
+ * `h2load` from the exceptional [nghttp2](https://nghttp2.org).
+ * Python package: `tqdm`
+
+```
+> make loadtest
+```
+

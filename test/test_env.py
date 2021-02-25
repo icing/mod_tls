@@ -1,25 +1,28 @@
 import inspect
 import json
+import logging
 import os
 import subprocess
 import sys
 import time
 
 from configparser import ConfigParser
-from datetime import timedelta
+from datetime import timedelta, datetime
 from http.client import HTTPConnection
 from typing import List, Optional, Dict, Tuple, Union
 from urllib.parse import urlparse
 
 from test_cert import TlsTestCA
 
+log = logging.getLogger(__name__)
 
 class ExecResult:
 
-    def __init__(self, exit_code: int, stdout: str, stderr: str = None):
+    def __init__(self, exit_code: int, stdout: str, stderr: str = None, duration: timedelta = None):
         self._exit_code = exit_code
         self._stdout = stdout if stdout is not None else ""
         self._stderr = stderr if stderr is not None else ""
+        self._duration = duration if duration is not None else timedelta()
         # noinspection PyBroadException
         try:
             self._json_out = json.loads(self._stdout)
@@ -42,6 +45,10 @@ class ExecResult:
     @property
     def stderr(self) -> str:
         return self._stderr
+
+    @property
+    def duration(self) -> timedelta:
+        return self._duration
 
 
 class TlsTestEnv:
@@ -113,6 +120,10 @@ class TlsTestEnv:
         return self._https_base
 
     @property
+    def gen_dir(self) -> str:
+        return self._gen_dir
+
+    @property
     def server_dir(self) -> str:
         return self._server_dir
 
@@ -141,10 +152,12 @@ class TlsTestEnv:
 
     @staticmethod
     def run(args: List[str]) -> ExecResult:
-        print("run: {0}".format(args))
+        log.debug("run: {0}".format(args))
+        start = datetime.now()
         p = subprocess.run(args, capture_output=True, text=True)
         # noinspection PyBroadException
-        return ExecResult(exit_code=p.returncode, stdout=p.stdout, stderr=p.stderr)
+        return ExecResult(exit_code=p.returncode, stdout=p.stdout, stderr=p.stderr,
+                          duration=datetime.now() - start)
 
     # --------- HTTP ---------
 
@@ -153,7 +166,7 @@ class TlsTestEnv:
         server = urlparse(url)
         timeout = timeout if timeout is not None else timedelta(seconds=20)
         try_until = time.time() + timeout.total_seconds()
-        print("checking is reachable: {url}".format(url=url))
+        log.debug("checking is reachable: {url}".format(url=url))
         while time.time() < try_until:
             # noinspection PyBroadException
             try:
@@ -163,12 +176,12 @@ class TlsTestEnv:
                 c.close()
                 return True
             except ConnectionRefusedError:
-                print("connection refused")
+                log.debug("connection refused")
                 time.sleep(.1)
             except:
-                print("Unexpected error:", sys.exc_info()[0])
+                log.warning("Unexpected error:", sys.exc_info()[0])
                 time.sleep(.1)
-        print("Unable to contact server after {timeout} sec".format(timeout=timeout))
+        log.warning("Unable to contact server after {timeout} sec".format(timeout=timeout))
         return False
 
     def is_dead(self, url: str = None, timeout: timedelta = None):
@@ -176,7 +189,7 @@ class TlsTestEnv:
         server = urlparse(url)
         timeout = timeout if timeout is not None else timedelta(seconds=20)
         try_until = time.time() + timeout.total_seconds()
-        print("checking is unreachable: {url}".format(url=url))
+        log.debug("checking is unreachable: {url}".format(url=url))
         while time.time() < try_until:
             # noinspection PyBroadException
             try:
@@ -189,7 +202,7 @@ class TlsTestEnv:
                 return True
             except:
                 return True
-        print(f"Server still responding after {timeout} sec".format(timeout=timeout))
+        log.warning(f"Server still responding after {timeout} sec".format(timeout=timeout))
         return False
 
     # --------- control apache ---------
@@ -204,9 +217,9 @@ class TlsTestEnv:
                 rv = 0 if self.is_live(timeout=timeout) else -1
             else:
                 rv = 0 if self.is_dead(timeout=timeout) else -1
-                print("waited for a apache.is_dead, rv=%d" % rv)
+                log.debug("waited for a apache.is_dead, rv=%d" % rv)
         else:
-            print("exit %d, stderr: %s" % (rv, p.stderr))
+            log.warning("exit %d, stderr: %s" % (rv, p.stderr))
         return rv
 
     def apache_restart(self):
@@ -221,7 +234,7 @@ class TlsTestEnv:
     def apache_fail(self):
         rv = self.apachectl("graceful", check_live=False)
         if rv != 0:
-            print("graceful restart returned: {0}".format(rv))
+            log.warning("graceful restart returned: {0}".format(rv))
             return 0 if self.is_dead(timeout=timedelta(seconds=5)) else -1
         return rv
 

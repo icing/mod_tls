@@ -1,3 +1,6 @@
+ * Adding the first load test scenario for compaing transfer speeds between mod_tls
+   and mod_ssl on a single connection for various resource sizes. Use `make loadtest`
+   to run.
  * Fixed a bug that caused the connection to close after the first request had been
    handled.
  * Improved the passing of encrytped data to the network to involve a bit less buffering.

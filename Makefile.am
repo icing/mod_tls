@@ -25,3 +25,6 @@ EXTRA_DIST      =
 test: all-recursive
 	$(MAKE) -C test/ test
 
+loadtest: all-recursive
+	$(MAKE) -C test/ loadtest
+

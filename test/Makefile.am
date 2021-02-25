@@ -31,6 +31,9 @@ unit_tests: $(TESTS)
 test: $(SERVER_DIR)/.test-setup unit_tests
 	@pytest
 
+loadtest: $(SERVER_DIR)/.test-setup unit_tests
+	@python3 load_test.py
+
 $(SERVER_DIR)/.test-setup: \
 	$(wildcard conf/*) \
 	$(wildcard htdocs/*) \
