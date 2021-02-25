@@ -137,29 +137,29 @@ cleanup:
 static apr_status_t write_tls_from_rustls(
     tls_filter_ctx_t *fctx)
 {
-    size_t dlen;
-    void *data = NULL;
+    void *buffer = NULL;
+    size_t blen, dlen;
     apr_status_t rv = APR_SUCCESS;
     rustls_result rr = RUSTLS_RESULT_OK;
     apr_bucket *b;
 
-    dlen = TLS_PREF_TLS_WRITE_SIZE;
+    blen = TLS_PREF_TLS_WRITE_SIZE;
     if (fctx->fout_rustls_bytes < TLS_MAX_BUCKET_SIZE) {
-        apr_size_t chunks = ((apr_size_t)fctx->fout_rustls_bytes / TLS_PREF_WRITE_SIZE) + 1;
-        dlen = chunks * TLS_PREF_TLS_WRITE_SIZE;
+        apr_size_t chunks = ((apr_size_t)fctx->fout_rustls_bytes / TLS_PREF_WRITE_SIZE);
+        blen = (chunks? chunks : 1) * TLS_PREF_TLS_WRITE_SIZE;
     }
 
-    data = ap_malloc(dlen);
+    buffer = ap_malloc(blen);
     rr = rustls_server_session_write_tls(fctx->cc->rustls_session,
-        (unsigned char*)data, dlen, &dlen);
+        (unsigned char*)buffer, blen, &dlen);
     if (rr != RUSTLS_RESULT_OK) goto cleanup;
 
-    b = apr_bucket_heap_create(data, dlen, free, fctx->c->bucket_alloc);
-    data = NULL;
+    b = apr_bucket_heap_create(buffer, dlen, free, fctx->c->bucket_alloc);
+    buffer = NULL;
     APR_BRIGADE_INSERT_TAIL(fctx->fout_tls_bb, b);
     rv = ap_pass_brigade(fctx->fout_ctx->next, fctx->fout_tls_bb);
     ap_log_error(APLOG_MARK, APLOG_TRACE2, rv, fctx->cc->server,
-        "write_tls_from_rustls, passed %ld bytes to network", (long)dlen);
+        "write_tls_from_rustls, passed %ld[%ld] bytes to network", (long)dlen, (long)blen);
 
     if (APR_SUCCESS == rv && fctx->c->aborted) {
         rv = APR_ECONNRESET;
@@ -167,7 +167,7 @@ static apr_status_t write_tls_from_rustls(
     apr_brigade_cleanup(fctx->fout_tls_bb);
 
 cleanup:
-    if (NULL != data) free(data);
+    if (NULL != buffer) free(buffer);
     if (rr != RUSTLS_RESULT_OK) {
         const char *err_descr = "";
         rv = tls_util_rustls_error(fctx->c->pool, rr, &err_descr);
@@ -182,11 +182,14 @@ static apr_status_t write_all_tls_from_rustls(
 {
     apr_status_t rv = APR_SUCCESS;
 
-    while (rustls_server_session_wants_write(fctx->cc->rustls_session)) {
-        rv = write_tls_from_rustls(fctx);
-        if (APR_SUCCESS != rv) goto cleanup;
+    if (rustls_server_session_wants_write(fctx->cc->rustls_session)) {
+        do {
+            rv = write_tls_from_rustls(fctx);
+            if (APR_SUCCESS != rv) goto cleanup;
+        }
+        while (rustls_server_session_wants_write(fctx->cc->rustls_session));
+        fctx->fout_rustls_bytes = 0;
     }
-    fctx->fout_rustls_bytes = 0;
 cleanup:
     return rv;
 }
@@ -374,18 +377,21 @@ static apr_status_t filter_conn_input(
     /* If we have nothing buffered, ask the rustls_session for more plain data. */
     while (APR_BRIGADE_EMPTY(fctx->fin_plain_bb)) {
         apr_size_t rlen = 0;
-        const char data[TLS_PREF_WRITE_SIZE];
 
-        rr = rustls_server_session_read(fctx->cc->rustls_session,
-            (unsigned char*)data, sizeof(data), &rlen);
-        if (rr != RUSTLS_RESULT_OK) goto cleanup;
-        ap_log_cerror(APLOG_MARK, APLOG_TRACE2, rv, fctx->c,
-                     "tls_filter_conn_input: got %ld plain bytes from rustls", (long)rlen);
-        if (rlen > 0) {
-            rv = apr_brigade_write(fctx->fin_plain_bb, NULL, NULL, data, rlen);
-            if (APR_SUCCESS != rv) goto cleanup;
+        if (fctx->fin_rustls_bytes > 0) {
+            const char data[TLS_PREF_WRITE_SIZE];
+
+            rr = rustls_server_session_read(fctx->cc->rustls_session,
+                (unsigned char*)data, sizeof(data), &rlen);
+            if (rr != RUSTLS_RESULT_OK) goto cleanup;
+            ap_log_cerror(APLOG_MARK, APLOG_TRACE2, rv, fctx->c,
+                         "tls_filter_conn_input: got %ld plain bytes from rustls", (long)rlen);
+            if (rlen > 0) {
+                rv = apr_brigade_write(fctx->fin_plain_bb, NULL, NULL, data, rlen);
+                if (APR_SUCCESS != rv) goto cleanup;
+            }
         }
-        else {
+        if (rlen == 0) {
             /* that did not produce anything either. try getting more
              * TLS data from the network into the rustls session. */
             fctx->fin_rustls_bytes = 0;
@@ -424,8 +430,10 @@ static apr_status_t filter_conn_input(
     write_all_tls_from_rustls(fctx);
 
 cleanup:
-    tls_util_bb_log(fctx->c, APLOG_TRACE3, "cleanup tls_input, fctx->fin_plain_bb", fctx->fin_plain_bb);
-    tls_util_bb_log(fctx->c, APLOG_TRACE3, "cleanup tls_input, bb", bb);
+    if (APLOGctrace3(fctx->c)) {
+        tls_util_bb_log(fctx->c, APLOG_TRACE3, "cleanup tls_input, fctx->fin_plain_bb", fctx->fin_plain_bb);
+        tls_util_bb_log(fctx->c, APLOG_TRACE3, "cleanup tls_input, bb", bb);
+    }
 
     if (rr != RUSTLS_RESULT_OK) {
         const char *err_descr = "";
@@ -437,12 +445,6 @@ cleanup:
     else if (APR_SUCCESS != rv) {
         ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, fctx->c, APLOGNO()
                      "tls_filter_conn_input");
-
-    }
-    else if (APR_SUCCESS == rv && passed == 0 && mode == AP_MODE_READBYTES) {
-        rv = APR_EAGAIN;
-        ap_log_cerror(APLOG_MARK, APLOG_TRACE2, rv, fctx->c,
-                     "tls_filter_conn_input: no input available");
     }
     else {
         ap_log_cerror(APLOG_MARK, APLOG_TRACE2, rv, fctx->c,

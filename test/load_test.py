@@ -24,13 +24,16 @@ class LoadTest:
                 fd.write(t110)
                 fd.write("\n")
 
-    def _setup(self, module: str, resource_kb: int) -> str:
+    def _setup(self, module: str, resource_kb: int, log_level: str = "info") -> str:
         conf = TlsTestConf(env=self.env)
         extras = {
             'base': """
-        LogLevel tls:info
+        LogLevel tls:{log_level}
         Protocols h2 http/1.1
-        """
+        H2TLSWarmUpSize 0
+        """.format(
+                log_level=log_level,
+            )
         }
         if 'mod_tls' == module:
             conf.add_vhosts(domains=[self.domain_a], extras=extras)
@@ -51,8 +54,10 @@ class LoadTest:
 
     def run(self, clients: int, requests: int, resource_kb: int,
             module: str = 'mod_tls', http_version: int = 2,
-            threads: int = None) -> ExecResult:
-        resource_path = self._setup(module=module, resource_kb=resource_kb)
+            threads: int = None, log_level: str = "info"
+            ) -> ExecResult:
+        resource_path = self._setup(module=module, resource_kb=resource_kb,
+                                    log_level=log_level)
         threads = threads if threads is not None else min(16, clients)
         try:
             args = [
@@ -81,6 +86,7 @@ class LoadTest:
                             help="which load case to run, defaults to all")
         load = LoadTest(env=TlsTestEnv())
         r = load.run(clients=1, requests=1000, resource_kb=10*1024, module="mod_tls", http_version=2)
+        #r = load.run(clients=1, requests=1, resource_kb=1024, module="mod_tls", http_version=2, log_level='trace2')
         print(r.stdout)
         print(r.stderr)
 
