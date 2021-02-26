@@ -19,15 +19,17 @@ struct tls_filter_ctx_t {
     apr_bucket_brigade *fin_tls_bb;      /* TLS encrypted, incoming network data */
     apr_bucket_brigade *fin_tls_buffer_bb; /* TLS encrypted, incoming network data buffering */
     apr_bucket_brigade *fin_plain_bb;    /* decrypted, incoming traffic data */
+    apr_off_t fin_bytes_in_rustls;       /* # of input TLS bytes in rustls_session */
+    apr_off_t fin_max_in_rustls;         /* how much tls we like to read into rustls */
     apr_read_type_e fin_block;           /* Do we block on input reads or not? */
 
     ap_filter_t *fout_ctx;               /* Apache's entry into the output filter chain */
+    char *fout_buf_plain;                /* a buffer to collect plain bytes for output */
+    apr_size_t fout_buf_plain_len;       /* the amount of bytes in the buffer */
+    apr_size_t fout_buf_plain_size;      /* the total size of the buffer */
     apr_bucket_brigade *fout_tls_bb;     /* TLS encrypted, outgoing network data */
-
-    apr_off_t fin_rustls_bytes;          /* # of input TLS bytes in rustls_session */
-    apr_off_t fout_rustls_bytes;         /* # of output plain bytes in rustls_session */
-    apr_off_t max_rustls_out;            /* how much plain bytes we like to give to rustls */
-    apr_off_t max_rustls_tls_in;         /* how much tls we like to read into rustls */
+    apr_off_t fout_bytes_in_rustls;      /* # of output plain bytes in rustls_session */
+    apr_off_t fout_max_in_rustls;        /* how much plain bytes we like to give to rustls */
 };
 
 /**

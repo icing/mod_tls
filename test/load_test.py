@@ -1,4 +1,5 @@
 import argparse
+import itertools
 import logging
 import os
 import re
@@ -10,13 +11,14 @@ from tqdm import tqdm  # type: ignore
 from typing import Dict, Iterable, List
 
 from test_conf import TlsTestConf
-from test_env import TlsTestEnv
-
+from test_env import TlsTestEnv, ExecResult
 
 log = logging.getLogger(__name__)
 
+
 class LoadTestException(Exception):
     pass
+
 
 class H2LoadLogSummary:
 
@@ -53,9 +55,11 @@ class H2LoadLogSummary:
         self._duration = duration
         self._all_durations = all_durations
         self._transfered_mb = 0.0
+        self._exec_result = None
+        self._expected_responses = 0
 
     @property
-    def title(self) -> int:
+    def title(self) -> str:
         return self._title
 
     @property
@@ -74,6 +78,14 @@ class H2LoadLogSummary:
     def response_stati(self) -> Dict[int, int]:
         return self._stati
 
+    @property
+    def expected_responses(self) -> int:
+        return self._expected_responses
+
+    @property
+    def execution(self) -> ExecResult:
+        return self._exec_result
+
     def all_200(self) -> bool:
         non_200s = [n for n in self._stati.keys() if n != 200]
         return len(non_200s) == 0
@@ -87,6 +99,12 @@ class H2LoadLogSummary:
     def set_transfered_mb(self, mb: float) -> None:
         self._transfered_mb = mb
 
+    def set_exec_result(self, result: ExecResult):
+        self._exec_result = result
+
+    def set_expected_responses(self, n: int):
+        self._expected_responses = n
+
 
 class H2LoadMonitor:
 
@@ -97,6 +115,7 @@ class H2LoadMonitor:
         self._tqdm = tqdm(desc=title, total=expected, unit="request", leave=False)
         self._running = False
         self._lines = ()
+        self._tail = None
 
     def start(self):
         self._tail = Thread(target=self._collect, kwargs={'self': self})
@@ -114,7 +133,6 @@ class H2LoadMonitor:
     @staticmethod
     def _collect(self) -> None:
         first_call = True
-        line_count = 0
         while self._running:
             try:
                 with open(self._fpath) as fd:
@@ -144,43 +162,75 @@ class H2LoadMonitor:
         self._tqdm.close()
 
 
+def mk_text_file(fpath: str, lines: int):
+    t110 = ""
+    for _ in range(11):
+        t110 += "0123456789"
+    with open(fpath, "w") as fd:
+        for i in range(lines):
+            fd.write("{0:015d}: ".format(i))  # total 128 bytes per line
+            fd.write(t110)
+            fd.write("\n")
+
+
 class LoadTest:
 
-    def __init__(self, env: TlsTestEnv):
+    @staticmethod
+    def from_scenario(scenario: Dict, env: TlsTestEnv) -> 'SingleFileLoadTest':
+        raise NotImplemented
+
+    def run(self) -> H2LoadLogSummary:
+        raise NotImplemented
+
+    def format_result(self, summary: H2LoadLogSummary) -> str:
+        raise NotImplemented
+
+
+class SingleFileLoadTest(LoadTest):
+
+    def __init__(self, env: TlsTestEnv,
+                 clients: int, requests: int, resource_kb: int,
+                 ssl_module: str = 'mod_tls', http_version: int = 2,
+                 threads: int = None, log_level: str = "info"):
         self.env = env
         self.domain_a = self.env.domain_a
+        self._clients = clients
+        self._requests = requests
+        self._resource_kb = resource_kb
+        self._ssl_module = ssl_module
+        self._http_version = http_version
+        self._threads = threads if threads is not None else min(16, self._clients)
+        self._log_level = log_level
 
     @staticmethod
-    def mk_text_file(fpath: str, lines: int):
-        t110 = ""
-        for _ in range(11):
-            t110 += "0123456789"
-        with open(fpath, "w") as fd:
-            for i in range(lines):
-                fd.write("{0:015d}: ".format(i))  # total 128 bytes per line
-                fd.write(t110)
-                fd.write("\n")
+    def from_scenario(scenario: Dict, env: TlsTestEnv) -> 'SingleFileLoadTest':
+        return SingleFileLoadTest(
+            env=env,
+            clients=scenario['clients'], requests=scenario['requests'],
+            ssl_module=scenario['module'], resource_kb=scenario['rsize'],
+            http_version=scenario['http']
+        )
 
-    def _setup(self, module: str, resource_kb: int, log_level: str = "info") -> str:
+    def _setup(self) -> str:
         conf = TlsTestConf(env=self.env)
         extras = {
             'base': """
         LogLevel tls:{log_level}
         Protocols h2 http/1.1
         """.format(
-                log_level=log_level,
+                log_level=self._log_level,
             )
         }
-        if 'mod_tls' == module:
+        if 'mod_tls' == self._ssl_module:
             conf.add_vhosts(domains=[self.domain_a], extras=extras)
-        elif 'mod_ssl' == module:
+        elif 'mod_ssl' == self._ssl_module:
             conf.add_ssl_vhosts(domains=[self.domain_a], extras=extras)
         else:
-            raise LoadTestException("tests for module: {0}".format(module))
+            raise LoadTestException("tests for module: {0}".format(self._ssl_module))
         conf.write()
         docs_a = os.path.join(self.env.server_docs_dir, self.domain_a)
-        fname = "{0}k.txt".format(resource_kb)
-        self.mk_text_file(os.path.join(docs_a, fname), 8 * resource_kb)
+        fname = "{0}k.txt".format(self._resource_kb)
+        mk_text_file(os.path.join(docs_a, fname), 8 * self._resource_kb)
         assert self.env.apache_restart() == 0
         return "/{0}".format(fname)
 
@@ -188,35 +238,30 @@ class LoadTest:
         if self.env.is_live(timeout=timedelta(milliseconds=100)):
             assert self.env.apache_stop() == 0
 
-    def run(self, clients: int, requests: int, resource_kb: int,
-            module: str = 'mod_tls', http_version: int = 2,
-            threads: int = None, log_level: str = "info"
-            ) -> H2LoadLogSummary:
-        resource_path = self._setup(module=module, resource_kb=resource_kb,
-                                    log_level=log_level)
-        threads = threads if threads is not None else min(16, clients)
+    def run(self) -> H2LoadLogSummary:
+        resource_path = self._setup()
         monitor = None
         try:
             log_file = "{gen_dir}/h2load.log".format(gen_dir=self.env.gen_dir)
             if os.path.isfile(log_file):
                 os.remove(log_file)
-            monitor = H2LoadMonitor(log_file, expected=requests,
+            monitor = H2LoadMonitor(log_file, expected=self._requests,
                                     title="{module}/h{http_version}/{conn}c/{kb}MB".format(
-                                        conn=clients,
-                                        module=module,
-                                        kb=(resource_kb/1024),
-                                        http_version=http_version
+                                        conn=self._clients,
+                                        module=self._ssl_module,
+                                        kb=(self._resource_kb / 1024),
+                                        http_version=self._http_version
                                     ))
             monitor.start()
             args = [
                 'h2load',
-                '--clients={0}'.format(clients),
-                '--threads={0}'.format(threads),
-                '--requests={0}'.format(requests),
+                '--clients={0}'.format(self._clients),
+                '--threads={0}'.format(self._threads),
+                '--requests={0}'.format(self._requests),
                 '--log-file={0}'.format(log_file),
                 '--connect-to=localhost:{0}'.format(self.env.https_port)
             ]
-            if http_version == 1:
+            if self._http_version == 1:
                 args.append('--h1')
             r = self.env.run(args + [
                 'https://{0}:{1}{2}'.format(self.domain_a, self.env.https_port, resource_path)
@@ -224,15 +269,139 @@ class LoadTest:
             if r.exit_code != 0:
                 raise LoadTestException("h2load returned {0}: {1}".format(r.exit_code, r.stderr))
             summary = monitor.get_summary(duration=r.duration)
-            summary.set_transfered_mb(requests * resource_kb / 1024)
+            summary.set_expected_responses(self._requests)
+            summary.set_exec_result(r)
+            summary.set_transfered_mb(self._requests * self._resource_kb / 1024)
             return summary
         finally:
             if monitor is not None:
                 monitor.stop()
             self._teardown()
 
+    def format_result(self, summary: H2LoadLogSummary) -> str:
+        return "{0:.1f}".format(summary.throughput_mb)
+
+
+class MultiFileLoadTest(LoadTest):
+
+    SETUP_DONE = False
+
+    def __init__(self, env: TlsTestEnv,
+                 clients: int, requests: int, file_count: int,
+                 file_sizes: List[int],
+                 ssl_module: str = 'mod_tls', http_version: int = 2,
+                 threads: int = None, log_level: str = "info"):
+        self.env = env
+        self.domain_a = self.env.domain_a
+        self._clients = clients
+        self._requests = requests
+        self._file_count = file_count
+        self._file_sizes = file_sizes
+        self._ssl_module = ssl_module
+        self._http_version = http_version
+        self._threads = threads if threads is not None else min(16, self._clients)
+        self._log_level = log_level
+        self._url_file = "{gen_dir}/h2load-urls.txt".format(gen_dir=self.env.gen_dir)
+
     @staticmethod
-    def print_table(table: List[List[str]]):
+    def from_scenario(scenario: Dict, env: TlsTestEnv) -> 'MultiFileLoadTest':
+        return MultiFileLoadTest(
+            env=env,
+            clients=scenario['clients'], requests=scenario['requests'],
+            file_sizes=scenario['file_sizes'], file_count=scenario['file_count'],
+            ssl_module=scenario['module'], http_version=scenario['http']
+        )
+
+    def _setup(self):
+        conf = TlsTestConf(env=self.env)
+        extras = {
+            'base': """
+        LogLevel tls:{log_level}
+        Protocols h2 http/1.1
+        """.format(
+                log_level=self._log_level,
+            )
+        }
+        if 'mod_tls' == self._ssl_module:
+            conf.add_vhosts(domains=[self.domain_a], extras=extras)
+        elif 'mod_ssl' == self._ssl_module:
+            conf.add_ssl_vhosts(domains=[self.domain_a], extras=extras)
+        else:
+            raise LoadTestException("tests for module: {0}".format(self._ssl_module))
+        conf.write()
+        if not MultiFileLoadTest.SETUP_DONE:
+            with tqdm(desc="setup resources", total=self._file_count, unit="file", leave=False) as t:
+                docs_a = os.path.join(self.env.server_docs_dir, self.domain_a)
+                uris = []
+                for i in range(self._file_count):
+                    fsize = self._file_sizes[i % len(self._file_sizes)]
+                    if fsize is None:
+                        raise Exception("file sizes?: {0} {1}".format(i, fsize))
+                    fname = "{0}-{1}k.txt".format(i, fsize)
+                    mk_text_file(os.path.join(docs_a, fname), 8 * fsize)
+                    uris.append(f"/{fname}")
+                    t.update()
+                with open(self._url_file, 'w') as fd:
+                    fd.write("\n".join(uris))
+                    fd.write("\n")
+            MultiFileLoadTest.SETUP_DONE = True
+        assert self.env.apache_restart() == 0
+
+    def _teardown(self):
+        if self.env.is_live(timeout=timedelta(milliseconds=100)):
+            assert self.env.apache_stop() == 0
+
+    def run(self) -> H2LoadLogSummary:
+        self._setup()
+        monitor = None
+        try:
+            log_file = "{gen_dir}/h2load.log".format(gen_dir=self.env.gen_dir)
+            if os.path.isfile(log_file):
+                os.remove(log_file)
+            monitor = H2LoadMonitor(log_file, expected=self._requests,
+                                    title="{module}/h{http_version}//{files}f/{conn}c".format(
+                                        conn=self._clients,
+                                        module=self._ssl_module,
+                                        files=(self._file_count / 1024),
+                                        http_version=self._http_version
+                                    ))
+            monitor.start()
+            args = [
+                'h2load',
+                '--clients={0}'.format(self._clients),
+                '--threads={0}'.format(self._threads),
+                '--requests={0}'.format(self._requests),
+                '--input-file={0}'.format(self._url_file),
+                '--log-file={0}'.format(log_file),
+                '--connect-to=localhost:{0}'.format(self.env.https_port)
+            ]
+            if self._http_version == 1:
+                args.append('--h1')
+            r = self.env.run(args + [
+                '--base-uri=https://{0}:{1}/'.format(
+                    self.domain_a, self.env.https_port)
+            ])
+            if r.exit_code != 0:
+                raise LoadTestException("h2load returned {0}: {1}".format(r.exit_code, r.stderr))
+            summary = monitor.get_summary(duration=r.duration)
+            summary.set_expected_responses(self._requests)
+            summary.set_exec_result(r)
+            return summary
+        finally:
+            if monitor is not None:
+                monitor.stop()
+            self._teardown()
+
+    def format_result(self, summary: H2LoadLogSummary) -> str:
+        return "{0:.1f}".format(
+            summary.response_count / summary.duration.total_seconds() / self._clients
+        )
+
+
+class LoadTest:
+
+    @staticmethod
+    def print_table(table: List[List[str]], foot_notes: List[str] = None):
         col_widths = []
         col_sep = "   "
         for row in table[1:]:
@@ -248,6 +417,15 @@ class LoadTest:
             for idx, cell in enumerate(row):
                 line += f"{col_sep if idx > 0 else ''}{cell:>{col_widths[idx]}}"
             print(line)
+        if foot_notes is not None:
+            for idx, note in enumerate(foot_notes):
+                print("{0:3d}) {1}".format(idx+1, note))
+
+    @staticmethod
+    def scenario_with(base: Dict, updates: Dict) -> Dict:
+        scenario = base.copy()
+        scenario.update(updates)
+        return scenario
 
     @classmethod
     def main(cls):
@@ -269,76 +447,95 @@ class LoadTest:
 
         try:
             log.debug("starting tests")
-            load = LoadTest(env=TlsTestEnv())
+
+            scenario_sf = {
+                "title": "sizes and throughput (MB/s)",
+                "class": SingleFileLoadTest,
+                "clients": 0,
+                "row0_title": "module protocol",
+                "row_title": "{module} h{http}",
+                "rows": [
+                    {"module": "mod_ssl", "http": 1},
+                    {"module": "mod_tls", "http": 1},
+                    {"module": "mod_ssl", "http": 2},
+                    {"module": "mod_tls", "http": 2},
+                ],
+                "col_title": "{rsize}KB",
+                "columns": [],
+            }
+            scenario_mf = {
+                "title": "connections and throughput (MB/s)",
+                "class": MultiFileLoadTest,
+                "file_count": 1024,
+                "file_sizes": [1, 2, 3, 4, 5, 10, 20, 30, 40, 50, 100, 10000],
+                "requests": 10000,
+                "row0_title": "module protocol",
+                "row_title": "{module} h{http}",
+                "rows": [
+                    {"module": "mod_ssl", "http": 1},
+                    {"module": "mod_tls", "http": 1},
+                    {"module": "mod_ssl", "http": 2},
+                    {"module": "mod_tls", "http": 2},
+                ],
+                "col_title": "{clients}c",
+                "columns": [],
+            }
 
             scenarios = {
-                "1c-throughput": {
-                    "title": "1 conn, 1k-10k requests, sizes and throughput (MB/s)",
-                    "base": {"clients": 1},
-                    "row0_title": "module protocol",
-                    "row_title": "{module} h{http}",
-                    "rows": [
-                        {"module": "mod_ssl", "http": 1},
-                        {"module": "mod_tls", "http": 1},
-                        {"module": "mod_ssl", "http": 2},
-                        {"module": "mod_tls", "http": 2},
-                    ],
-                    "col_title": "{rsize}KB",
+                "1c-throughput": cls.scenario_with(scenario_sf, {
+                    "title": "1 conn, 1k-10k requests, *sizes, throughput (MB/s)",
+                    "clients": 1,
                     "columns": [
                         {"requests": 1000, "rsize": 10 * 1024},
                         {"requests": 3000, "rsize": 1024},
                         {"requests": 6000, "rsize": 100},
                         {"requests": 10000, "rsize": 10},
                     ],
-                },
-                "10c-throughput": {
-                    "title": "10 conn, 5k-50k requests, sizes and throughput (MB/s)",
-                    "base": {"clients": 10},
-                    "row0_title": "module protocol",
-                    "row_title": "{module} h{http}",
-                    "rows": [
-                        {"module": "mod_ssl", "http": 1},
-                        {"module": "mod_tls", "http": 1},
-                        {"module": "mod_ssl", "http": 2},
-                        {"module": "mod_tls", "http": 2},
-                    ],
-                    "col_title": "{rsize}KB",
+                }),
+                "10c-throughput": cls.scenario_with(scenario_sf, {
+                    "title": "10 conn, 5k-50k requests, *sizes, throughput (MB/s)",
+                    "clients": 10,
                     "columns": [
                         {"requests": 5000, "rsize": 10 * 1024},
                         {"requests": 10000, "rsize": 1024},
                         {"requests": 25000, "rsize": 100},
                         {"requests": 50000, "rsize": 10},
                     ],
-                },
-                "100c-throughput": {
-                    "title": "100 conn, 10k-100k requests, sizes and throughput (MB/s)",
-                    "base": {"clients": 10},
-                    "row0_title": "module protocol",
-                    "row_title": "{module} h{http}",
-                    "rows": [
-                        {"module": "mod_ssl", "http": 1},
-                        {"module": "mod_tls", "http": 1},
-                        {"module": "mod_ssl", "http": 2},
-                        {"module": "mod_tls", "http": 2},
-                    ],
-                    "col_title": "{rsize}KB",
+                }),
+                "50c-throughput": cls.scenario_with(scenario_sf, {
+                    "title": "50 conn, 10k-100k requests, *sizes, throughput (MB/s)",
+                    "clients": 50,
                     "columns": [
-                        {"requests": 10000, "rsize": 10 * 1024},
+                        {"requests": 5000, "rsize": 10 * 1024},
                         {"requests": 10000, "rsize": 1024},
                         {"requests": 50000, "rsize": 100},
                         {"requests": 100000, "rsize": 10},
                     ],
-                },
+                }),
+                "1k-files": cls.scenario_with(scenario_mf, {
+                    "title": "1000 files, 1k-10MB, *conn, 10k req, (req/s/conn)",
+                    "clients": 1,
+                    "columns": [
+                        {"clients": 1},
+                        {"clients": 2},
+                        {"clients": 5},
+                        {"clients": 10},
+                        {"clients": 20},
+                    ],
+                }),
             }
             for name in args.names:
                 if name not in scenarios:
                     raise LoadTestException(f"scenario unknown: '{name}'")
             names = args.names if len(args.names) else sorted(scenarios.keys())
+
+            env = TlsTestEnv()
             for name in names:
                 scenario = scenarios[name]
                 table = [
                     [scenario['title']],
                 ]
+                foot_notes = []
                 headers = [scenario['row0_title']]
                 for col in scenario['columns']:
                     headers.append(scenario['col_title'].format(**col))
@@ -350,24 +547,29 @@ class LoadTest:
                     row_line = [scenario['row_title'].format(**row)]
                     table.append(row_line)
                     for col in scenario['columns']:
-                        t = scenario['base'].copy()
+                        t = scenario.copy()
                         t.update(row)
                         t.update(col)
-                        summary = load.run(clients=t['clients'], requests=t['requests'],
-                                           resource_kb=t['rsize'],
-                                           module=t['module'], http_version=t['http'])
-                        if summary.response_count != t['requests']:
-                            sys.stderr.write("responses missing: {0}, expected {1}\n".format(
-                                summary.response_count, t['requests']))
-                            sys.exit(1)
+                        test = scenario['class'].from_scenario(t, env=env)
+                        summary = test.run()
+                        fnote = ""
+                        if summary.response_count != summary.expected_responses:
+                            fnote += "{0}/{1} missing".format(
+                                summary.expected_responses - summary.response_count,
+                                summary.expected_responses
+                            )
                         if not summary.all_200():
-                            sys.stderr.write("errors in responses:")
+                            fnote += "non 200s:"
                             for status in [n for n in summary.response_stati.keys() if n != 200]:
-                                sys.stderr.write(" {0}={1}".format(status, summary.response_stati[status]))
-                            sys.stderr.write("\n")
-                            sys.exit(1)
-                        row_line.append("{1:.1f}".format(summary.title, summary.throughput_mb))
-                        cls.print_table(table)
+                                fnote += " {0}={1}".format(status, summary.response_stati[status])
+
+                        if len(fnote):
+                            foot_notes.append(fnote)
+                        row_line.append("{0}{1}".format(
+                            test.format_result(summary),
+                            f"[{len(foot_notes)}]" if len(fnote) else ""
+                        ))
+                        cls.print_table(table, foot_notes)
         except KeyboardInterrupt:
             sys.exit(1)
         except LoadTestException as ex:
