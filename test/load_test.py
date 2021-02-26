@@ -254,10 +254,11 @@ class LoadTest:
         parser = argparse.ArgumentParser(prog='load_h1', description="""
             Run a range of load tests against the test Apache setup.
             """)
-        parser.add_argument("-c", "--case", type=str, default=None,
-                            help="which load case to run, defaults to all")
+        parser.add_argument("-m", "--module", type=str, default=None,
+                            help="which module to test, defaults to all")
         parser.add_argument("-v", "--verbose", action='count', default=0,
                             help="log more output on stderr")
+        parser.add_argument("names", nargs='*', help="Name(s) of scenarios to run")
         args = parser.parse_args()
 
         if args.verbose > 0:
@@ -270,8 +271,8 @@ class LoadTest:
             log.debug("starting tests")
             load = LoadTest(env=TlsTestEnv())
 
-            for scenario in [
-                {
+            scenarios = {
+                "1c-throughput": {
                     "title": "1 conn, 1k-10k requests, sizes and throughput (MB/s)",
                     "base": {"clients": 1},
                     "row0_title": "module protocol",
@@ -285,12 +286,56 @@ class LoadTest:
                     "col_title": "{rsize}KB",
                     "columns": [
                         {"requests": 1000, "rsize": 10 * 1024},
-                        {"requests": 1000, "rsize": 1024},
-                        {"requests": 5000, "rsize": 100},
+                        {"requests": 3000, "rsize": 1024},
+                        {"requests": 6000, "rsize": 100},
                         {"requests": 10000, "rsize": 10},
                     ],
-                }
-            ]:
+                },
+                "10c-throughput": {
+                    "title": "10 conn, 5k-50k requests, sizes and throughput (MB/s)",
+                    "base": {"clients": 10},
+                    "row0_title": "module protocol",
+                    "row_title": "{module} h{http}",
+                    "rows": [
+                        {"module": "mod_ssl", "http": 1},
+                        {"module": "mod_tls", "http": 1},
+                        {"module": "mod_ssl", "http": 2},
+                        {"module": "mod_tls", "http": 2},
+                    ],
+                    "col_title": "{rsize}KB",
+                    "columns": [
+                        {"requests": 5000, "rsize": 10 * 1024},
+                        {"requests": 10000, "rsize": 1024},
+                        {"requests": 25000, "rsize": 100},
+                        {"requests": 50000, "rsize": 10},
+                    ],
+                },
+                "100c-throughput": {
+                    "title": "100 conn, 10k-100k requests, sizes and throughput (MB/s)",
+                    "base": {"clients": 10},
+                    "row0_title": "module protocol",
+                    "row_title": "{module} h{http}",
+                    "rows": [
+                        {"module": "mod_ssl", "http": 1},
+                        {"module": "mod_tls", "http": 1},
+                        {"module": "mod_ssl", "http": 2},
+                        {"module": "mod_tls", "http": 2},
+                    ],
+                    "col_title": "{rsize}KB",
+                    "columns": [
+                        {"requests": 10000, "rsize": 10 * 1024},
+                        {"requests": 10000, "rsize": 1024},
+                        {"requests": 50000, "rsize": 100},
+                        {"requests": 100000, "rsize": 10},
+                    ],
+                },
+            }
+            for name in args.names:
+                if name not in scenarios:
+                    raise LoadTestException(f"scenario unknown: '{name}'")
+            names = args.names if len(args.names) else sorted(scenarios.keys())
+            for name in names:
+                scenario = scenarios[name]
                 table = [
                     [scenario['title']],
                 ]
@@ -300,6 +345,8 @@ class LoadTest:
                 table.append(headers)
                 cls.print_table(table)
                 for row in scenario['rows']:
+                    if args.module is not None and row['module'] != args.module:
+                        continue
                     row_line = [scenario['row_title'].format(**row)]
                     table.append(row_line)
                     for col in scenario['columns']:
@@ -324,7 +371,7 @@ class LoadTest:
         except KeyboardInterrupt:
             sys.exit(1)
         except LoadTestException as ex:
-            sys.stderr.write(str(ex))
+            sys.stderr.write(f"ERROR: {str(ex)}\n")
             sys.exit(1)
         sys.exit(0)
 

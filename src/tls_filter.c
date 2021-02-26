@@ -688,6 +688,9 @@ void tls_filter_register(
     (void)pool;
     ap_register_input_filter(TLS_FILTER_RAW, filter_conn_input,  NULL, AP_FTYPE_CONNECTION + 5);
     ap_register_output_filter(TLS_FILTER_RAW, filter_conn_output, NULL, AP_FTYPE_CONNECTION + 5);
-
+#if AP_MODULE_MAGIC_AT_LEAST(20160312, 0)
     ap_hook_input_pending(tls_filter_input_pending, NULL, NULL, APR_HOOK_MIDDLE);
+#else
+    (void)tls_filter_input_pending;
+#endif
 }

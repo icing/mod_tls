@@ -1,3 +1,7 @@
+ * Added a patch file for the Apache httpd 2.4.x release line with the - so far -
+   necessary changes to the server. Make mod_tls compile against httpd trunk and
+   a patched branches/2.4.x.
+ * More load test scenarios.
  * Adding the first load test scenario for compaing transfer speeds between mod_tls
    and mod_ssl on a single connection for various resource sizes. Use `make loadtest`
    to run.
