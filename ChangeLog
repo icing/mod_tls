@@ -1,3 +1,5 @@
+ * All buffers passed to rustls for writing to are now initialized via 'calloc()',
+   as Rust requires. There is no concept of a write-only array, unfortunately.
  * Added a patch file for the Apache httpd 2.4.x release line with the - so far -
    necessary changes to the server. Make mod_tls compile against httpd trunk and
    a patched branches/2.4.x.
