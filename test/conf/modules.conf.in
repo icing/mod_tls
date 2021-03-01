@@ -34,10 +34,7 @@ LoadModule proxy_http_module    "@PREFIX@/modules/mod_proxy_http.so"
 LoadModule proxy_http2_module   "@PREFIX@/modules/mod_proxy_http2.so"
 LoadModule proxy_connect_module "@PREFIX@/modules/mod_proxy_connect.so"
 
-LoadModule mpm_event_module     "@PREFIX@/modules/mod_mpm_event.so"
-
 LoadModule ssl_module           "@PREFIX@/modules/mod_ssl.so"
-# test an installed or the locally built version
-#LoadModule md_module            "@PREFIX@/modules/mod_md.so"
-LoadModule tls_module            "@MODULE_SRC@/.libs/mod_tls.so"
+# test an locally built version
+LoadModule tls_module           "@MODULE_SRC@/.libs/mod_tls.so"
 

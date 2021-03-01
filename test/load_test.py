@@ -369,7 +369,6 @@ class MultiFileLoadTest(LoadTest):
             args = [
                 'h2load',
                 '--clients={0}'.format(self._clients),
-                '--threads={0}'.format(self._threads),
                 '--requests={0}'.format(self._requests),
                 '--input-file={0}'.format(self._url_file),
                 '--log-file={0}'.format(log_file),
@@ -377,6 +376,8 @@ class MultiFileLoadTest(LoadTest):
             ]
             if self._http_version == 1:
                 args.append('--h1')
+            else:
+                args.extend(['-m', '1'])
             r = self.env.run(args + [
                 '--base-uri=https://{0}:{1}/'.format(
                     self.domain_a, self.env.https_port)

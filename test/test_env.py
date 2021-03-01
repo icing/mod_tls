@@ -88,6 +88,7 @@ class TlsTestEnv:
         self._server_dir = os.path.join(self._gen_dir, 'apache')
         self._server_conf_dir = os.path.join(self._server_dir, "conf")
         self._server_docs_dir = os.path.join(self._server_dir, "htdocs")
+        self._mpm_type = os.environ['MPM'] if 'MPM' in os.environ else 'event'
 
         self._apachectl = os.path.join(self._prefix, 'bin', 'apachectl')
         self._http_port = int(config.get('global', 'http_port'))
@@ -102,6 +103,14 @@ class TlsTestEnv:
             self._curl = "curl"
         self._openssl = config.get('global', 'openssl_bin')
         TlsTestEnv.init_class(self._server_dir)
+
+    @property
+    def prefix(self) -> str:
+        return self._prefix
+
+    @property
+    def mpm_type(self) -> str:
+        return self._mpm_type
 
     @property
     def http_port(self) -> int:
