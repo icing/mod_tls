@@ -1,6 +1,7 @@
 import argparse
 import itertools
 import logging
+import multiprocessing
 import os
 import re
 import sys
@@ -188,24 +189,25 @@ class LoadTest:
 
 class SingleFileLoadTest(LoadTest):
 
-    def __init__(self, env: TlsTestEnv,
+    def __init__(self, env: TlsTestEnv, server: str,
                  clients: int, requests: int, resource_kb: int,
                  ssl_module: str = 'mod_tls', http_version: int = 2,
-                 threads: int = None, log_level: str = "info"):
+                 threads: int = None):
         self.env = env
         self.domain_a = self.env.domain_a
+        self._server = server
         self._clients = clients
         self._requests = requests
         self._resource_kb = resource_kb
         self._ssl_module = ssl_module
         self._http_version = http_version
-        self._threads = threads if threads is not None else min(16, self._clients)
-        self._log_level = log_level
+        self._threads = threads if threads is not None else min(multiprocessing.cpu_count()/2, self._clients)
 
     @staticmethod
     def from_scenario(scenario: Dict, env: TlsTestEnv) -> 'SingleFileLoadTest':
         return SingleFileLoadTest(
             env=env,
+            server=scenario['server'],
             clients=scenario['clients'], requests=scenario['requests'],
             ssl_module=scenario['module'], resource_kb=scenario['rsize'],
             http_version=scenario['http']
@@ -214,12 +216,7 @@ class SingleFileLoadTest(LoadTest):
     def _setup(self) -> str:
         conf = TlsTestConf(env=self.env)
         extras = {
-            'base': """
-        LogLevel tls:{log_level}
-        Protocols h2 http/1.1
-        """.format(
-                log_level=self._log_level,
-            )
+            'base': self._server
         }
         if 'mod_tls' == self._ssl_module:
             conf.add_vhosts(domains=[self.domain_a], extras=extras)
@@ -286,27 +283,29 @@ class MultiFileLoadTest(LoadTest):
 
     SETUP_DONE = False
 
-    def __init__(self, env: TlsTestEnv,
+    def __init__(self, env: TlsTestEnv, server: str,
                  clients: int, requests: int, file_count: int,
                  file_sizes: List[int],
                  ssl_module: str = 'mod_tls', http_version: int = 2,
-                 threads: int = None, log_level: str = "info"):
+                 threads: int = None, ):
         self.env = env
         self.domain_a = self.env.domain_a
+        self._server = server
         self._clients = clients
         self._requests = requests
         self._file_count = file_count
         self._file_sizes = file_sizes
         self._ssl_module = ssl_module
         self._http_version = http_version
-        self._threads = threads if threads is not None else min(16, self._clients)
-        self._log_level = log_level
+        self._threads = threads if threads is not None else \
+            min(multiprocessing.cpu_count()/2, self._clients)
         self._url_file = "{gen_dir}/h2load-urls.txt".format(gen_dir=self.env.gen_dir)
 
     @staticmethod
     def from_scenario(scenario: Dict, env: TlsTestEnv) -> 'MultiFileLoadTest':
         return MultiFileLoadTest(
             env=env,
+            server=scenario['server'],
             clients=scenario['clients'], requests=scenario['requests'],
             file_sizes=scenario['file_sizes'], file_count=scenario['file_count'],
             ssl_module=scenario['module'], http_version=scenario['http']
@@ -315,12 +314,7 @@ class MultiFileLoadTest(LoadTest):
     def _setup(self):
         conf = TlsTestConf(env=self.env)
         extras = {
-            'base': """
-        LogLevel tls:{log_level}
-        Protocols h2 http/1.1
-        """.format(
-                log_level=self._log_level,
-            )
+            'base': self._server
         }
         if 'mod_tls' == self._ssl_module:
             conf.add_vhosts(domains=[self.domain_a], extras=extras)
@@ -369,7 +363,6 @@ class MultiFileLoadTest(LoadTest):
             args = [
                 'h2load',
                 '--clients={0}'.format(self._clients),
-                '--threads={0}'.format(self._threads),
                 '--requests={0}'.format(self._requests),
                 '--input-file={0}'.format(self._url_file),
                 '--log-file={0}'.format(log_file),
@@ -377,6 +370,8 @@ class MultiFileLoadTest(LoadTest):
             ]
             if self._http_version == 1:
                 args.append('--h1')
+            else:
+                args.extend(['-m', "1"])
             r = self.env.run(args + [
                 '--base-uri=https://{0}:{1}/'.format(
                     self.domain_a, self.env.https_port)
@@ -448,9 +443,22 @@ class LoadTest:
         try:
             log.debug("starting tests")
 
+            server_config = """
+        LogLevel tls:info
+        Protocols h2 http/1.1
+        KeepAliveTimeout 60
+        MaxKeepAliveRequests 0
+        MaxConnectionsPerChild 0
+        MaxRequestWorkers 1024
+        StartServers 4
+        ServerLimit 4
+        ThreadLimit 2048
+                """
+
             scenario_sf = {
                 "title": "sizes and throughput (MB/s)",
                 "class": SingleFileLoadTest,
+                "server": server_config,
                 "clients": 0,
                 "row0_title": "module protocol",
                 "row_title": "{module} h{http}",
@@ -466,6 +474,7 @@ class LoadTest:
             scenario_mf = {
                 "title": "connections and throughput (MB/s)",
                 "class": MultiFileLoadTest,
+                "server": server_config,
                 "file_count": 1024,
                 "file_sizes": [1, 2, 3, 4, 5, 10, 20, 30, 40, 50, 100, 10000],
                 "requests": 10000,
@@ -513,14 +522,14 @@ class LoadTest:
                     ],
                 }),
                 "1k-files": cls.scenario_with(scenario_mf, {
-                    "title": "1000 files, 1k-10MB, *conn, 10k req, (req/s/conn)",
+                    "title": "1k files, 1k-10MB, *conn, 10k req, (req/s/conn)",
                     "clients": 1,
                     "columns": [
                         {"clients": 1},
-                        {"clients": 2},
-                        {"clients": 5},
-                        {"clients": 10},
-                        {"clients": 20},
+                        {"clients": 4},
+                        {"clients": 16},
+                        {"clients": 64},
+                        {"clients": 256},
                     ],
                 }),
             }
