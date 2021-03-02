@@ -1,3 +1,7 @@
+ * The module now also allows certificate configuration via the new central
+   hookes. A future mod_md will provide ACME certificate this way.
+ * Updated patch file for the Apache httpd 2.4.x release line with the latest
+   necessary changes to run the module.
  * Fixes in output handling to pass meta buckets in their proper location down
    to the network.
  * Test can be run with another mpm by setting the environment variable MPM:

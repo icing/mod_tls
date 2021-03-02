@@ -90,29 +90,77 @@ static apr_status_t server_conf_setup(
         rv = APR_ENOMEM; goto cleanup;
     }
 
+    certified_keys = apr_array_make(p, 2, sizeof(rustls_cipher_certified_key *));
     if (sc->certificates->nelts > 0) {
-        certified_keys = apr_array_make(p, 2, sizeof(rustls_cipher_certified_key *));
         for (i = 0; i < sc->certificates->nelts; ++i) {
             tls_certificate_t *spec = APR_ARRAY_IDX(sc->certificates, i, tls_certificate_t*);
-            tls_util_cert_pem_t *pems;
             const rustls_cipher_certified_key *ckey = NULL;
 
-            rv = tls_util_load_pem(ptemp, spec, &pems);
+            rv = tls_util_load_certified_key(ptemp, spec, &ckey);
             if (APR_SUCCESS != rv) goto cleanup;
-            ap_log_error(APLOG_MARK, APLOG_TRACE2, rv, sc->server,
-                "tls_core_init: loaded pem data: %s (%ld), %s (%ld)",
-                spec->cert_file, (long)pems->cert_pem_len,
-                spec->pkey_file, (long)pems->pkey_pem_len
-                );
-
-            rr = rustls_cipher_certified_key_build(
-                pems->cert_pem_bytes, pems->cert_pem_len,
-                pems->pkey_pem_bytes, pems->pkey_pem_len,
-                &ckey);
-            if (RUSTLS_RESULT_OK != rr) goto cleanup;
             APR_ARRAY_PUSH(certified_keys, const rustls_cipher_certified_key*) = ckey;
         }
+    }
 
+    if (1) {
+        apr_array_header_t *cert_files = apr_array_make(p, 2, sizeof(const char*));
+        apr_array_header_t *key_files = apr_array_make(p, 2, sizeof(const char*));
+
+        rv = ap_ssl_add_cert_files(sc->server, p, cert_files, key_files);
+        if (APR_SUCCESS != rv) goto cleanup;
+        if (cert_files->nelts != key_files->nelts) {
+            ap_log_error(APLOG_MARK, APLOG_ERR, rv, sc->server, APLOGNO()
+                         "Failed to configure server %s: added certificates and keys do not match."
+                         " %d certificate files and %d key files were added",
+                         sc->server->server_hostname, cert_files->nelts, key_files->nelts);
+            rv = APR_EGENERAL; goto cleanup;
+        }
+        if (cert_files->nelts > 0) {
+            for (i = 0; i < cert_files->nelts; ++i) {
+                tls_certificate_t spec;
+                const rustls_cipher_certified_key *ckey = NULL;
+
+                spec.cert_file = APR_ARRAY_IDX(cert_files, i, const char*);
+                spec.pkey_file = APR_ARRAY_IDX(key_files, i, const char*);
+                rv = tls_util_load_certified_key(ptemp, &spec, &ckey);
+                if (APR_SUCCESS != rv) goto cleanup;
+                APR_ARRAY_PUSH(certified_keys, const rustls_cipher_certified_key*) = ckey;
+            }
+        }
+
+        if (apr_is_empty_array(certified_keys)) {
+            apr_array_clear(cert_files);
+            apr_array_clear(key_files);
+            rv = ap_ssl_add_fallback_cert_files(sc->server, p, cert_files, key_files);
+            if (APR_SUCCESS != rv) goto cleanup;
+            if (cert_files->nelts != key_files->nelts) {
+                ap_log_error(APLOG_MARK, APLOG_ERR, rv, sc->server, APLOGNO()
+                             "Failed to configure server %s: added certificates and keys do not match."
+                             " %d certificate files and %d key files were added",
+                             sc->server->server_hostname, cert_files->nelts, key_files->nelts);
+                rv = APR_EGENERAL; goto cleanup;
+            }
+            if (cert_files->nelts > 0) {
+                for (i = 0; i < cert_files->nelts; ++i) {
+                    tls_certificate_t spec;
+                    const rustls_cipher_certified_key *ckey = NULL;
+
+                    spec.cert_file = APR_ARRAY_IDX(cert_files, i, const char*);
+                    spec.pkey_file = APR_ARRAY_IDX(key_files, i, const char*);
+                    rv = tls_util_load_certified_key(ptemp, &spec, &ckey);
+                    if (APR_SUCCESS != rv) goto cleanup;
+                    APR_ARRAY_PUSH(certified_keys, const rustls_cipher_certified_key*) = ckey;
+                }
+                sc->service_unavailable = 1;
+                ap_log_error(APLOG_MARK, APLOG_WARNING, 0, sc->server, APLOGNO()
+                             "Init: %s will respond with '503 Service Unavailable' for now. There "
+                             "are no SSL certificates configured and no other module contributed any.",
+                             sc->server->server_hostname);
+            }
+        }
+    }
+
+    if (certified_keys->nelts > 0) {
         rr = rustls_server_config_builder_set_certified_keys(
             rustls_builder,
             (const rustls_cipher_certified_key**)certified_keys->elts,
@@ -155,7 +203,7 @@ cleanup:
         const char *err_descr;
         rv = tls_util_rustls_error(ptemp, rr, &err_descr);
         ap_log_error(APLOG_MARK, APLOG_ERR, rv, sc->server, APLOGNO()
-                     "Failed to configure serverr %s: [%d] %s",
+                     "Failed to configure server %s: [%d] %s",
                      sc->server->server_hostname, (int)rr, err_descr);
         goto cleanup;
     }
@@ -340,6 +388,7 @@ apr_status_t tls_core_conn_server_init(conn_rec *c)
     tls_conf_server_t *sc;
     rustls_server_config_builder *builder = NULL;
     const rustls_server_config *config = NULL;
+    const char *cert_file, *pkey_file;
     rustls_result rr = RUSTLS_RESULT_OK;
     apr_status_t rv = APR_SUCCESS;
 
@@ -353,6 +402,18 @@ apr_status_t tls_core_conn_server_init(conn_rec *c)
                     "vhost_init: virtual host found for SNI '%s'", cc->sni_hostname);
                 /* reinit, we might have a new server selected */
                 sc = tls_conf_server_get(cc->server);
+            }
+            else if (ap_ssl_answer_challenge(c, cc->sni_hostname, &cert_file, &pkey_file)) {
+                /* With ACME we can have challenge connections to a unknown domains
+                 * that need to be answered with a special certificate and will
+                 * otherwise not answer any requests. See RFC 8555 */
+                /* TODO: setup a special server config for this
+                 * TODO: in the mod_ssl case, ALPN has been handled already at this point
+                if (set_challenge_creds(c, servername, ssl, cert, key) != APR_SUCCESS) {
+                    return APR_EGENERAL;
+                }
+                SSL_set_verify(ssl, SSL_VERIFY_NONE, ssl_callback_SSLVerify);
+                */
             }
             else {
                 ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, c, APLOGNO()

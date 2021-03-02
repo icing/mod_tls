@@ -114,6 +114,38 @@ cleanup:
     return rv;
 }
 
+apr_status_t tls_util_load_certified_key(
+    apr_pool_t *p, tls_certificate_t *spec, const rustls_cipher_certified_key **pckey)
+{
+    tls_util_cert_pem_t *pems;
+    const rustls_cipher_certified_key *ckey = NULL;
+    rustls_result rr = RUSTLS_RESULT_OK;
+    apr_status_t rv;
+
+    rv = tls_util_load_pem(p, spec, &pems);
+    if (APR_SUCCESS != rv) goto cleanup;
+    rr = rustls_cipher_certified_key_build(
+        pems->cert_pem_bytes, pems->cert_pem_len,
+        pems->pkey_pem_bytes, pems->pkey_pem_len,
+        &ckey);
+
+cleanup:
+    if (RUSTLS_RESULT_OK != rr) {
+        const char *err_descr;
+        rv = tls_util_rustls_error(p, rr, &err_descr);
+        ap_log_perror(APLOG_MARK, APLOG_ERR, rv, p, APLOGNO()
+                     "Failed to load certified key %s: [%d] %s",
+                     spec->cert_file, (int)rr, err_descr);
+    }
+    if (APR_SUCCESS == rv) {
+        *pckey = ckey;
+    }
+    else if (ckey) {
+        rustls_cipher_certified_key_free(ckey);
+    }
+    return rv;
+}
+
 apr_status_t tls_util_brigade_transfer(
     apr_bucket_brigade *dest, apr_bucket_brigade *src, apr_off_t length,
     apr_off_t *pnout)

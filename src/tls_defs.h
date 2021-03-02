@@ -40,7 +40,7 @@ typedef struct {
  * in the post config phase. Readonly after that.
  */
 typedef struct {
-    const server_rec *server;         /* server this config belongs to */
+    server_rec *server;         /* server this config belongs to */
     const char *name;
     tls_conf_global_t *global;        /* global module config, singleton */
 
@@ -48,6 +48,7 @@ typedef struct {
     apr_array_header_t *certificates; /* array of (tls_certificate_t*) available for server_rec */
     int tls_proto;                    /* the minimum TLS protocol version */
     int honor_client_order;           /* honor client cipher ordering */
+    int service_unavailable;          /* TLS not trustworthy configured, return 503s */
     const rustls_server_config *rustls_config; /* config to use for TLS against this very server */
 } tls_conf_server_t;
 
