@@ -32,6 +32,8 @@ typedef struct {
     int client_hello_seen;            /* the client hello has been inspected */
     const char *sni_hostname;         /* the SNI value from the client hello, if present */
     const apr_array_header_t *alpn;   /* the protocols proposed via ALPN by the client */
+    const char *protocol_selected;    /* the ALPN selected a protocol or NULL if not done yet */
+    int service_unavailable;          /* we 503 all requests on this connection */
 
     struct tls_filter_ctx_t *filter_ctx;
 } tls_conf_conn_t;

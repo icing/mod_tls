@@ -16,6 +16,8 @@
 typedef struct {
     const char *cert_file;
     const char *pkey_file;
+    const char *cert_pem;
+    const char *pkey_pem;
 } tls_certificate_t;
 
 /* Configuration flags */

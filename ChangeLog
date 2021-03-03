@@ -1,3 +1,5 @@
+ * Added support for setting challenge certificates using the new (apache trunk)
+   hooks and functions. ACME tls-alpn-01 support incoming.
  * The module now also allows certificate configuration via the new central
    hookes. A future mod_md will provide ACME certificate this way.
  * Updated patch file for the Apache httpd 2.4.x release line with the latest
