@@ -297,7 +297,7 @@ static const rustls_cipher_certified_key *tls_conn_hello_cb(
     if (hello->signature_schemes.len > 0) {
         for (i = 0; i < hello->signature_schemes.len; ++i) {
             n = hello->signature_schemes.data[i];
-            rustls_cipher_get_signature_scheme_name(n, buffer, sizeof(buffer), &len);
+            rustls_signature_scheme_get_name(n, buffer, sizeof(buffer), &len);
             ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, c,
                 "client supports signature scheme: %.*s", (int)len, buffer);
         }
@@ -526,6 +526,45 @@ cleanup:
         c->aborted = 1;
         goto cleanup;
     }
+    return rv;
+}
+
+apr_status_t tls_core_conn_post_handshake(conn_rec *c)
+{
+    tls_conf_conn_t *cc = tls_conf_conn_get(c);
+    apr_status_t rv = APR_SUCCESS;
+    char buffer[HUGE_STRING_LEN];
+    apr_size_t len;
+    unsigned short n;
+
+    if (rustls_server_session_is_handshaking(cc->rustls_session)) {
+        rv = APR_EGENERAL;
+        ap_log_error(APLOG_MARK, APLOG_ERR, rv, cc->server, APLOGNO()
+                     "post handshake, but rustls claims to still be handshaking %s",
+                     cc->server->server_hostname);
+        goto cleanup;
+    }
+
+    n = rustls_server_session_get_protocol_version(cc->rustls_session);
+    switch (n) {
+    case TLS_VERSION_1_2:
+        cc->tls_version = "TLSv1.2";
+        break;
+    case TLS_VERSION_1_3:
+        cc->tls_version = "TLSv1.3";
+        break;
+    default:
+        cc->tls_version = apr_psprintf(c->pool, "TLSv(%0x)", n);
+        break;
+    }
+
+    n = rustls_server_session_get_negotiated_ciphersuite(cc->rustls_session);
+    rustls_ciphersuite_get_name(n, buffer, sizeof(buffer), &len);
+    cc->tls_ciphersuite = apr_pstrndup(c->pool, buffer, len);
+    ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, c, "post_handshake %s: %s [%s]",
+        cc->server->server_hostname, cc->tls_version, cc->tls_ciphersuite);
+
+cleanup:
     return rv;
 }
 

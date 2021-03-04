@@ -291,16 +291,22 @@ static apr_status_t filter_do_handshake(
 {
     apr_status_t rv = APR_SUCCESS;
 
-    while (rustls_server_session_is_handshaking(fctx->cc->rustls_session)) {
-        if (rustls_server_session_wants_read(fctx->cc->rustls_session)) {
-            fctx->fin_block = APR_BLOCK_READ;
-            rv = read_tls_to_rustls(fctx, fctx->fin_max_in_rustls);
-            if (APR_SUCCESS != rv) goto cleanup;
+    if (rustls_server_session_is_handshaking(fctx->cc->rustls_session)) {
+        do {
+            if (rustls_server_session_wants_read(fctx->cc->rustls_session)) {
+                fctx->fin_block = APR_BLOCK_READ;
+                rv = read_tls_to_rustls(fctx, fctx->fin_max_in_rustls);
+                if (APR_SUCCESS != rv) goto cleanup;
+            }
+            if (rustls_server_session_wants_write(fctx->cc->rustls_session)) {
+                rv = flush_tls_from_rustls(fctx);
+                if (APR_SUCCESS != rv) goto cleanup;
+            }
         }
-        if (rustls_server_session_wants_write(fctx->cc->rustls_session)) {
-            rv = flush_tls_from_rustls(fctx);
-            if (APR_SUCCESS != rv) goto cleanup;
-        }
+        while (rustls_server_session_is_handshaking(fctx->cc->rustls_session));
+
+        rv = tls_core_conn_post_handshake(fctx->c);
+        if (APR_SUCCESS != rv) goto cleanup;
     }
 cleanup:
     if (APR_SUCCESS != rv && !APR_STATUS_IS_EAGAIN(rv)) {

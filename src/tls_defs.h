@@ -27,8 +27,8 @@ typedef struct {
 
 /* The minimal TLS protocol version to use */
 #define TLS_PROTO_AUTO  0
-#define TLS_PROTO_1_2   2
-#define TLS_PROTO_1_3   3
+#define TLS_VERSION_1_2   0x0303
+#define TLS_VERSION_1_3   0x0304
 
 /* The global module configuration, created after post-config
  * and then readonly.

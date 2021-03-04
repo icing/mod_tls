@@ -33,6 +33,8 @@ typedef struct {
     const char *sni_hostname;         /* the SNI value from the client hello, if present */
     const apr_array_header_t *alpn;   /* the protocols proposed via ALPN by the client */
     const char *protocol_selected;    /* the ALPN selected a protocol or NULL if not done yet */
+    const char *tls_version;          /* the TLS version negotiated as string */
+    const char *tls_ciphersuite;      /* the TLS cipher suite negotiated as string */
     int service_unavailable;          /* we 503 all requests on this connection */
 
     struct tls_filter_ctx_t *filter_ctx;
@@ -69,6 +71,11 @@ int tls_core_conn_base_init(conn_rec *c);
  * rustls session, etc.
  */
 apr_status_t tls_core_conn_server_init(conn_rec *c);
+
+/**
+ * Called when the TLS handshake has completed.
+ */
+apr_status_t tls_core_conn_post_handshake(conn_rec *c);
 
 /**
  * After a request has been read, but before processing is started, we

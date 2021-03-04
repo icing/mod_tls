@@ -234,9 +234,9 @@ static const char *tls_conf_set_protocol(
     if (!strcasecmp(v, "auto")) {
         sc->tls_proto = TLS_PROTO_AUTO;
     } else if (!strcasecmp(v, "v1.2+")) {
-        sc->tls_proto = TLS_PROTO_1_2;
+        sc->tls_proto = TLS_VERSION_1_2;
     } else if (!strcasecmp(v, "v1.3+")) {
-        sc->tls_proto = TLS_PROTO_1_3;
+        sc->tls_proto = TLS_VERSION_1_3;
     } else {
         return apr_pstrcat(cmd->pool, cmd->cmd->name,
             ": value must be 'auto', 'v1.2+' or 'v1.3+': '", v, "'", NULL);

@@ -39,10 +39,10 @@ const char *tls_var_lookup(
         if (strncasecmp(name, "SSL_", 4)) goto cleanup; /* not for us */
         name += 4;
         if (0 == strcasecmp(name, "PROTOCOL")) {
-            val = "TLSv1.2"; /* TODO: how to ask rustls for this? */
+            val = cc->tls_version;
         }
         else if (0 == strcasecmp(name, "CIPHER")) {
-            val = "unknown"; /* TODO: how to ask rustls for this? */
+            val = cc->tls_ciphersuite;
         }
         ap_log_cerror(APLOG_MARK, APLOG_TRACE3, 0, c, "tls lookup of var '%s' -> '%s'", name, val);
     }
