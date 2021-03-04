@@ -283,7 +283,6 @@ static const rustls_cipher_certified_key *tls_conn_hello_cb(
     char buffer[HUGE_STRING_LEN];
     size_t i, len;
     unsigned short n;
-    const rustls_slice_bytes *rs;
 
     if (!cc) goto cleanup;
     cc->client_hello_seen = 1;
@@ -303,14 +302,13 @@ static const rustls_cipher_certified_key *tls_conn_hello_cb(
                 "client supports signature scheme: %.*s", (int)len, buffer);
         }
     }
-    if (hello->alpn.len > 0) {
+    if ((len = rustls_slice_slice_bytes_len(hello->alpn)) > 0) {
         apr_array_header_t *alpn = apr_array_make(c->pool, 5, sizeof(const char*));
         const char *protocol;
-        ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, c,
-            "ALPN: client proposes %d protocols", (int)hello->alpn.len);
-        for (i = 0; i < hello->alpn.len; ++i) {
-            rs = &hello->alpn.data[i];
-            protocol = apr_pstrndup(c->pool, (const char*)rs->data, rs->len);
+        ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, c, "ALPN: client proposes %d protocols", (int)len);
+        for (i = 0; i < len; ++i) {
+            rustls_slice_bytes rs = rustls_slice_slice_bytes_get(hello->alpn, i);
+            protocol = apr_pstrndup(c->pool, (const char*)rs.data, rs.len);
             APR_ARRAY_PUSH(alpn, const char*) = protocol;
             ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, c,
                 "ALPN: client proposes `%s`", protocol);
