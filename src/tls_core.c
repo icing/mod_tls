@@ -147,6 +147,9 @@ static apr_status_t server_conf_setup(
     (void)p;
     if (!sc || sc->enabled != TLS_FLAG_TRUE) goto cleanup;
 
+    rv = tls_conf_server_apply_defaults(sc, p);
+    if (APR_SUCCESS != rv) goto cleanup;
+
     builder = rustls_server_config_builder_new();
     if (!builder) {
         rv = APR_ENOMEM; goto cleanup;
@@ -176,14 +179,42 @@ static apr_status_t server_conf_setup(
     rv = use_certificates(builder, ptemp, sc->server, certificates);
     if (APR_SUCCESS != rv) goto cleanup;
 
-    if (sc->tls_proto > TLS_PROTO_AUTO) {
-        /* TODO: set the minimum TLS protocol version to use. */
+    if (sc->tls_protocols != TLS_PROTOCOL_AUTO) {
+        apr_array_header_t *tls_versions = apr_array_make(ptemp, 3, sizeof(apr_uint16_t));
+        if (sc->tls_protocols & TLS_PROTOCOL_1_3) {
+            *(apr_uint16_t *)apr_array_push(tls_versions) = TLS_VERSION_1_3;
+        }
+        if (sc->tls_protocols & TLS_PROTOCOL_1_2) {
+            *(apr_uint16_t *)apr_array_push(tls_versions) = TLS_VERSION_1_2;
+        }
+        if (tls_versions->nelts > 0) {
+            rr = rustls_server_config_builder_set_versions(builder,
+                (const apr_uint16_t*)tls_versions->elts, (apr_size_t)tls_versions->nelts);
+            if (RUSTLS_RESULT_OK != rr) goto cleanup;
+        }
     }
 
-    rr = rustls_server_config_builder_set_ignore_client_order(builder, !sc->honor_client_order);
+    if (!apr_is_empty_array(sc->tls_ciphers)) {
+        apr_array_header_t *cipher_ids;
+        const tls_cipher_t *cipher;
+        int i;
+
+        cipher_ids = apr_array_make(ptemp, sc->tls_ciphers->nelts, sizeof(apr_uint16_t));
+        for (i = 0; i < sc->tls_ciphers->nelts; ++i) {
+            cipher = APR_ARRAY_IDX(sc->tls_ciphers, i, const tls_cipher_t*);
+            *(apr_uint16_t*)apr_array_push(cipher_ids) = cipher->id;
+        }
+        rr = rustls_server_config_builder_set_ciphersuites(builder,
+            (apr_uint16_t*)cipher_ids->elts, (apr_size_t)cipher_ids->nelts);
+        if (RUSTLS_RESULT_OK != rr) goto cleanup;
+    }
+
+    rr = rustls_server_config_builder_set_ignore_client_order(
+        builder, sc->honor_client_order == TLS_FLAG_FALSE);
     if (RUSTLS_RESULT_OK != rr) goto cleanup;
 
-    {
+    /* whatever we negotiate later on a connection, the base we start with is http/1.1 */
+    if (1) {
         rustls_slice_bytes rsb = {
             (const unsigned char*)"http/1.1",
             sizeof("http/1.1")-1,
@@ -213,6 +244,18 @@ cleanup:
     return rv;
 }
 
+static int log_cipher(void *userdata, const void *key, apr_ssize_t klen, const void *entry)
+{
+    tls_iter_ctx_t *ctx = userdata;
+    const tls_cipher_t *cipher = entry;
+
+    (void)key;
+    (void)klen;
+    ap_log_error(APLOG_MARK, APLOG_TRACE3, 0, ctx->s,
+        "supported cipher: %x %s", cipher->id, cipher->name);
+    return 1;
+}
+
 apr_status_t tls_core_init(apr_pool_t *p, apr_pool_t *ptemp, server_rec *base_server)
 {
     tls_conf_server_t *sc = tls_conf_server_get(base_server);
@@ -223,6 +266,18 @@ apr_status_t tls_core_init(apr_pool_t *p, apr_pool_t *ptemp, server_rec *base_se
     ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, base_server, "tls_core_init");
     apr_pool_cleanup_register(p, base_server, tls_core_free,
                               apr_pool_cleanup_null);
+
+    if (APLOGtrace3(base_server)) {
+        tls_iter_ctx_t ctx;
+
+        ap_log_error(APLOG_MARK, APLOG_TRACE3, 0, base_server,
+            "%d ciphers supported by rustls detected.",
+            apr_hash_count(gc->supported_ciphers));
+        memset(&ctx, 0, sizeof(ctx));
+        ctx.pool = p;
+        ctx.s = base_server;
+        apr_hash_do(log_cipher, &ctx, gc->supported_ciphers);
+    }
 
     for (s = base_server; s; s = s->next) {
         sc = tls_conf_server_get(s);
@@ -554,7 +609,7 @@ apr_status_t tls_core_conn_post_handshake(conn_rec *c)
         cc->tls_version = "TLSv1.3";
         break;
     default:
-        cc->tls_version = apr_psprintf(c->pool, "TLSv(%0x)", n);
+        cc->tls_version = apr_psprintf(c->pool, "TLSv-%0x", n);
         break;
     }
 

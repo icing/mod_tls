@@ -1,3 +1,5 @@
+ * Configuration directives 'TLSProtocols' and 'TLSCiphers' implemented. Test
+   cases added.
  * Added support for setting challenge certificates using the new (apache trunk)
    hooks and functions. ACME tls-alpn-01 support incoming.
  * The module now also allows certificate configuration via the new central

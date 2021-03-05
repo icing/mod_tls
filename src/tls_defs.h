@@ -20,39 +20,32 @@ typedef struct {
     const char *pkey_pem;
 } tls_certificate_t;
 
+typedef struct {
+    const char *name;
+    apr_uint16_t id;
+} tls_cipher_t;
+
 /* Configuration flags */
 #define TLS_FLAG_UNSET  (-1)
 #define TLS_FLAG_FALSE  (0)
 #define TLS_FLAG_TRUE   (1)
 
-/* The minimal TLS protocol version to use */
-#define TLS_PROTO_AUTO  0
 #define TLS_VERSION_1_2   0x0303
 #define TLS_VERSION_1_3   0x0304
 
-/* The global module configuration, created after post-config
- * and then readonly.
- */
-typedef struct {
-    server_addr_rec *tls_addresses;   /* the addresses/port we are active on */
-} tls_conf_global_t;
+/* The TLS protocol version to use */
+#define TLS_PROTOCOL_AUTO  0x00
+#define TLS_PROTOCOL_1_2   0x01
+#define TLS_PROTOCOL_1_3   0x02
 
-/* The module configuration for a server (vhost).
- * Populated during config parsing, merged and completed
- * in the post config phase. Readonly after that.
- */
+/* An iteration context that hold userdata and a pool for allocations. */
 typedef struct {
-    server_rec *server;         /* server this config belongs to */
-    const char *name;
-    tls_conf_global_t *global;        /* global module config, singleton */
-
-    int enabled;
-    apr_array_header_t *certificates; /* array of (tls_certificate_t*) available for server_rec */
-    int tls_proto;                    /* the minimum TLS protocol version */
-    int honor_client_order;           /* honor client cipher ordering */
-    int service_unavailable;          /* TLS not trustworthy configured, return 503s */
-    const rustls_server_config *rustls_config; /* config to use for TLS against this very server */
-} tls_conf_server_t;
+    apr_pool_t *pool;
+    server_rec *s;
+    conn_rec *c;
+    request_rec *r;
+    void *userdata;
+} tls_iter_ctx_t;
 
 
 #endif /* tls_def_h */
