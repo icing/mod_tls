@@ -1,31 +1,31 @@
-Index: changes-entries/core_ssl_functions.txt
-===================================================================
 Index: include/ap_mmn.h
 ===================================================================
---- include/ap_mmn.h	(Revision 1886944)
+--- include/ap_mmn.h	(Revision 1887085)
 +++ include/ap_mmn.h	(Arbeitskopie)
-@@ -548,6 +548,7 @@
+@@ -548,6 +548,9 @@
   * 20120211.100 (2.4.47-dev) Add ap_proxy_prefetch_input(),
   *                           ap_proxy_spool_input() and
   *                           ap_proxy_read_input().
 + * 20120211.101 (2.4.47-dev)  Add ap_ssl_conn_is_ssl()/ap_ssl_var_lookup() and hooks
++ * 20120211.102 (2.4.47-dev)  Add ap_ssl_add_cert_files, ap_ssl_add_fallback_cert_files
++ *                          and ap_ssl_answer_challenge and hooks.
   */
  
  #define MODULE_MAGIC_COOKIE 0x41503234UL /* "AP24" */
-@@ -555,7 +556,7 @@
+@@ -555,7 +558,7 @@
  #ifndef MODULE_MAGIC_NUMBER_MAJOR
  #define MODULE_MAGIC_NUMBER_MAJOR 20120211
  #endif
 -#define MODULE_MAGIC_NUMBER_MINOR 100                 /* 0...n */
-+#define MODULE_MAGIC_NUMBER_MINOR 101                 /* 0...n */
++#define MODULE_MAGIC_NUMBER_MINOR 102                 /* 0...n */
  
  /**
   * Determine if the server's current MODULE_MAGIC_NUMBER is at least a
 Index: include/http_protocol.h
 ===================================================================
---- include/http_protocol.h	(Revision 1886944)
+--- include/http_protocol.h	(Revision 1887085)
 +++ include/http_protocol.h	(Arbeitskopie)
-@@ -1025,6 +1025,66 @@
+@@ -1025,6 +1025,151 @@
   */
  AP_DECLARE(void) ap_send_interim_response(request_rec *r, int send_headers);
  
@@ -89,12 +89,245 @@ Index: include/http_protocol.h
 +                                           conn_rec *c, request_rec *r,
 +                                           const char *name);                                           
 +
++/**
++ * Register to provide certificate/key files for servers. Certificate files are
++ * exepcted to contain the certificate chain, beginning with the server's certificate,
++ * excluding the trust anchor, in PEM format. 
++ * They must be accompanied by a private key file, also in PEM format.
++ *  
++ * @param s the server certificates are collected for
++ * @param p the pool to use for allocations
++ * @param cert_file and array of const char* with the path to the certificate chain
++ * @param key_file and array of const char* with the path to the private key file
++ * @return OK if files were added, DECLINED if not, or other for error.
++ */
++
++AP_DECLARE_HOOK(int, ssl_add_cert_files, (server_rec *s, apr_pool_t *p,
++                                          apr_array_header_t *cert_files,
++                                          apr_array_header_t *key_files))
++
++/**
++ * Collect certificate/key files from all providers registered. This includes
++ * providers registered at the global 'ssl_add_cert_files', as well as those
++ * installed in the OPTIONAL 'ssl_add_cert_files' hook as may be provided by 
++ * ssl modules.
++ *  
++ * @param s the server certificates are collected for
++ * @param p the pool to use for allocations
++ * @param cert_file and array of const char* with the path to the certificate chain
++ * @param key_file and array of const char* with the path to the private key file
++ */
++AP_DECLARE(apr_status_t) ap_ssl_add_cert_files(server_rec *s, apr_pool_t *p,
++                                               apr_array_header_t *cert_files,
++                                               apr_array_header_t *key_files);         
++
++
++/** 
++ * Register to provide 'fallback' certificates in case no 'real' certificates
++ * have been configured/added by other providers. Modules using these certificates
++ * are encouraged to answer requests to this server with a 503 response code.
++ * 
++ * @param s the server certificates are collected for
++ * @param p the pool to use for allocations
++ * @param cert_file and array of const char* with the path to the certificate chain
++ * @param key_file and array of const char* with the path to the private key file
++ * @return OK if files were added, DECLINED if not, or other for error.
++ */
++AP_DECLARE_HOOK(int, ssl_add_fallback_cert_files, (server_rec *s, apr_pool_t *p,
++                                                   apr_array_header_t *cert_files,
++                                                   apr_array_header_t *key_files))
++
++/**
++ * Collect 'fallback' certificate/key files from all registered providers, either
++ * in the global 'ssl_add_fallback_cert_files' hook or the optional one of similar
++ * name as provided by mod_ssl and sorts.
++ * Certificates obtained this way are commonly self signed, temporary crutches.
++ * To be used to the time it takes to retrieve a 'read', trusted certificate. 
++ * A module using fallbacks is encouraged to answer all requests with a 503.
++ * 
++ * @param s the server certificates are collected for
++ * @param p the pool to use for allocations
++ * @param cert_file and array of const char* with the path to the certificate chain
++ * @param key_file and array of const char* with the path to the private key file
++ */
++AP_DECLARE(apr_status_t) ap_ssl_add_fallback_cert_files(server_rec *s, apr_pool_t *p,
++                                                        apr_array_header_t *cert_files,
++                                                        apr_array_header_t *key_files);         
++
++
++/** 
++ * On TLS connections that do not relate to a configured virtual host,
++ * allow modules to provide a certificate and key to
++ * be used on the connection. 
++ */
++AP_DECLARE_HOOK(int, ssl_answer_challenge, (conn_rec *c, const char *server_name, 
++                                            const char **pcert_file, const char **pkey_file))
++
++/**
++ * Returns != 0 iff the connection is a challenge to the server, for example
++ * as defined in RFC 8555 for the 'tls-alpn-01' domain verification, and needs
++ * a specific certificate as answer in the handshake.
++ * ALPN protocol negotiation via the hooks 'protocol_propose' and 'protocol_switch'
++ * need to have run before this call is made.
++ */
++AP_DECLARE(int) ap_ssl_answer_challenge(conn_rec *c, const char *server_name, 
++                                        const char **pcert_file, const char **pkey_file);
++
++
  #ifdef __cplusplus
  }
  #endif
+Index: modules/md/mod_md.c
+===================================================================
+--- modules/md/mod_md.c	(Revision 1887085)
++++ modules/md/mod_md.c	(Arbeitskopie)
+@@ -1237,7 +1237,7 @@
+                                X509 **pcert, EVP_PKEY **pkey)
+ {
+     if (md_is_challenge(c, servername, pcert, pkey)) {
+-        return APR_SUCCESS;
++        return OK;
+     }
+     return DECLINED;
+ }
+Index: modules/ssl/ssl_engine_init.c
+===================================================================
+--- modules/ssl/ssl_engine_init.c	(Revision 1887085)
++++ modules/ssl/ssl_engine_init.c	(Arbeitskopie)
+@@ -195,13 +195,18 @@
+ */
+ 
+ int ssl_is_challenge(conn_rec *c, const char *servername, 
+-                     X509 **pcert, EVP_PKEY **pkey)
++                     X509 **pcert, EVP_PKEY **pkey,
++                     const char **pcert_file, const char **pkey_file)
+ {
+-    if (APR_SUCCESS == ssl_run_answer_challenge(c, servername, pcert, pkey)) {
++    *pcert = NULL;
++    *pkey = NULL;
++    *pcert_file = *pkey_file = NULL;
++    if (ap_ssl_answer_challenge(c, servername, pcert_file, pkey_file)) {
+         return 1;
+     }
+-    *pcert = NULL;
+-    *pkey = NULL;
++    else if (OK == ssl_run_answer_challenge(c, servername, pcert, pkey)) {
++        return 1;
++    }
+     return 0;
+ }
+ 
+@@ -1805,10 +1810,12 @@
+     /* Allow others to provide certificate files */
+     pks = sc->server->pks;
+     n = pks->cert_files->nelts;
++    ap_ssl_add_cert_files(s, p, pks->cert_files, pks->key_files);
+     ssl_run_add_cert_files(s, p, pks->cert_files, pks->key_files);
+ 
+     if (apr_is_empty_array(pks->cert_files)) {
+         /* does someone propose a certiciate to fall back on here? */
++        ap_ssl_add_fallback_cert_files(s, p, pks->cert_files, pks->key_files);
+         ssl_run_add_fallback_cert_files(s, p, pks->cert_files, pks->key_files);
+         if (n < pks->cert_files->nelts) {
+             pks->service_unavailable = 1;
+Index: modules/ssl/ssl_engine_kernel.c
+===================================================================
+--- modules/ssl/ssl_engine_kernel.c	(Revision 1887085)
++++ modules/ssl/ssl_engine_kernel.c	(Arbeitskopie)
+@@ -2316,11 +2316,29 @@
+ #ifdef HAVE_TLSEXT
+ 
+ static apr_status_t set_challenge_creds(conn_rec *c, const char *servername,
+-                                        SSL *ssl, X509 *cert, EVP_PKEY *key)
++                                        SSL *ssl, X509 *cert, EVP_PKEY *key,
++                                        const char *cert_file, const char *key_file)
+ {
+     SSLConnRec *sslcon = myConnConfig(c);
+     
+     sslcon->service_unavailable = 1;
++    if (cert_file) {
++        if (SSL_use_certificate_chain_file(ssl, cert_file) < 1) {
++            ap_log_cerror(APLOG_MARK, APLOG_WARNING, 0, c, APLOGNO()
++                          "Failed to configure challenge certificate %s",
++                          servername);
++            return APR_EGENERAL;
++        }
++        if (key_file == NULL) key_file = cert_file;
++        if (SSL_use_PrivateKey_file(ssl, key_file, SSL_FILETYPE_PEM) < 1) {
++            ap_log_cerror(APLOG_MARK, APLOG_WARNING, 0, c, APLOGNO()
++                          "Failed to configure challenge private key %s",
++                          servername);
++            return APR_EGENERAL;
++        }
++        goto check;
++    }
++    
+     if ((SSL_use_certificate(ssl, cert) < 1)) {
+         ap_log_cerror(APLOG_MARK, APLOG_WARNING, 0, c, APLOGNO(10086)
+                       "Failed to configure challenge certificate %s",
+@@ -2336,6 +2354,7 @@
+         return APR_EGENERAL;
+     }
+     
++check:
+     if (SSL_check_private_key(ssl) < 1) {
+         ap_log_cerror(APLOG_MARK, APLOG_WARNING, 0, c, APLOGNO(10088)
+                       "Challenge certificate and private key %s "
+@@ -2353,6 +2372,7 @@
+ {
+     X509 *cert;
+     EVP_PKEY *key;
++    const char *cert_file, *key_file;
+     
+     if (c) {
+         SSLConnRec *sslcon = myConnConfig(c);
+@@ -2376,11 +2396,12 @@
+                 sslcon->vhost_found = +1;
+                 return APR_SUCCESS;
+             }
+-            else if (ssl_is_challenge(c, servername, &cert, &key)) {
++            else if (ssl_is_challenge(c, servername, &cert, &key, &cert_file, &key_file)) {
+                 /* With ACMEv1 we can have challenge connections to a unknown domains
+                  * that need to be answered with a special certificate and will
+                  * otherwise not answer any requests. */
+-                if (set_challenge_creds(c, servername, ssl, cert, key) != APR_SUCCESS) {
++                if (set_challenge_creds(c, servername, ssl, cert, key, 
++                                        cert_file, key_file) != APR_SUCCESS) {
+                     return APR_EGENERAL;
+                 }
+                 SSL_set_verify(ssl, SSL_VERIFY_NONE, ssl_callback_SSLVerify);
+@@ -2759,9 +2780,11 @@
+             const char *servername = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
+             X509 *cert;
+             EVP_PKEY *key;
+-            
+-            if (ssl_is_challenge(c, servername, &cert, &key)) {
+-                if (set_challenge_creds(c, servername, ssl, cert, key) != APR_SUCCESS) {
++            const char *cert_file, *key_file;
++
++            if (ssl_is_challenge(c, servername, &cert, &key, &cert_file, &key_file)) {
++                if (set_challenge_creds(c, servername, ssl, cert, key, 
++                                        cert_file, key_file) != APR_SUCCESS) {
+                     return SSL_TLSEXT_ERR_ALERT_FATAL;
+                 }
+                 SSL_set_verify(ssl, SSL_VERIFY_NONE, ssl_callback_SSLVerify);
+Index: modules/ssl/ssl_private.h
+===================================================================
+--- modules/ssl/ssl_private.h	(Revision 1887085)
++++ modules/ssl/ssl_private.h	(Arbeitskopie)
+@@ -1122,7 +1122,8 @@
+ int modssl_request_is_tls(const request_rec *r, SSLConnRec **sslconn);
+ 
+ int ssl_is_challenge(conn_rec *c, const char *servername, 
+-                     X509 **pcert, EVP_PKEY **pkey);
++                     X509 **pcert, EVP_PKEY **pkey,
++                    const char **pcert_file, const char **pkey_file);
+ 
+ /* Returns non-zero if the cert/key filename should be handled through
+  * the configured ENGINE. */
 Index: server/core.c
 ===================================================================
---- server/core.c	(Revision 1886944)
+--- server/core.c	(Revision 1887085)
 +++ server/core.c	(Arbeitskopie)
 @@ -5072,6 +5072,7 @@
      set_banner(pconf);
@@ -106,18 +339,21 @@ Index: server/core.c
                       "Server MUST relinquish startup privileges before "
 Index: server/protocol.c
 ===================================================================
---- server/protocol.c	(Revision 1886944)
+--- server/protocol.c	(Revision 1887085)
 +++ server/protocol.c	(Arbeitskopie)
-@@ -70,6 +70,8 @@
+@@ -70,6 +70,11 @@
      APR_HOOK_LINK(protocol_propose)
      APR_HOOK_LINK(protocol_switch)
      APR_HOOK_LINK(protocol_get)
 +    APR_HOOK_LINK(ssl_conn_is_ssl)
 +    APR_HOOK_LINK(ssl_var_lookup)
++    APR_HOOK_LINK(ssl_add_cert_files) 
++    APR_HOOK_LINK(ssl_add_fallback_cert_files) 
++    APR_HOOK_LINK(ssl_answer_challenge) 
  )
  
  AP_DECLARE_DATA ap_filter_rec_t *ap_old_write_func = NULL;
-@@ -2462,7 +2464,71 @@
+@@ -2462,7 +2467,92 @@
      return !strcmp(AP_PROTOCOL_HTTP1, protocol);
  }
  
@@ -185,11 +421,32 @@ Index: server/protocol.c
 +    APR_REGISTER_OPTIONAL_FN(ssl_var_lookup);
 +}
 +
++AP_DECLARE(apr_status_t) ap_ssl_add_cert_files(server_rec *s, apr_pool_t *p,
++                                               apr_array_header_t *cert_files,
++                                               apr_array_header_t *key_files)
++{
++    int rv = ap_run_ssl_add_cert_files(s, p, cert_files, key_files);
++    return (rv == OK || rv == DECLINED)? APR_SUCCESS : APR_EGENERAL;
++}         
++
++AP_DECLARE(apr_status_t) ap_ssl_add_fallback_cert_files(server_rec *s, apr_pool_t *p,
++                                                        apr_array_header_t *cert_files,
++                                                        apr_array_header_t *key_files)
++{
++    int rv = ap_run_ssl_add_fallback_cert_files(s, p, cert_files, key_files);
++    return (rv == OK || rv == DECLINED)? APR_SUCCESS : APR_EGENERAL;
++}         
++
++AP_DECLARE(int) ap_ssl_answer_challenge(conn_rec *c, const char *server_name, 
++                                        const char **pcert_file, const char **pkey_file)
++{
++    return (ap_run_ssl_answer_challenge(c, server_name, pcert_file, pkey_file) == OK);
++}
 +
  AP_IMPLEMENT_HOOK_VOID(pre_read_request,
                         (request_rec *r, conn_rec *c),
                         (r, c))
-@@ -2488,3 +2554,8 @@
+@@ -2488,3 +2578,20 @@
                              (c, r, s, protocol), DECLINED)
  AP_IMPLEMENT_HOOK_RUN_FIRST(const char *,protocol_get,
                              (const conn_rec *c), (c), NULL)
@@ -198,9 +455,21 @@ Index: server/protocol.c
 +AP_IMPLEMENT_HOOK_RUN_FIRST(const char *,ssl_var_lookup,
 +        (apr_pool_t *p, server_rec *s, conn_rec *c, request_rec *r, const char *name),
 +        (p, s, c, r, name), NULL)
++AP_IMPLEMENT_HOOK_RUN_ALL(int, ssl_add_cert_files, 
++        (server_rec *s, apr_pool_t *p, 
++         apr_array_header_t *cert_files, apr_array_header_t *key_files),
++        (s, p, cert_files, key_files), OK, DECLINED)
++AP_IMPLEMENT_HOOK_RUN_ALL(int, ssl_add_fallback_cert_files, 
++        (server_rec *s, apr_pool_t *p,
++         apr_array_header_t *cert_files, apr_array_header_t *key_files),
++        (s, p, cert_files, key_files), OK, DECLINED)
++AP_IMPLEMENT_HOOK_RUN_FIRST(int, ssl_answer_challenge, 
++        (conn_rec *c, const char *server_name, const char **pcert_file, const char **pkey_file),
++        (c, server_name, pcert_file, pkey_file), DECLINED)
++
 Index: .
 ===================================================================
---- .	(Revision 1886944)
+--- .	(Revision 1887085)
 +++ .	(Arbeitskopie)
 
 Property changes on: .

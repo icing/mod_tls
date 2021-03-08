@@ -56,6 +56,15 @@ AC_ARG_WITH([apxs], [AS_HELP_STRING([--with-apxs],
 AC_ARG_WITH([crustls], [AS_HELP_STRING([--with-crustls], [Use crustls from this prefix])],
     [request_crustls=$withval], [request_crustls=check])
 
+AC_ARG_WITH([curl], [AS_HELP_STRING([--with-curl],
+    [Use curl executable [default=check]])],
+    [request_curl=$withval], [request_curl=check])
+
+AC_ARG_WITH([openssl], [AS_HELP_STRING([--with-openssl],
+    [Use openssl executable [default=check]])],
+    [request_openssl=$withval], [request_openssl=check])
+
+
 
 SERVER_NAME=$(hostname -f)
 AC_SUBST(SERVER_NAME)
@@ -189,9 +198,15 @@ AC_CHECK_HEADERS([ \
     stddef.h \
 ])
 
-# for now, we assume these are installed somewhere in our path
-CURL_BIN = "curl"
-OPENSSL_BIN = "openssl"
+CURL_BIN="curl"
+if test "$request_curl" != "check"; then
+    CURL_BIN="$request_curl"
+fi
+
+OPENSSL_BIN="openssl"
+if test "$request_openssl" != "check"; then
+    OPENSSL_BIN="$request_openssl"
+fi
 
 AC_SUBST(CURL_BIN)
 AC_SUBST(OPENSSL_BIN)
@@ -254,4 +269,5 @@ AC_MSG_NOTICE([summary of build options:
     WARNCFLAGS:     ${WERROR_CFLAGS}
     LDFLAGS:        ${LDFLAGS}
     CPPFLAGS:       ${CPPFLAGS}
+    CURL:           ${CURL_BIN}
 ])

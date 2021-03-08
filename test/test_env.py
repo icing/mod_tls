@@ -67,7 +67,7 @@ class TlsTestEnv:
     @classmethod
     def init_class(cls, base_dir: str):
         if cls.CA is None:
-            cls.CA = TlsTestCA(ca_dir=os.path.join(base_dir, 'ca'))
+            cls.CA = TlsTestCA(ca_dir=os.path.join(base_dir, 'ca'), key_type="rsa4096")
             cls.CERT_FILES['ca'] = cls.CA.ca_cert_file, None
             certs = []
             for domain in [cls.DOMAIN_A, cls.DOMAIN_B]:
@@ -88,6 +88,7 @@ class TlsTestEnv:
         self._server_dir = os.path.join(self._gen_dir, 'apache')
         self._server_conf_dir = os.path.join(self._server_dir, "conf")
         self._server_docs_dir = os.path.join(self._server_dir, "htdocs")
+        self._mpm_type = os.environ['MPM'] if 'MPM' in os.environ else 'event'
 
         self._apachectl = os.path.join(self._prefix, 'bin', 'apachectl')
         self._http_port = int(config.get('global', 'http_port'))
@@ -102,6 +103,14 @@ class TlsTestEnv:
             self._curl = "curl"
         self._openssl = config.get('global', 'openssl_bin')
         TlsTestEnv.init_class(self._server_dir)
+
+    @property
+    def prefix(self) -> str:
+        return self._prefix
+
+    @property
+    def mpm_type(self) -> str:
+        return self._mpm_type
 
     @property
     def http_port(self) -> int:
@@ -152,7 +161,7 @@ class TlsTestEnv:
 
     @staticmethod
     def run(args: List[str]) -> ExecResult:
-        log.debug("run: {0}".format(args))
+        print("run: {0}".format(" ".join(args)))
         start = datetime.now()
         p = subprocess.run(args, capture_output=True, text=True)
         # noinspection PyBroadException
@@ -262,3 +271,17 @@ class TlsTestEnv:
 
     def run_diff(self, fleft: str, fright: str) -> ExecResult:
         return self.run(['diff', '-u', fleft, fright])
+
+    def openssl(self, args: List[str]) -> ExecResult:
+        return self.run([self._openssl] + args)
+
+    def openssl_client(self, domain, extra_args: List[str] = None) -> ExecResult:
+        args = ["s_client", "-CAfile", self.ca_cert, "-servername", domain,
+                "-connect", "localhost:{port}".format(
+                    port=self.https_port
+                )]
+        if extra_args:
+            args.extend(extra_args)
+        args.extend([])
+        return self.openssl(args)
+

@@ -29,6 +29,7 @@ struct tls_filter_ctx_t {
     apr_size_t fout_buf_plain_size;      /* the total size of the buffer */
     apr_bucket_brigade *fout_tls_bb;     /* TLS encrypted, outgoing network data */
     apr_off_t fout_bytes_in_rustls;      /* # of output plain bytes in rustls_session */
+    apr_off_t fout_bytes_in_tls_bb;      /* # of output tls bytes in our brigade */
     apr_off_t fout_max_in_rustls;        /* how much plain bytes we like to give to rustls */
 };
 

@@ -6,10 +6,16 @@ from test_env import TlsTestEnv
 
 class TlsTestConf:
 
-    def __init__(self, env: TlsTestEnv, name: str = "test.conf"):
+    def __init__(self, env: TlsTestEnv, name: str = "test.conf", mpm_type: str = None):
         self.env = env
         self.name = name
-        self._content = ["LogLevel tls:trace8"]
+        self._mpm_type = mpm_type if mpm_type is not None else env.mpm_type
+        self._content = [
+            "LoadModule mpm_{mpm_type}_module  \"{prefix}/modules/mod_mpm_{mpm_type}.so\"".format(
+                prefix=self.env.prefix,
+                mpm_type=self._mpm_type
+            ),
+        ]
 
     def add(self, text: Union[List[str], str]) -> None:
         if isinstance(text, List):

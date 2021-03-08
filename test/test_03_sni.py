@@ -72,7 +72,7 @@ class TestSni:
     def test_03_sni_bad_hostname(self):
         # curl checks hostnames we give it, but the openssl client
         # does not. Good for us, since we need to test it.
-        r = self.env.run(["openssl", "s_client", "-connect",
+        r = self.env.openssl(["s_client", "-connect",
                           "localhost:{0}".format(self.env.https_port),
-                          "-servername", b'x\x2f.y'])
+                          "-servername", b'x\x2f.y'.decode()])
         assert r.exit_code == 1, r.stderr

@@ -71,7 +71,7 @@ apr_status_t tls_util_file_load(
         err = "file size not in allowed range";
         rv = APR_EINVAL; goto cleanup;
     }
-    buffer = apr_pcalloc(p, len);
+    buffer = apr_pcalloc(p, len+1); /* keep it NUL terminated in any case */
     rv = apr_file_open(&f, fpath, APR_FOPEN_READ, 0, p);
     if (APR_SUCCESS != rv) {
         err = "error opening"; goto cleanup;
@@ -101,16 +101,69 @@ apr_status_t tls_util_load_pem(
     apr_status_t rv;
     tls_util_cert_pem_t *cpem;
 
+    ap_assert(cert->cert_file);
     cpem = apr_pcalloc(p, sizeof(*cpem));
     rv = tls_util_file_load(p, cert->cert_file, 0, 100*1024,
         &cpem->cert_pem_bytes, &cpem->cert_pem_len);
     if (APR_SUCCESS != rv) goto cleanup;
-    rv = tls_util_file_load(p, cert->pkey_file, 0, 100*1024,
-        &cpem->pkey_pem_bytes, &cpem->pkey_pem_len);
-    if (APR_SUCCESS != rv) goto cleanup;
+
+    if (cert->pkey_file) {
+        rv = tls_util_file_load(p, cert->pkey_file, 0, 100*1024,
+            &cpem->pkey_pem_bytes, &cpem->pkey_pem_len);
+        if (APR_SUCCESS != rv) goto cleanup;
+    }
+    else {
+        cpem->pkey_pem_bytes = cpem->cert_pem_bytes;
+        cpem->pkey_pem_len = cpem->cert_pem_len;
+    }
 
 cleanup:
     *ppem = (APR_SUCCESS == rv)? cpem : NULL;
+    return rv;
+}
+
+apr_status_t tls_util_load_certified_key(
+    apr_pool_t *p, tls_certificate_t *spec, const rustls_cipher_certified_key **pckey)
+{
+    const rustls_cipher_certified_key *ckey = NULL;
+    rustls_result rr = RUSTLS_RESULT_OK;
+    apr_status_t rv;
+
+    if (spec->cert_file) {
+        tls_util_cert_pem_t *pems;
+
+        rv = tls_util_load_pem(p, spec, &pems);
+        if (APR_SUCCESS != rv) goto cleanup;
+        rr = rustls_cipher_certified_key_build(
+            pems->cert_pem_bytes, pems->cert_pem_len,
+            pems->pkey_pem_bytes, pems->pkey_pem_len,
+            &ckey);
+    }
+    else if (spec->cert_pem) {
+        const char *pkey_pem = spec->pkey_pem? spec->pkey_pem : spec->cert_pem;
+        rr = rustls_cipher_certified_key_build(
+            (const unsigned char*)spec->cert_pem, strlen(spec->cert_pem),
+            (const unsigned char*)pkey_pem, strlen(pkey_pem),
+            &ckey);
+    }
+    else {
+        rv = APR_ENOENT; goto cleanup;
+    }
+
+cleanup:
+    if (RUSTLS_RESULT_OK != rr) {
+        const char *err_descr;
+        rv = tls_util_rustls_error(p, rr, &err_descr);
+        ap_log_perror(APLOG_MARK, APLOG_ERR, rv, p, APLOGNO()
+                     "Failed to load certified key %s: [%d] %s",
+                     spec->cert_file, (int)rr, err_descr);
+    }
+    if (APR_SUCCESS == rv) {
+        *pckey = ckey;
+    }
+    else if (ckey) {
+        rustls_cipher_certified_key_free(ckey);
+    }
     return rv;
 }
 

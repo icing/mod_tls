@@ -7,8 +7,8 @@ from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
-from cryptography.hazmat.primitives.serialization.base import Encoding, PrivateFormat, NoEncryption
-from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+from cryptography.hazmat.primitives.serialization import Encoding, PrivateFormat, NoEncryption
+from cryptography.x509 import ExtendedKeyUsageOID, NameOID
 
 
 EC_SUPPORTED = {}
@@ -179,9 +179,12 @@ class TlsTestCA:
         )
 
     def _add_ca_usages(self, csr: Any) -> Any:
-        csr.add_extension(
+        return csr.add_extension(
+            x509.BasicConstraints(ca=True, path_length=9),
+            critical=True,
+        ).add_extension(
             x509.KeyUsage(
-                digital_signature=False,
+                digital_signature=True,
                 content_commitment=False,
                 key_encipherment=False,
                 data_encipherment=False,
@@ -191,8 +194,7 @@ class TlsTestCA:
                 encipher_only=False,
                 decipher_only=False),
             critical=True
-        )
-        csr.add_extension(
+        ).add_extension(
             x509.ExtendedKeyUsage([
                 ExtendedKeyUsageOID.CLIENT_AUTH,
                 ExtendedKeyUsageOID.SERVER_AUTH,
@@ -200,23 +202,25 @@ class TlsTestCA:
             ]),
             critical=True
         )
-        return csr
 
     def _add_leaf_usages(self, csr: Any, domains: List[str], issuer: Credentials) -> Any:
-        csr.add_extension(
+        return csr.add_extension(
             x509.BasicConstraints(ca=False, path_length=None),
             critical=True,
-        )
-        csr.add_extension(
+        ).add_extension(
             x509.AuthorityKeyIdentifier.from_issuer_subject_key_identifier(
                 issuer.certificate.extensions.get_extension_for_class(
                     x509.SubjectKeyIdentifier).value),
-            critical=False)
-        csr.add_extension(
+            critical=False
+        ).add_extension(
             x509.SubjectAlternativeName([x509.DNSName(domain) for domain in domains]),
             critical=True,
+        ).add_extension(
+            x509.ExtendedKeyUsage([
+                ExtendedKeyUsageOID.SERVER_AUTH,
+            ]),
+            critical=True
         )
-        return csr
 
     def _make_ca_credentials(self, name, key_type: Any = None,
                              issuer: Credentials = None) -> Credentials:

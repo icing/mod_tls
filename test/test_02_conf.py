@@ -83,18 +83,19 @@ class TestConf:
 
     def test_02_conf_proto_wrong(self):
         conf = TlsTestConf(env=self.env)
-        conf.add("TLSProtocol wrong")
+        conf.add("TLSProtocols wrong")
         conf.write()
         assert self.env.apache_fail() == 0
 
     @pytest.mark.parametrize("proto", [
-        "auto",
-        "v1.2+",
-        "v1.3+",
+        "default",
+        "v1.2",
+        "v1.3",
+        "v1.2 v1.3",
     ])
     def test_02_conf_proto_valid(self, proto):
         conf = TlsTestConf(env=self.env)
-        conf.add("TLSProtocol {proto}".format(proto=proto))
+        conf.add("TLSProtocols {proto}".format(proto=proto))
         conf.write()
         assert self.env.apache_restart() == 0
 
@@ -113,3 +114,29 @@ class TestConf:
         conf.add("TLSHonorClientOrder {honor}".format(honor=honor))
         conf.write()
         assert self.env.apache_restart() == 0
+
+    @pytest.mark.parametrize("cipher", [
+        "default",
+        "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256",
+        "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305",
+        """ECDHE-ECDSA-AES128-GCM-SHA256  ECDHE-RSA-AES128-GCM-SHA256 \\
+        ECDHE-ECDSA-AES256-GCM-SHA384  ECDHE-RSA-AES256-GCM-SHA384\\
+        ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305"""
+    ])
+    def test_02_conf_cipher_valid(self, cipher):
+        conf = TlsTestConf(env=self.env)
+        conf.add("TLSCiphers {cipher}".format(cipher=cipher))
+        conf.write()
+        assert self.env.apache_restart() == 0
+
+    @pytest.mark.parametrize("cipher", [
+        "wrong",
+        "TLS_NULL_WITH_NULL_NULL",       # not supported
+        "DHE-RSA-AES128-GCM-SHA256",     # not supported
+    ])
+    def test_02_conf_cipher_wrong(self, cipher):
+        conf = TlsTestConf(env=self.env)
+        conf.add("TLSCiphers {cipher}".format(cipher=cipher))
+        conf.write()
+        assert self.env.apache_fail() == 0
+

@@ -1,3 +1,15 @@
+ * Configuration directives 'TLSProtocols' and 'TLSCiphers' implemented. Test
+   cases added.
+ * Added support for setting challenge certificates using the new (apache trunk)
+   hooks and functions. ACME tls-alpn-01 support incoming.
+ * The module now also allows certificate configuration via the new central
+   hookes. A future mod_md will provide ACME certificate this way.
+ * Updated patch file for the Apache httpd 2.4.x release line with the latest
+   necessary changes to run the module.
+ * Fixes in output handling to pass meta buckets in their proper location down
+   to the network.
+ * Test can be run with another mpm by setting the environment variable MPM:
+   > MPM=worker pytest
  * All buffers passed to rustls for writing to are now initialized via 'calloc()',
    as Rust requires. There is no concept of a write-only array, unfortunately.
  * Added a patch file for the Apache httpd 2.4.x release line with the - so far -
