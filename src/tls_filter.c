@@ -221,23 +221,32 @@ cleanup:
     return rv;
 }
 
-static void filter_abort(tls_filter_ctx_t *fctx)
+static apr_status_t filter_abort(
+    tls_filter_ctx_t *fctx, apr_status_t rv, apr_bucket_brigade *bb)
 {
+    apr_bucket *b;
+
     fctx->c->aborted = 1;
     fctx->cc->state = TLS_CONN_ST_DONE;
+    b = apr_bucket_eos_create(fctx->c->bucket_alloc);
+    APR_BRIGADE_INSERT_TAIL(bb, b);
+    if (APR_STATUS_IS_EOF(rv)) {
+        apr_table_setn(fctx->c->notes, "short-lingering-close", "1");
+    }
     ap_log_cerror(APLOG_MARK, APLOG_TRACE2, 0, fctx->c, "filter_abort");
+    return APR_ECONNABORTED;
 }
 
 /**
  *
  */
 static apr_status_t filter_do_pre_handshake(
-    tls_filter_ctx_t *fctx)
+    tls_filter_ctx_t *fctx, apr_bucket_brigade *bb)
 {
     apr_status_t rv = APR_SUCCESS;
 
     if (rustls_server_session_is_handshaking(fctx->cc->rustls_session)) {
-        apr_bucket_brigade *bb;
+        apr_bucket_brigade *bb_tmp;
 
         fctx->fin_tls_buffer_bb = apr_brigade_create(fctx->c->pool, fctx->c->bucket_alloc);
         do {
@@ -265,17 +274,17 @@ static apr_status_t filter_do_pre_handshake(
         rv = tls_core_conn_server_init(fctx->c);
         if (APR_SUCCESS != rv) goto cleanup;
 
-        bb = fctx->fin_tls_bb; /* data we have yet to feed to rustls */
+        bb_tmp = fctx->fin_tls_bb; /* data we have yet to feed to rustls */
         fctx->fin_tls_bb = fctx->fin_tls_buffer_bb; /* data we already fed to the pre_session */
         fctx->fin_tls_buffer_bb = NULL;
-        APR_BRIGADE_CONCAT(fctx->fin_tls_bb, bb); /* all tls data from the cleint so far, reloaded */
-        apr_brigade_destroy(bb);
+        APR_BRIGADE_CONCAT(fctx->fin_tls_bb, bb_tmp); /* all tls data from the cleint so far, reloaded */
+        apr_brigade_destroy(bb_tmp);
         rv = APR_SUCCESS;
     }
 
 cleanup:
     if (APR_SUCCESS != rv && !APR_STATUS_IS_EAGAIN(rv)) {
-        filter_abort(fctx);
+        rv = filter_abort(fctx, rv, bb);
     }
     return rv;
 }
@@ -287,7 +296,7 @@ cleanup:
  * @return APR_SUCCESS when the handshake is completed
  */
 static apr_status_t filter_do_handshake(
-    tls_filter_ctx_t *fctx)
+    tls_filter_ctx_t *fctx, apr_bucket_brigade *bb)
 {
     apr_status_t rv = APR_SUCCESS;
 
@@ -310,7 +319,7 @@ static apr_status_t filter_do_handshake(
     }
 cleanup:
     if (APR_SUCCESS != rv && !APR_STATUS_IS_EAGAIN(rv)) {
-        filter_abort(fctx);
+        rv = filter_abort(fctx, rv, bb);
     }
     return rv;
 }
@@ -353,26 +362,24 @@ static apr_status_t filter_conn_input(
 
     fctx->fin_block = block;
     if (f->c->aborted) {
-        apr_bucket *b = apr_bucket_eos_create(f->c->bucket_alloc);
-        APR_BRIGADE_INSERT_TAIL(bb, b);
-        rv = APR_ECONNABORTED; goto cleanup;
+        rv = filter_abort(fctx, rv, bb); goto cleanup;
     }
 
     if (TLS_CONN_ST_PRE_HANDSHAKE == fctx->cc->state) {
         ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, fctx->cc->server,
             "tls_filter_conn_input, server=%s, do pre_handshake",
             fctx->cc->server->server_hostname);
-        rv = filter_do_pre_handshake(fctx);
-        fctx->cc->state = TLS_CONN_ST_HANDSHAKE;
+        rv = filter_do_pre_handshake(fctx, bb);
         if (APR_SUCCESS != rv) goto cleanup;
+        fctx->cc->state = TLS_CONN_ST_HANDSHAKE;
     }
     if (TLS_CONN_ST_HANDSHAKE == fctx->cc->state) {
         ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, fctx->cc->server,
             "tls_filter_conn_input, server=%s, do handshake",
             fctx->cc->server->server_hostname);
-        rv = filter_do_handshake(fctx);
-        fctx->cc->state = TLS_CONN_ST_TRAFFIC;
+        rv = filter_do_handshake(fctx, bb);
         if (APR_SUCCESS != rv) goto cleanup;
+        fctx->cc->state = TLS_CONN_ST_TRAFFIC;
     }
 
     if (AP_MODE_INIT == mode) {
@@ -449,12 +456,12 @@ static apr_status_t filter_conn_input(
     write_all_tls_from_rustls(fctx);
 
 cleanup:
-    if (APLOGctrace3(fctx->c)) {
-        tls_util_bb_log(fctx->c, APLOG_TRACE3, "cleanup tls_input, fctx->fin_plain_bb", fctx->fin_plain_bb);
-        tls_util_bb_log(fctx->c, APLOG_TRACE3, "cleanup tls_input, bb", bb);
-    }
-
     if (NULL != in_buf) free(in_buf);
+
+    if (APLOGctrace3(fctx->c)) {
+        tls_util_bb_log(fctx->c, APLOG_TRACE3, "tls_input, fctx->fin_plain_bb", fctx->fin_plain_bb);
+        tls_util_bb_log(fctx->c, APLOG_TRACE3, "tls_input, bb", bb);
+    }
     if (rr != RUSTLS_RESULT_OK) {
         const char *err_descr = "";
 
@@ -782,9 +789,9 @@ int tls_filter_conn_init(conn_rec *c)
 static int tls_filter_input_pending(conn_rec *c)
 {
     tls_conf_conn_t *cc = tls_conf_conn_get(c);
-    if (cc && cc->filter_ctx && !APR_BRIGADE_EMPTY(cc->filter_ctx->fin_plain_bb)) {
-        return OK;
-    }
+
+    if (c->aborted || !cc || TLS_CONN_ST_IGNORED == cc->state) return DECLINED;
+    if (cc && cc->filter_ctx && !APR_BRIGADE_EMPTY(cc->filter_ctx->fin_plain_bb)) return OK;
     return DECLINED;
 }
 

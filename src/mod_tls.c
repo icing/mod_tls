@@ -14,6 +14,7 @@
 #include <http_connection.h>
 #include <http_log.h>
 #include <http_protocol.h>
+#include <http_request.h>
 
 #include <crustls.h>
 
@@ -119,13 +120,14 @@ static int hook_connection(conn_rec* c)
     return DECLINED;
 }
 
-static int tls_conn_is_ssl(conn_rec *c)
+static const char *tls_hook_http_scheme(const request_rec *r)
 {
-    tls_conf_conn_t *cc = tls_conf_conn_get(c);
-    if (cc && TLS_CONN_ST_IGNORED != cc->state) {
-        return OK;
-    }
-    return DECLINED;
+    return tls_conn_is_ssl(r->connection) ? "https" : NULL;
+}
+
+static apr_port_t tls_hook_default_port(const request_rec *r)
+{
+    return tls_conn_is_ssl(r->connection) ? 443 : 0;
 }
 
 static const char* const mod_http2[]        = { "mod_http2.c", NULL};
@@ -151,7 +153,10 @@ static void tls_hooks(apr_pool_t *pool)
     ap_hook_pre_connection(hook_pre_connection, NULL, NULL, APR_HOOK_MIDDLE);
     ap_hook_process_connection(hook_connection, NULL, mod_http2, APR_HOOK_MIDDLE);
     /* request things */
+    ap_hook_default_port(tls_hook_default_port, NULL,NULL, APR_HOOK_MIDDLE);
+    ap_hook_http_scheme(tls_hook_http_scheme, NULL,NULL, APR_HOOK_MIDDLE);
     ap_hook_post_read_request(tls_core_request_check, pre_req_check, NULL, APR_HOOK_MIDDLE);
+    ap_hook_fixups(tls_var_request_fixup, NULL,NULL, APR_HOOK_MIDDLE);
 
     ap_hook_ssl_conn_is_ssl(tls_conn_is_ssl, NULL, NULL, APR_HOOK_MIDDLE);
     ap_hook_ssl_var_lookup(tls_var_lookup, NULL, NULL, APR_HOOK_MIDDLE);

@@ -34,8 +34,7 @@ const char *tls_var_lookup(
     s = s? s : (c? c->base_server : (r? r->server : NULL));
     c = c? c : (r? r->connection : NULL);
 
-    if (c) {
-        cc = tls_conf_conn_get(c);
+    if (c && (cc = tls_conf_conn_get(c->master? c->master : c))) {
         if (strncasecmp(name, "SSL_", 4)) goto cleanup; /* not for us */
         name += 4;
         if (0 == strcasecmp(name, "PROTOCOL")) {
@@ -54,3 +53,22 @@ cleanup:
     return val;
 }
 
+int tls_var_request_fixup(request_rec *r)
+{
+    conn_rec *c = r->connection;
+    tls_conf_conn_t *cc;
+    apr_table_t *env;
+
+    cc = tls_conf_conn_get(c->master? c->master : c);
+    if (!cc || TLS_CONN_ST_IGNORED == cc->state) goto cleanup;
+
+    env = r->subprocess_env;
+    apr_table_setn(env, "HTTPS", "on");
+    if (cc->sni_hostname) {
+        apr_table_set(env, "SSL_TLS_SNI", cc->sni_hostname);
+    }
+
+    /* TODO: directory config to add more variables to the env like SSLOPtions StdEnvVars */
+cleanup:
+    return DECLINED;
+}

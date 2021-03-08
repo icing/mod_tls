@@ -35,6 +35,15 @@ void tls_conf_conn_set(conn_rec *c, tls_conf_conn_t *cc)
     ap_set_module_config(c->conn_config, &tls_module, cc);
 }
 
+int tls_conn_is_ssl(conn_rec *c)
+{
+    tls_conf_conn_t *cc = tls_conf_conn_get(c->master? c->master : c);
+    if (cc && TLS_CONN_ST_IGNORED != cc->state) {
+        return OK;
+    }
+    return DECLINED;
+}
+
 static int we_listen_on(tls_conf_global_t *gc, server_rec *s)
 {
     server_addr_rec *sa, *la;

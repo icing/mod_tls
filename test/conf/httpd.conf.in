@@ -11,6 +11,8 @@ Listen @HTTPS_PORT@
     SetHandler server-status
 </Location>
 
+AddHandler cgi-script .py
+
 <VirtualHost *:@HTTP_PORT@>
     ServerName localhost
     DocumentRoot "htdocs"
@@ -31,5 +33,14 @@ Listen @HTTPS_PORT@
     LogFormat "%h %l %u %t \"%r\" %>s %b" common
     CustomLog "logs/access_log" combined
 </IfModule>
+
+<Directory "@GEN_DIR@/apache/htdocs/b.mod-tls.test">
+    Options Indexes FollowSymLinks
+    AllowOverride None
+    Require all granted
+
+    AddHandler cgi-script .py
+    Options +ExecCGI
+</Directory>
 
 Include "conf/test.conf"

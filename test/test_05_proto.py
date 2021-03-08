@@ -1,7 +1,4 @@
-import time
 from datetime import timedelta
-
-import pytest
 
 from test_env import TlsTestEnv
 from test_conf import TlsTestConf
@@ -27,6 +24,7 @@ class TestProto:
     def setup_class(cls):
         conf = TlsTestConf(env=cls.env)
         conf.add_vhosts(domains=[cls.env.domain_a, cls.env.domain_b], extras={
+            'base': "LogLevel trace4",
             cls.env.domain_a: "TLSProtocols v1.3",
             cls.env.domain_b: "TLSProtocols v1.2",
         })
@@ -47,7 +45,7 @@ class TestProto:
         assert r.exit_code == 0, r.stderr
         if self.curl_supports_tls_1_3():
             r = self.env.https_get(self.env.domain_b, "/index.json",
-                               extra_args=["--tlsv1.3"])
+                                   extra_args=["--tlsv1.3"])
             assert r.exit_code != 0, r.stderr
 
     def test_05_proto_1_3(self):
@@ -57,4 +55,3 @@ class TestProto:
             assert r.exit_code == 0, r.stderr
         else:
             assert r.exit_code == 4, r.stderr
-

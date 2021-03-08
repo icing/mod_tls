@@ -14,4 +14,9 @@
 const char *tls_var_lookup(
     apr_pool_t *p, server_rec *s, conn_rec *c, request_rec *r, const char *name);
 
+/**
+ * A request is ready for processing, add some TLS flavours (if this is on a TLS connection)
+ */
+int tls_var_request_fixup(request_rec *r);
+
 #endif /* tls_var_h */
