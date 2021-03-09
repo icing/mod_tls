@@ -123,9 +123,9 @@ cleanup:
 }
 
 apr_status_t tls_util_load_certified_key(
-    apr_pool_t *p, tls_certificate_t *spec, const rustls_cipher_certified_key **pckey)
+    apr_pool_t *p, tls_certificate_t *spec, const rustls_certified_key **pckey)
 {
-    const rustls_cipher_certified_key *ckey = NULL;
+    const rustls_certified_key *ckey = NULL;
     rustls_result rr = RUSTLS_RESULT_OK;
     apr_status_t rv;
 
@@ -134,14 +134,14 @@ apr_status_t tls_util_load_certified_key(
 
         rv = tls_util_load_pem(p, spec, &pems);
         if (APR_SUCCESS != rv) goto cleanup;
-        rr = rustls_cipher_certified_key_build(
+        rr = rustls_certified_key_build(
             pems->cert_pem_bytes, pems->cert_pem_len,
             pems->pkey_pem_bytes, pems->pkey_pem_len,
             &ckey);
     }
     else if (spec->cert_pem) {
         const char *pkey_pem = spec->pkey_pem? spec->pkey_pem : spec->cert_pem;
-        rr = rustls_cipher_certified_key_build(
+        rr = rustls_certified_key_build(
             (const unsigned char*)spec->cert_pem, strlen(spec->cert_pem),
             (const unsigned char*)pkey_pem, strlen(pkey_pem),
             &ckey);
@@ -162,7 +162,7 @@ cleanup:
         *pckey = ckey;
     }
     else if (ckey) {
-        rustls_cipher_certified_key_free(ckey);
+        rustls_certified_key_free(ckey);
     }
     return rv;
 }

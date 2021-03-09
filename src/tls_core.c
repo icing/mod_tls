@@ -89,22 +89,22 @@ static apr_status_t use_certificates(
 {
     rustls_result rr = RUSTLS_RESULT_OK;
     apr_array_header_t *certified_keys = NULL;
-    const rustls_cipher_certified_key *ckey;
+    const rustls_certified_key *ckey;
     apr_status_t rv = APR_SUCCESS;
     int i;
 
     if (cert_specs && cert_specs->nelts > 0) {
-        certified_keys = apr_array_make(p, cert_specs->nelts, sizeof(rustls_cipher_certified_key *));
+        certified_keys = apr_array_make(p, cert_specs->nelts, sizeof(rustls_certified_key *));
 
         for (i = 0; i < cert_specs->nelts; ++i) {
             tls_certificate_t *spec = APR_ARRAY_IDX(cert_specs, i, tls_certificate_t*);
             rv = tls_util_load_certified_key(p, spec, &ckey);
             if (APR_SUCCESS != rv) goto cleanup;
-            APR_ARRAY_PUSH(certified_keys, const rustls_cipher_certified_key*) = ckey;
+            APR_ARRAY_PUSH(certified_keys, const rustls_certified_key*) = ckey;
         }
 
         rr = rustls_server_config_builder_set_certified_keys(
-            builder, (const rustls_cipher_certified_key**)certified_keys->elts,
+            builder, (const rustls_certified_key**)certified_keys->elts,
             (size_t)certified_keys->nelts);
         if (RUSTLS_RESULT_OK != rr) goto cleanup;
     }
@@ -112,8 +112,8 @@ static apr_status_t use_certificates(
 cleanup:
     if (certified_keys != NULL) {
         for (i = 0; i < certified_keys->nelts; ++i) {
-            ckey = APR_ARRAY_IDX(certified_keys, i, rustls_cipher_certified_key*);
-            rustls_cipher_certified_key_free(ckey);
+            ckey = APR_ARRAY_IDX(certified_keys, i, rustls_certified_key*);
+            rustls_certified_key_free(ckey);
         }
         apr_array_clear(certified_keys);
     }
@@ -339,7 +339,7 @@ static apr_status_t tls_core_conn_free(void *data)
     return APR_SUCCESS;
 }
 
-static const rustls_cipher_certified_key *tls_conn_hello_cb(
+static const rustls_certified_key *tls_conn_hello_cb(
     void* userdata, const rustls_client_hello *hello)
 {
     conn_rec *c = userdata;
