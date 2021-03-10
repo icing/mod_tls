@@ -66,7 +66,7 @@ LogLevel tls:trace4
     def add_ssl_vhosts(self, domains: List[str], extras: Dict[str, str] = None):
         extras = extras if extras is not None else {}
         self.add("""
-LogLevel tls:trace4
+LogLevel ssl:trace4
 {extras}
         """.format(
             https=self.env.https_port,
@@ -87,9 +87,9 @@ LogLevel tls:trace4
                 self.add("  SSLCertificateFile {cert_file}".format(
                     cert_file = cert_file,
                 ))
-            self.add("  SSLCertificateKeyFile {pkey_file}".format(
-                pkey_file=pkey_file,
-            ))
+                self.add("  SSLCertificateKeyFile {pkey_file}".format(
+                    pkey_file=pkey_file,
+                ))
             self.add("""
       {extras}
     </VirtualHost>

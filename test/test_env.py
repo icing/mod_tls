@@ -91,6 +91,7 @@ class TlsTestEnv:
         self._mpm_type = os.environ['MPM'] if 'MPM' in os.environ else 'event'
 
         self._apachectl = os.path.join(self._prefix, 'bin', 'apachectl')
+        self._httpd = os.path.join(self._prefix, 'bin', 'httpd')
         self._http_port = int(config.get('global', 'http_port'))
         self._https_port = int(config.get('global', 'https_port'))
 
@@ -215,6 +216,12 @@ class TlsTestEnv:
         return False
 
     # --------- control apache ---------
+
+    def httpd(self):
+        args = [self._httpd, "-X", "-d", self._server_dir]
+        p = subprocess.run(args, capture_output=True, text=True)
+        rv = p.returncode
+        return rv
 
     def apachectl(self, cmd, check_live=True):
         args = [self._apachectl, "-d", self._server_dir, "-k", cmd]

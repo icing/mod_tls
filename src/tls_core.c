@@ -336,6 +336,10 @@ static apr_status_t tls_core_conn_free(void *data)
         rustls_server_session_free(cc->rustls_session);
         cc->rustls_session = NULL;
     }
+    if (cc->rustls_config) {
+        rustls_server_config_free(cc->rustls_config);
+        cc->rustls_config = NULL;
+    }
     return APR_SUCCESS;
 }
 
@@ -348,6 +352,7 @@ static const rustls_certified_key *tls_conn_hello_cb(
     size_t i, len;
     unsigned short n;
 
+    ap_log_cerror(APLOG_MARK, APLOG_TRACE2, 0, c, "client hello callback invoked");
     if (!cc) goto cleanup;
     cc->client_hello_seen = 1;
     if (hello->sni_name.len > 0) {
@@ -394,7 +399,6 @@ int tls_core_conn_base_init(conn_rec *c)
     if (!sc->rustls_config) goto cleanup;
     if (!cc) {
         rustls_server_config_builder *builder;
-        const rustls_server_config *config;
 
         ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, c->base_server, "tls_core_conn_init on %s",
             c->base_server->server_hostname);
@@ -415,11 +419,11 @@ int tls_core_conn_base_init(conn_rec *c)
             rr = RUSTLS_RESULT_PANIC; goto cleanup;
         }
         rustls_server_config_builder_set_hello_callback(builder, tls_conn_hello_cb, c);
-        config = rustls_server_config_builder_build(builder);
-        if (!config) {
+        cc->rustls_config = rustls_server_config_builder_build(builder);
+        if (!cc->rustls_config) {
             rr = RUSTLS_RESULT_PANIC; goto cleanup;
         }
-        rr = rustls_server_session_new(config, &cc->rustls_session);
+        rr = rustls_server_session_new(cc->rustls_config, &cc->rustls_session);
         if (RUSTLS_RESULT_OK != rr) goto cleanup;
 
         /* copy over mutable connection properties inherited from server setting */
@@ -526,7 +530,6 @@ apr_status_t tls_core_conn_server_init(conn_rec *c)
     tls_conf_conn_t *cc = tls_conf_conn_get(c);
     tls_conf_server_t *sc;
     rustls_server_config_builder *builder = NULL;
-    const rustls_server_config *config = NULL;
     rustls_result rr = RUSTLS_RESULT_OK;
     apr_status_t rv = APR_SUCCESS;
 
@@ -565,21 +568,19 @@ apr_status_t tls_core_conn_server_init(conn_rec *c)
          * the real handshake and, if successful, the traffic after that.
          * Free the current session and create the real one for the
          * selected server. */
+        rustls_server_config_free(cc->rustls_config);
+        cc->rustls_config = NULL;
         rustls_server_session_free(cc->rustls_session);
         cc->rustls_session = NULL;
-        config = rustls_server_config_builder_build(builder);
+        cc->rustls_config = rustls_server_config_builder_build(builder);
         builder = NULL;
-        rr = rustls_server_session_new(config, &cc->rustls_session);
+        rr = rustls_server_session_new(cc->rustls_config, &cc->rustls_session);
         if (RUSTLS_RESULT_OK != rr) goto cleanup;
-        config = NULL;
     }
 
 cleanup:
     if (builder != NULL) {
         rustls_server_config_builder_free(builder);
-    }
-    if (config != NULL) {
-        rustls_server_config_free(config);
     }
     if (rr != RUSTLS_RESULT_OK) {
         const char *err_descr = NULL;

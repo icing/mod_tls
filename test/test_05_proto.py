@@ -1,4 +1,7 @@
+import time
 from datetime import timedelta
+import socket
+from threading import Thread
 
 from test_env import TlsTestEnv
 from test_conf import TlsTestConf
@@ -24,7 +27,7 @@ class TestProto:
     def setup_class(cls):
         conf = TlsTestConf(env=cls.env)
         conf.add_vhosts(domains=[cls.env.domain_a, cls.env.domain_b], extras={
-            'base': "LogLevel trace4",
+            'base': "LogLevel tls:debug",
             cls.env.domain_a: "TLSProtocols v1.3",
             cls.env.domain_b: "TLSProtocols v1.2",
         })
@@ -55,3 +58,23 @@ class TestProto:
             assert r.exit_code == 0, r.stderr
         else:
             assert r.exit_code == 4, r.stderr
+
+    def test_05_proto_close(self):
+        s = socket.create_connection(('localhost', self.env.https_port))
+        time.sleep(0.1)
+        s.close()
+
+    def test_05_proto_ssl_close(self):
+        conf = TlsTestConf(env=self.env)
+        conf.add_ssl_vhosts(domains=[self.env.domain_a, self.env.domain_b], extras={
+            'base': "LogLevel ssl:debug",
+            self.env.domain_a: "SSLProtocol TLSv1.3",
+            self.env.domain_b: "SSLProtocol TLSv1.2",
+        })
+        conf.write()
+        assert self.env.apache_restart() == 0
+        s = socket.create_connection(('localhost', self.env.https_port))
+        time.sleep(0.1)
+        s.close()
+
+

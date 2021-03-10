@@ -34,7 +34,8 @@ const char *tls_var_lookup(
     s = s? s : (c? c->base_server : (r? r->server : NULL));
     c = c? c : (r? r->connection : NULL);
 
-    if (c && (cc = tls_conf_conn_get(c->master? c->master : c))) {
+    if (c && (cc = tls_conf_conn_get(c->master? c->master : c))
+        && cc->state != TLS_CONN_ST_IGNORED) {
         if (strncasecmp(name, "SSL_", 4)) goto cleanup; /* not for us */
         name += 4;
         if (0 == strcasecmp(name, "PROTOCOL")) {

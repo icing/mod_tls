@@ -28,6 +28,7 @@ typedef struct {
     server_rec *server;               /* the server_rec selected for this connection,
                                        * initially c->base_server, to be negotiated. */
     tls_conn_state_t state;
+    const rustls_server_config *rustls_config;
     rustls_server_session *rustls_session;
     int client_hello_seen;            /* the client hello has been inspected */
     const char *sni_hostname;         /* the SNI value from the client hello, if present */
