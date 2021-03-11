@@ -7,6 +7,8 @@
 #ifndef tls_var_h
 #define tls_var_h
 
+void tls_var_init_lookup_hash(apr_pool_t *pool, apr_hash_t *map);
+
 /**
  * Callback for installation in Apache's 'ssl_var_lookup' hook to provide
  * SSL related variable lookups to other modules.

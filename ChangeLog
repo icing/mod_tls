@@ -1,3 +1,6 @@
+ * new config Directive `TLSOptions` similar for mod_ssl's `SSLOptions`.
+   Only open so far is 'StdEnvVars' which adds a (currently limited) list
+   of TLS related environment variables to CGI handlers.
  * `TLSCertificate` can also be used with a single argument, given one file
    that contains all PEM data.
  * Configuration directives 'TLSProtocols' and 'TLSCiphers' implemented. Test

@@ -13,6 +13,8 @@
 
 #include <crustls.h>
 
+#define TLS_DIM(a)      (sizeof(a)/sizeof(a[0]))
+
 typedef struct {
     const char *cert_file;
     const char *pkey_file;

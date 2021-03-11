@@ -30,8 +30,8 @@ static void tls_hooks(apr_pool_t *pool);
 
 AP_DECLARE_MODULE(tls) = {
     STANDARD20_MODULE_STUFF,
-    NULL,                  /* create per dir config */
-    NULL,                  /* merge per dir config */
+    tls_conf_create_dir,   /* create per dir config */
+    tls_conf_merge_dir,    /* merge per dir config */
     tls_conf_create_svr,   /* create per server config */
     tls_conf_merge_svr,    /* merge per server config (inheritance) */
     tls_conf_cmds,         /* command handlers */

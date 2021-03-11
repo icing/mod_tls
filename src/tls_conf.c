@@ -19,6 +19,7 @@
 #include "tls_defs.h"
 #include "tls_conf.h"
 #include "tls_util.h"
+#include "tls_var.h"
 
 
 extern module AP_MODULE_DECLARE_DATA tls_module;
@@ -66,6 +67,9 @@ static tls_conf_global_t *conf_global_get_or_make(apr_pool_t *pool, server_rec *
     }
 #endif /*TLS_CIPHER_CONFIGURATION*/
 
+    gconf->var_lookups = apr_hash_make(pool);
+    tls_var_init_lookup_hash(pool, gconf->var_lookups);
+
     return gconf;
 }
 
@@ -101,8 +105,8 @@ void *tls_conf_create_svr(apr_pool_t *pool, server_rec *s)
 
 void *tls_conf_merge_svr(apr_pool_t *pool, void *basev, void *addv)
 {
-    tls_conf_server_t *base = (tls_conf_server_t *)basev;
-    tls_conf_server_t *add = (tls_conf_server_t *)addv;
+    tls_conf_server_t *base = basev;
+    tls_conf_server_t *add = addv;
     tls_conf_server_t *nconf;
 
     nconf = apr_pcalloc(pool, sizeof(*nconf));
@@ -116,8 +120,41 @@ void *tls_conf_merge_svr(apr_pool_t *pool, void *basev, void *addv)
     nconf->tls_protocols = MERGE_INT(base, add, tls_protocols);
     nconf->tls_ciphers = add->tls_ciphers->nelts? add->tls_ciphers : base->tls_ciphers;
     nconf->honor_client_order = MERGE_INT(base, add, honor_client_order);
-
     return nconf;
+}
+
+tls_conf_dir_t *tls_conf_dir_get(request_rec *r)
+{
+    tls_conf_dir_t *dc = ap_get_module_config(r->per_dir_config, &tls_module);
+    ap_assert(dc);
+    return dc;
+}
+
+void *tls_conf_create_dir(apr_pool_t *pool, char *dir)
+{
+    tls_conf_dir_t *conf;
+
+    (void)dir;
+    conf = apr_pcalloc(pool, sizeof(*conf));
+    conf->std_env_vars = TLS_FLAG_UNSET;
+    return conf;
+}
+
+void *tls_conf_merge_dir(apr_pool_t *pool, void *basev, void *addv)
+{
+    tls_conf_dir_t *base = basev;
+    tls_conf_dir_t *add = addv;
+    tls_conf_dir_t *nconf;
+
+    nconf = apr_pcalloc(pool, sizeof(*nconf));
+    nconf->std_env_vars = MERGE_INT(base, add, std_env_vars);
+    return nconf;
+}
+
+static void tls_conf_dir_set_options_defaults(apr_pool_t *pool, tls_conf_dir_t *dc)
+{
+    (void)pool;
+    dc->std_env_vars = TLS_FLAG_FALSE;
 }
 
 apr_status_t tls_conf_server_apply_defaults(tls_conf_server_t *sc, apr_pool_t *p)
@@ -339,18 +376,56 @@ cleanup:
     return err;
 }
 
+static const char *tls_conf_set_options(
+    cmd_parms *cmd, void *dcv, int argc, char *const argv[])
+{
+    tls_conf_dir_t *dc = dcv;
+    const char *err = NULL, *option;
+    int i, val;
+
+    /* Are we only having deltas (+/-) or do we reset the options? */
+    for (i = 0; i < argc; ++i) {
+        if (argv[i][0] != '+' && argv[i][0] != '-') {
+            tls_conf_dir_set_options_defaults(cmd->pool, dc);
+            break;
+        }
+    }
+
+    for (i = 0; i < argc; ++i) {
+        option = argv[i];
+        val = TLS_FLAG_TRUE;
+        if (*option == '+' || *option == '-') {
+            val = (*option == '+')? TLS_FLAG_TRUE : TLS_FLAG_FALSE;
+            ++option;
+        }
+
+        if (!apr_strnatcasecmp("StdEnvVars", option)) {
+            dc->std_env_vars = val;
+        }
+        else {
+            err = apr_pstrcat(cmd->pool, cmd->cmd->name,
+                               ": unknown option '", option, "'", NULL);
+            goto cleanup;
+        }
+    }
+cleanup:
+    return err;
+}
+
 const command_rec tls_conf_cmds[] = {
     AP_INIT_TAKE12("TLSCertificate", tls_conf_add_certificate, NULL, RSRC_CONF,
         "Add a certificate to the server by specifying a file containing the "
         "certificate PEM, followed by its chain PEMs. The PEM of the key must "
         "either also be there or can be given as a separate file."),
+    AP_INIT_TAKE_ARGV("TLSCiphers", tls_conf_set_ciphers, NULL, RSRC_CONF,
+        "Set the TLS ciphers to use when negotiating with a client."),
     AP_INIT_TAKE1("TLSHonorClientOrder", tls_conf_set_honor_client_order, NULL, RSRC_CONF,
         "Set 'on' to have the server honor client preferences in cipher suites, default off."),
     AP_INIT_TAKE1("TLSListen", tls_conf_add_listener, NULL, RSRC_CONF,
         "Specify an adress+port where the module shall handle incoming TLS connections."),
+    AP_INIT_TAKE_ARGV("TLSOptions", tls_conf_set_options, NULL, OR_OPTIONS,
+        "En-/disables optional features in the module."),
     AP_INIT_TAKE_ARGV("TLSProtocols", tls_conf_set_protocol, NULL, RSRC_CONF,
         "Set the TLS protocol version to support."),
-    AP_INIT_TAKE_ARGV("TLSCiphers", tls_conf_set_ciphers, NULL, RSRC_CONF,
-        "Set the TLS ciphers to use when negotiating with a client."),
     AP_INIT_TAKE1(NULL, NULL, NULL, RSRC_CONF, NULL)
 };
