@@ -526,10 +526,12 @@ class LoadTest:
                     "clients": 1,
                     "columns": [
                         {"clients": 1},
+                        {"clients": 2},
                         {"clients": 4},
+                        {"clients": 8},
                         {"clients": 16},
+                        {"clients": 32},
                         {"clients": 64},
-                        {"clients": 256},
                     ],
                 }),
             }
