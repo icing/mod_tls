@@ -43,6 +43,13 @@ def _private_key(key_type):
         backend=default_backend()
     )
 
+class CertificateSpec:
+
+    def __init__(self, domains: List[str], key_type: str = None, single_file: bool = False):
+        self.domains = domains
+        self.key_type = key_type
+        self.single_file = single_file
+
 
 class Credentials:
 
@@ -89,13 +96,19 @@ class CertStore:
         if not os.path.exists(self._store_dir):
             os.makedirs(self._store_dir)
 
-    def save(self, creds: Credentials, name: str = None) -> Tuple[str, str]:
+    def save(self, creds: Credentials, name: str = None,
+             single_file: bool = False) -> Tuple[str, str]:
         name = name if name is not None else creds.name
         cert_file, pkey_file = self._fpaths_for(name, creds)
+        if single_file:
+            pkey_file = None
         with open(cert_file, "wb") as fd:
             fd.write(creds.cert_pem)
-        with open(pkey_file, "wb") as fd:
-            fd.write(creds.pkey_pem)
+            if pkey_file is None:
+                fd.write(creds.pkey_pem)
+        if pkey_file is not None:
+            with open(pkey_file, "wb") as fd:
+                fd.write(creds.pkey_pem)
         return cert_file, pkey_file
 
     def _fpaths_for(self, name: str, creds: Credentials):
@@ -122,14 +135,14 @@ class TlsTestCA:
     def ca_cert_file(self):
         return self._ca_cert_file
 
-    def create_cert(self, domains: List[str], key_type: str = None) -> Tuple[str, str]:
+    def create_cert(self, spec: CertificateSpec) -> Tuple[str, str]:
         """Create a certificate signed by this CA for the given domains.
         :returns: the certificate and private key PEM file paths
         """
-        creds = self._make_leaf_credentials(domains=domains,
+        creds = self._make_leaf_credentials(domains=spec.domains,
                                             issuer=self._root,
-                                            key_type=key_type)
-        return self._store.save(creds)
+                                            key_type=spec.key_type)
+        return self._store.save(creds, single_file=spec.single_file)
 
     @staticmethod
     def _make_x509_name(name: str, org_name: str, common_name: str = None) -> x509.Name:

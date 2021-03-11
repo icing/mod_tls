@@ -47,7 +47,7 @@ LogLevel tls:trace4
                     domain=domain))
             for cert_file, pkey_file in self.env.cert_files_for(domain):
                 cert_file = os.path.relpath(cert_file, self.env.server_dir)
-                pkey_file = os.path.relpath(pkey_file, self.env.server_dir)
+                pkey_file = os.path.relpath(pkey_file, self.env.server_dir) if pkey_file else ""
                 self.add("  TLSCertificate {cert_file} {pkey_file}".format(
                     cert_file = cert_file,
                     pkey_file = pkey_file,

@@ -12,7 +12,7 @@ from http.client import HTTPConnection
 from typing import List, Optional, Dict, Tuple, Union
 from urllib.parse import urlparse
 
-from test_cert import TlsTestCA
+from test_cert import TlsTestCA, CertificateSpec
 
 log = logging.getLogger(__name__)
 
@@ -56,9 +56,11 @@ class TlsTestEnv:
     DOMAIN_A = "a.mod-tls.test"
     DOMAIN_B = "b.mod-tls.test"
 
-    KEY_TYPES = {
-        DOMAIN_B: ["secp256r1", "rsa4096"]
-    }
+    CERT_SPECS = [
+        CertificateSpec([DOMAIN_A]),
+        CertificateSpec([DOMAIN_B], key_type='secp256r1', single_file=True),
+        CertificateSpec([DOMAIN_B], key_type='rsa4096'),
+    ]
     CERT_FILES = {}
     CA = None
 
@@ -72,14 +74,12 @@ class TlsTestEnv:
         if cls.CA is None:
             cls.CA = TlsTestCA(ca_dir=os.path.join(base_dir, 'ca'), key_type="rsa4096")
             cls.CERT_FILES['ca'] = cls.CA.ca_cert_file, None
-            certs = []
-            for domain in [cls.DOMAIN_A, cls.DOMAIN_B]:
-                if domain in cls.KEY_TYPES:
-                    for key_type in cls.KEY_TYPES[domain]:
-                        certs.append(cls.CA.create_cert(domains=[domain], key_type=key_type))
-                    cls.CERT_FILES[domain] = certs
-                else:
-                    cls.CERT_FILES[domain] = [cls.CA.create_cert(domains=[domain], key_type=None)]
+            for spec in cls.CERT_SPECS:
+                cert_file, key_file = cls.CA.create_cert(spec)
+                for name in spec.domains:
+                    if name not in cls.CERT_FILES:
+                        cls.CERT_FILES[name] = []
+                    cls.CERT_FILES[name].append((cert_file, key_file))
             cls._initialized = True
 
     def __init__(self):

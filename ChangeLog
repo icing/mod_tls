@@ -1,3 +1,5 @@
+ * `TLSCertificate` can also be used with a single argument, given one file
+   that contains all PEM data.
  * Configuration directives 'TLSProtocols' and 'TLSCiphers' implemented. Test
    cases added.
  * Added support for setting challenge certificates using the new (apache trunk)

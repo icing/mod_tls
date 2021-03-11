@@ -240,7 +240,8 @@ static const char *tls_conf_add_certificate(
 
     (void)dc;
     if (NULL != (err = cmd_resolve_file(cmd, &cert_file))) goto cleanup;
-    if (NULL != (err = cmd_resolve_file(cmd, &pkey_file))) goto cleanup;
+    /* key file may be NULL, in which case cert_file must contain the key PEM */
+    if (pkey_file && NULL != (err = cmd_resolve_file(cmd, &pkey_file))) goto cleanup;
 
     cert = apr_pcalloc(cmd->pool, sizeof(*cert));
     cert->cert_file = cert_file;
@@ -339,10 +340,10 @@ cleanup:
 }
 
 const command_rec tls_conf_cmds[] = {
-    /* none yet */
-    AP_INIT_TAKE2("TLSCertificate", tls_conf_add_certificate, NULL, RSRC_CONF,
-        "Add a certificate to the server by specifying a certificate file and"
-        "a private key file (PEM format)."),
+    AP_INIT_TAKE12("TLSCertificate", tls_conf_add_certificate, NULL, RSRC_CONF,
+        "Add a certificate to the server by specifying a file containing the "
+        "certificate PEM, followed by its chain PEMs. The PEM of the key must "
+        "either also be there or can be given as a separate file."),
     AP_INIT_TAKE1("TLSHonorClientOrder", tls_conf_set_honor_client_order, NULL, RSRC_CONF,
         "Set 'on' to have the server honor client preferences in cipher suites, default off."),
     AP_INIT_TAKE1("TLSListen", tls_conf_add_listener, NULL, RSRC_CONF,
