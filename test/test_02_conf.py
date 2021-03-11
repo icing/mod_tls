@@ -87,6 +87,8 @@ class TestConf:
         conf.write()
         assert self.env.apache_fail() == 0
 
+    @pytest.mark.skipif(not TlsTestEnv.CRUSTLY_SUPPORTS_TLS_VERSION,
+                        reason="crustls-not-implemented")
     @pytest.mark.parametrize("proto", [
         "default",
         "v1.2",
@@ -115,6 +117,8 @@ class TestConf:
         conf.write()
         assert self.env.apache_restart() == 0
 
+    @pytest.mark.skipif(not TlsTestEnv.CRUSTLY_SUPPORTS_TLS_CIPHER,
+                        reason="crustls-not-implemented")
     @pytest.mark.parametrize("cipher", [
         "default",
         "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256",
@@ -129,6 +133,8 @@ class TestConf:
         conf.write()
         assert self.env.apache_restart() == 0
 
+    @pytest.mark.skipif(not TlsTestEnv.CRUSTLY_SUPPORTS_TLS_CIPHER,
+                        reason="crustls-not-implemented")
     @pytest.mark.parametrize("cipher", [
         "wrong",
         "TLS_NULL_WITH_NULL_NULL",       # not supported

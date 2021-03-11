@@ -24,6 +24,7 @@
 extern module AP_MODULE_DECLARE_DATA tls_module;
 APLOG_USE_MODULE(tls);
 
+#if TLS_CIPHER_CONFIGURATION
 static void add_rustls_cipher(void *userdata, unsigned short id, const struct rustls_str *name)
 {
     const tls_iter_ctx_t *ctx = userdata;
@@ -35,11 +36,11 @@ static void add_rustls_cipher(void *userdata, unsigned short id, const struct ru
     cipher->name = apr_pstrndup(ctx->pool, name->data, name->len);
     apr_hash_set(ciphers, cipher->name, APR_HASH_KEY_STRING, cipher);
 }
+#endif /*TLS_CIPHER_CONFIGURATION*/
 
 static tls_conf_global_t *conf_global_get_or_make(apr_pool_t *pool, server_rec *s)
 {
     tls_conf_global_t *gconf;
-    tls_iter_ctx_t ctx;
 
     /* we create this only once for apache's one ap_server_conf.
      * If this gets called for another server, we should already have
@@ -54,11 +55,16 @@ static tls_conf_global_t *conf_global_get_or_make(apr_pool_t *pool, server_rec *
     gconf = apr_pcalloc(pool, sizeof(*gconf));
 
     gconf->supported_ciphers = apr_hash_make(pool);
-    memset(&ctx, 0, sizeof(ctx));
-    ctx.pool = pool;
-    ctx.s = s;
-    ctx.userdata = gconf->supported_ciphers;
-    rustls_supported_ciphersuite_iter(add_rustls_cipher, &ctx);
+#if TLS_CIPHER_CONFIGURATION
+    {
+        tls_iter_ctx_t ctx;
+        memset(&ctx, 0, sizeof(ctx));
+        ctx.pool = pool;
+        ctx.s = s;
+        ctx.userdata = gconf->supported_ciphers;
+        rustls_supported_ciphersuite_iter(add_rustls_cipher, &ctx);
+    }
+#endif /*TLS_CIPHER_CONFIGURATION*/
 
     return gconf;
 }

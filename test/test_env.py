@@ -64,6 +64,9 @@ class TlsTestEnv:
 
     SNI_CERT_BROKEN = True  # cerrtificate selection based on SNI not implemented
 
+    CRUSTLY_SUPPORTS_TLS_VERSION = False
+    CRUSTLY_SUPPORTS_TLS_CIPHER = False
+
     @classmethod
     def init_class(cls, base_dir: str):
         if cls.CA is None:

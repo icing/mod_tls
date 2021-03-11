@@ -188,6 +188,7 @@ static apr_status_t server_conf_setup(
     rv = use_certificates(builder, ptemp, sc->server, certificates);
     if (APR_SUCCESS != rv) goto cleanup;
 
+#if TLS_VERSION_CONFIGURATION
     if (sc->tls_protocols != TLS_PROTOCOL_AUTO) {
         apr_array_header_t *tls_versions = apr_array_make(ptemp, 3, sizeof(apr_uint16_t));
         if (sc->tls_protocols & TLS_PROTOCOL_1_3) {
@@ -202,7 +203,9 @@ static apr_status_t server_conf_setup(
             if (RUSTLS_RESULT_OK != rr) goto cleanup;
         }
     }
+#endif
 
+#if TLS_CIPHER_CONFIGURATION
     if (!apr_is_empty_array(sc->tls_ciphers)) {
         apr_array_header_t *cipher_ids;
         const tls_cipher_t *cipher;
@@ -217,7 +220,7 @@ static apr_status_t server_conf_setup(
             (apr_uint16_t*)cipher_ids->elts, (apr_size_t)cipher_ids->nelts);
         if (RUSTLS_RESULT_OK != rr) goto cleanup;
     }
-
+#endif
     rr = rustls_server_config_builder_set_ignore_client_order(
         builder, sc->honor_client_order == TLS_FLAG_FALSE);
     if (RUSTLS_RESULT_OK != rr) goto cleanup;
@@ -366,7 +369,7 @@ static const rustls_certified_key *tls_conn_hello_cb(
     if (hello->signature_schemes.len > 0) {
         for (i = 0; i < hello->signature_schemes.len; ++i) {
             n = hello->signature_schemes.data[i];
-            rustls_signature_scheme_get_name(n, buffer, sizeof(buffer), &len);
+            rustls_cipher_get_signature_scheme_name(n, buffer, sizeof(buffer), &len);
             ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, c,
                 "client supports signature scheme: %.*s", (int)len, buffer);
         }
@@ -610,6 +613,7 @@ apr_status_t tls_core_conn_post_handshake(conn_rec *c)
         goto cleanup;
     }
 
+#if TLS_VERSION_CONFIGURATION
     n = rustls_server_session_get_protocol_version(cc->rustls_session);
     switch (n) {
     case TLS_VERSION_1_2:
@@ -622,10 +626,19 @@ apr_status_t tls_core_conn_post_handshake(conn_rec *c)
         cc->tls_version = apr_psprintf(c->pool, "TLSv-%0x", n);
         break;
     }
-
+#else
+    /* we do not know, but it is at least this */
+    cc->tls_version = "TLSv1.2";
+#endif
+#if TLS_VERSION_CONFIGURATION
     n = rustls_server_session_get_negotiated_ciphersuite(cc->rustls_session);
     rustls_ciphersuite_get_name(n, buffer, sizeof(buffer), &len);
     cc->tls_ciphersuite = apr_pstrndup(c->pool, buffer, len);
+#else
+    /* we do not know, but it is something like this */
+    (void)buffer; (void)len; (void)n;
+    cc->tls_ciphersuite = "ECDHE-RSA-AES128-GCM-SHA256";
+#endif
     ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, c, "post_handshake %s: %s [%s]",
         cc->server->server_hostname, cc->tls_version, cc->tls_ciphersuite);
 

@@ -3,6 +3,8 @@ from datetime import timedelta
 import socket
 from threading import Thread
 
+import pytest
+
 from test_env import TlsTestEnv
 from test_conf import TlsTestConf
 
@@ -26,11 +28,17 @@ class TestProto:
     @classmethod
     def setup_class(cls):
         conf = TlsTestConf(env=cls.env)
-        conf.add_vhosts(domains=[cls.env.domain_a, cls.env.domain_b], extras={
-            'base': "LogLevel tls:debug",
-            cls.env.domain_a: "TLSProtocols v1.3",
-            cls.env.domain_b: "TLSProtocols v1.2",
-        })
+
+        if TlsTestEnv.CRUSTLY_SUPPORTS_TLS_VERSION:
+            conf.add_vhosts(domains=[cls.env.domain_a, cls.env.domain_b], extras={
+                'base': "LogLevel tls:debug",
+                cls.env.domain_a: "TLSProtocols v1.3",
+                cls.env.domain_b: "TLSProtocols v1.2",
+            })
+        else:
+            conf.add_vhosts(domains=[cls.env.domain_a, cls.env.domain_b], extras={
+                'base': "LogLevel tls:debug",
+            })
         conf.write()
         assert cls.env.apache_restart() == 0
 
@@ -42,6 +50,8 @@ class TestProto:
     def setup_method(self, _method):
         pass
 
+    @pytest.mark.skipif(not TlsTestEnv.CRUSTLY_SUPPORTS_TLS_VERSION,
+                        reason="crustls-not-implemented")
     def test_05_proto_1_2(self):
         r = self.env.https_get(self.env.domain_b, "/index.json",
                                extra_args=["--tlsv1.2"])
@@ -51,6 +61,8 @@ class TestProto:
                                    extra_args=["--tlsv1.3"])
             assert r.exit_code != 0, r.stderr
 
+    @pytest.mark.skipif(not TlsTestEnv.CRUSTLY_SUPPORTS_TLS_VERSION,
+                        reason="crustls-not-implemented")
     def test_05_proto_1_3(self):
         r = self.env.https_get(self.env.domain_a, "/index.json",
                                extra_args=["--tlsv1.3"])
@@ -64,6 +76,8 @@ class TestProto:
         time.sleep(0.1)
         s.close()
 
+    @pytest.mark.skipif(not TlsTestEnv.CRUSTLY_SUPPORTS_TLS_VERSION,
+                        reason="crustls-not-implemented")
     def test_05_proto_ssl_close(self):
         conf = TlsTestConf(env=self.env)
         conf.add_ssl_vhosts(domains=[self.env.domain_a, self.env.domain_b], extras={

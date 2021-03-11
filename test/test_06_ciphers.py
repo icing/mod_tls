@@ -60,6 +60,8 @@ class TestCiphers:
         assert protocol == "TLSv1.2", r.stdout
         assert cipher == "ECDHE-RSA-AES256-GCM-SHA384", r.stdout
 
+    @pytest.mark.skipif(not TlsTestEnv.CRUSTLY_SUPPORTS_TLS_CIPHER,
+                        reason="crustls-not-implemented")
     def test_06_ciphers_server_ecdsa(self):
         conf = TlsTestConf(env=self.env)
         conf.add_vhosts(domains=[self.domain_a, self.domain_b], extras={
@@ -74,6 +76,8 @@ class TestCiphers:
         assert protocol == "TLSv1.2", r.stdout
         assert cipher == "ECDHE-ECDSA-AES256-GCM-SHA384", r.stdout
 
+    @pytest.mark.skipif(not TlsTestEnv.CRUSTLY_SUPPORTS_TLS_CIPHER,
+                        reason="crustls-not-implemented")
     def test_06_ciphers_server_rsa(self):
         conf = TlsTestConf(env=self.env)
         conf.add_vhosts(domains=[self.domain_a, self.domain_b], extras={
