@@ -1,3 +1,4 @@
+ * Added test case for timeout handling during TLS handshake.
  * new config Directive `TLSOptions` similar for mod_ssl's `SSLOptions`.
    Only open so far is 'StdEnvVars' which adds a (currently limited) list
    of TLS related environment variables to CGI handlers.
