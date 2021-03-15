@@ -52,5 +52,8 @@ typedef struct {
 #define TLS_VERSION_CONFIGURATION    0
 #define TLS_CIPHER_CONFIGURATION    0
 
+/* name of the global session cache mutex, should we need it */
+#define TLS_SESSION_CACHE_MUTEX_TYPE    "tls-session-cache"
+
 #endif /* tls_def_h */
 

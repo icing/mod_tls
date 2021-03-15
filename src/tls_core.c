@@ -15,11 +15,13 @@
 #include <http_log.h>
 #include <http_protocol.h>
 #include <http_vhost.h>
+#include <ap_socache.h>
 
 #include "tls_defs.h"
 #include "tls_conf.h"
 #include "tls_core.h"
 #include "tls_util.h"
+#include "tls_cache.h"
 
 
 extern module AP_MODULE_DECLARE_DATA tls_module;
@@ -314,8 +316,6 @@ apr_status_t tls_core_init(apr_pool_t *p, apr_pool_t *ptemp, server_rec *base_se
         }
     }
 
-    /* Collect and prepare certificates for enabled servers */
-
     /* Create server configs for enabled servers */
     for (s = base_server; s; s = s->next) {
         sc = tls_conf_server_get(s);
@@ -323,7 +323,8 @@ apr_status_t tls_core_init(apr_pool_t *p, apr_pool_t *ptemp, server_rec *base_se
         if (APR_SUCCESS != rv) goto cleanup;
     }
 
-    rv = APR_SUCCESS;
+    rv = tls_cache_post_config(p, ptemp, base_server);
+
 cleanup:
     ap_log_error(APLOG_MARK, APLOG_TRACE2, rv, base_server, "tls_core_init done.");
     return rv;
@@ -565,6 +566,9 @@ apr_status_t tls_core_conn_server_init(conn_rec *c)
         }
 
         rv = process_alpn(c, cc->server, builder);
+        if (APR_SUCCESS != rv) goto cleanup;
+
+        rv = tls_cache_init_conn(builder, c);
         if (APR_SUCCESS != rv) goto cleanup;
 
         /* if found or not, cc->server will be the server we use now to do

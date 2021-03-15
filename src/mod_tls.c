@@ -15,6 +15,7 @@
 #include <http_log.h>
 #include <http_protocol.h>
 #include <http_request.h>
+#include <ap_socache.h>
 
 #include <crustls.h>
 
@@ -22,6 +23,7 @@
 #include "tls_defs.h"
 #include "tls_conf.h"
 #include "tls_core.h"
+#include "tls_cache.h"
 #include "tls_filter.h"
 #include "tls_var.h"
 #include "tls_version.h"
@@ -49,6 +51,12 @@ static const char* crustls_version(apr_pool_t *p)
     memset(buffer, 0, sizeof(buffer));
     len = rustls_version(buffer, sizeof(buffer)-1);
     return apr_pstrndup(p, buffer, len);
+}
+
+static int tls_pre_config(apr_pool_t *pconf, apr_pool_t *plog, apr_pool_t *ptemp)
+{
+    tls_cache_pre_config(pconf, plog, ptemp);
+    return OK;
 }
 
 static apr_status_t tls_post_config(apr_pool_t *p, apr_pool_t *plog,
@@ -79,6 +87,11 @@ static apr_status_t tls_post_config(apr_pool_t *p, apr_pool_t *plog,
     }
 
     return tls_core_init(p, ptemp, s);
+}
+
+static void tls_init_child(apr_pool_t *p, server_rec *s)
+{
+    tls_cache_init_child(p, s);
 }
 
 static int hook_pre_connection(conn_rec *c, void *csd)
@@ -148,7 +161,9 @@ static void tls_hooks(apr_pool_t *pool)
      */
     tls_filter_register(pool);
 
+    ap_hook_pre_config(tls_pre_config, NULL,NULL, APR_HOOK_MIDDLE);
     ap_hook_post_config(tls_post_config, NULL, NULL, APR_HOOK_MIDDLE);
+    ap_hook_child_init(tls_init_child, NULL,NULL, APR_HOOK_MIDDLE);
     /* connection things */
     ap_hook_pre_connection(hook_pre_connection, NULL, NULL, APR_HOOK_MIDDLE);
     ap_hook_process_connection(hook_connection, NULL, mod_http2, APR_HOOK_MIDDLE);

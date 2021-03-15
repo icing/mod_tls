@@ -15,11 +15,13 @@
 #include <http_config.h>
 #include <http_log.h>
 #include <http_main.h>
+#include <ap_socache.h>
 
 #include "tls_defs.h"
 #include "tls_conf.h"
 #include "tls_util.h"
 #include "tls_var.h"
+#include "tls_cache.h"
 
 
 extern module AP_MODULE_DECLARE_DATA tls_module;
@@ -54,6 +56,7 @@ static tls_conf_global_t *conf_global_get_or_make(apr_pool_t *pool, server_rec *
     }
 
     gconf = apr_pcalloc(pool, sizeof(*gconf));
+    gconf->ap_server = ap_server_conf;
 
     gconf->supported_ciphers = apr_hash_make(pool);
 #if TLS_CIPHER_CONFIGURATION
@@ -69,6 +72,7 @@ static tls_conf_global_t *conf_global_get_or_make(apr_pool_t *pool, server_rec *
 
     gconf->var_lookups = apr_hash_make(pool);
     tls_var_init_lookup_hash(pool, gconf->var_lookups);
+    gconf->session_cache_spec = "default";
 
     return gconf;
 }
@@ -412,6 +416,20 @@ cleanup:
     return err;
 }
 
+static const char *tls_conf_set_session_cache(
+    cmd_parms *cmd, void *dc, const char *value)
+{
+    tls_conf_server_t *sc = tls_conf_server_get(cmd->server);
+    const char *err = NULL;
+
+    (void)dc;
+    if ((err = ap_check_cmd_context(cmd, GLOBAL_ONLY))) goto cleanup;
+
+    err = tls_cache_set_specification(value, sc->global, cmd->pool, cmd->temp_pool);
+cleanup:
+    return err;
+}
+
 const command_rec tls_conf_cmds[] = {
     AP_INIT_TAKE12("TLSCertificate", tls_conf_add_certificate, NULL, RSRC_CONF,
         "Add a certificate to the server by specifying a file containing the "
@@ -427,5 +445,7 @@ const command_rec tls_conf_cmds[] = {
         "En-/disables optional features in the module."),
     AP_INIT_TAKE_ARGV("TLSProtocols", tls_conf_set_protocol, NULL, RSRC_CONF,
         "Set the TLS protocol version to support."),
+    AP_INIT_TAKE1("TLSSessionCache", tls_conf_set_session_cache, NULL, RSRC_CONF,
+        "Set which cache to use for TLS sessions."),
     AP_INIT_TAKE1(NULL, NULL, NULL, RSRC_CONF, NULL)
 };

@@ -14,6 +14,7 @@
 #include <http_core.h>
 #include <http_main.h>
 #include <http_log.h>
+#include <ap_socache.h>
 
 #include "tls_defs.h"
 #include "tls_conf.h"

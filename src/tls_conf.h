@@ -11,9 +11,16 @@
  * and then readonly.
  */
 typedef struct {
+    server_rec *ap_server;            /* the gobal server we initialized on */
     server_addr_rec *tls_addresses;   /* the addresses/port we are active on */
     apr_hash_t *supported_ciphers;    /* hash by name of tls_cipher_t* */
     apr_hash_t *var_lookups;          /* variable lookup functions by var name */
+
+    const char *session_cache_spec;   /* how the session cache was specified */
+    const ap_socache_provider_t *session_cache_provider;
+    ap_socache_instance_t *session_cache;
+    apr_global_mutex_t *session_cache_mutex;
+
 } tls_conf_global_t;
 
 /* The module configuration for a server (vhost).

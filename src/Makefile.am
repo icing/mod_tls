@@ -28,6 +28,7 @@ mod_tls_la_LDFLAGS  = -lcrustls -module -export-symbols-regex tls_module
 
 OBJECTS = \
     mod_tls.c \
+    tls_cache.c \
     tls_conf.c \
     tls_core.c \
     tls_filter.c \
@@ -36,12 +37,14 @@ OBJECTS = \
 
 HFILES = \
     mod_tls.h \
+    tls_cache.h \
     tls_conf.h \
     tls_core.h \
     tls_defs.h \
     tls_filter.h \
     tls_util.h \
-    tls_var.h
+    tls_var.h \
+    tls_version.h
 
 mod_tls_la_SOURCES = $(HFILES) $(OBJECTS)
 

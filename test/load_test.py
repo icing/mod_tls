@@ -511,6 +511,16 @@ class LoadTest:
                         {"requests": 50000, "rsize": 10},
                     ],
                 }),
+                "20c-throughput": cls.scenario_with(scenario_sf, {
+                    "title": "20 conn, 5k-50k requests, *sizes, throughput (MB/s)",
+                    "clients": 20,
+                    "columns": [
+                        {"requests": 5000, "rsize": 10 * 1024},
+                        {"requests": 10000, "rsize": 1024},
+                        {"requests": 25000, "rsize": 100},
+                        {"requests": 50000, "rsize": 10},
+                    ],
+                }),
                 "50c-throughput": cls.scenario_with(scenario_sf, {
                     "title": "50 conn, 10k-100k requests, *sizes, throughput (MB/s)",
                     "clients": 50,

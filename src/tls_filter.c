@@ -13,6 +13,7 @@
 #include <http_connection.h>
 #include <http_core.h>
 #include <http_log.h>
+#include <ap_socache.h>
 
 #include "tls_defs.h"
 #include "tls_conf.h"
@@ -266,9 +267,6 @@ static apr_status_t filter_do_pre_handshake(
             }
             /* Notice: we never write here to the client. We just want to inspect
              * the client hello. */
-
-            /* TODO: check that handshake timeout supervision by mod_reqtimeout
-             * can work here as well. */
         } while (!fctx->cc->client_hello_seen);
 
         /* We have seen the client hello and selected the server (vhost) to use
