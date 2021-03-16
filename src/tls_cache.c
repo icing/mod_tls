@@ -64,6 +64,8 @@ static const char *cache_init(tls_conf_global_t *gconf, apr_pool_t *p, apr_pool_
     else if (!apr_strnatcasecmp("none", gconf->session_cache_spec)) {
         gconf->session_cache_provider = NULL;
         gconf->session_cache = NULL;
+        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, gconf->ap_server, APLOGNO()
+                     "session cache explicitly disabled");
         goto cleanup;
     }
     else if (!apr_strnatcasecmp("default", gconf->session_cache_spec)) {
@@ -74,8 +76,11 @@ static const char *cache_init(tls_conf_global_t *gconf, apr_pool_t *p, apr_pool_
 #endif
         gconf->session_cache_spec = apr_psprintf(p, "%s:%s/%s(%ld)",
             TLS_CACHE_DEF_PROVIDER, path, TLS_CACHE_DEF_FILE, (long)TLS_CACHE_DEF_SIZE);
+        gconf->session_cache_spec = "shmcb:mod_tls-sesss(64000)";
     }
 
+    ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, gconf->ap_server, APLOGNO()
+                 "Using session cache: %s", gconf->session_cache_spec);
     name = gconf->session_cache_spec;
     args = ap_strchr(name, ':');
     if (args) {
@@ -128,19 +133,20 @@ apr_status_t tls_cache_post_config(apr_pool_t *p, apr_pool_t *ptemp, server_rec 
     err = cache_init(sc->global, p, ptemp);
     if (err) {
         ap_log_error(APLOG_MARK, APLOG_WARNING, 0, s, APLOGNO()
-                     "default session cache could not be initialized from '%s': %s",
-                     sc->global->session_cache_spec, err);
-        ap_log_error(APLOG_MARK, APLOG_WARNING, 0, s, APLOGNO()
-                     "will continue without session cache. Consider specifying an "
-                     "explicit one using 'TLSSessionCache' or make sure that the "
-                     "necessary cache module is loaded.");
+                     "session cache [%s] could not be initialized, will continue "
+                     "without session one. Since this will impact performance, "
+                     "consider making use of the 'TLSSessionCache' directive. The "
+                     "error was: %s", sc->global->session_cache_spec, err);
     }
-    else if (sc->global->session_cache) {
+
+    if (sc->global->session_cache) {
         struct ap_socache_hints hints;
 
+        ap_log_error(APLOG_MARK, APLOG_TRACE1, 0, s, "provider init session cache [%s]",
+                     sc->global->session_cache_spec);
         memset(&hints, 0, sizeof(hints));
-        hints.avg_obj_size = 150;
-        hints.avg_id_len = 30;
+        hints.avg_obj_size = 100;
+        hints.avg_id_len = 33;
         hints.expiry_interval = 30;
 
         rv = sc->global->session_cache_provider->init(
@@ -204,20 +210,26 @@ static int tls_cache_get(
     tls_conf_conn_t *cc = tls_conf_conn_get(c);
     tls_conf_server_t *sc = tls_conf_server_get(cc->server);
     apr_status_t rv = APR_ENOENT;
-    unsigned int val_len;
+    unsigned int vlen, klen;
+    const unsigned char *kdata;
 
     if (!sc->global->session_cache) goto not_found;
     tls_cache_lock(sc->global);
 
-    val_len = (unsigned int)count;
+    kdata = key->data;
+    klen = (unsigned int)key->len;
+    vlen = (unsigned int)count;
     rv = sc->global->session_cache_provider->retrieve(
-        sc->global->session_cache, cc->server,
-        key->data, (unsigned int)key->len, buf, &val_len, c->pool);
+        sc->global->session_cache, cc->server, kdata, klen, buf, &vlen, c->pool);
 
-    if (remove_after || APR_SUCCESS != rv) {
+    if (APLOGctrace4(c)) {
+        apr_ssize_t n = klen;
+        ap_log_cerror(APLOG_MARK, APLOG_TRACE4, rv, c, "retrieve key %d[%8x], found %d val",
+            klen, apr_hashfunc_default((const char*)kdata, &n), vlen);
+    }
+    if (remove_after || (APR_SUCCESS != rv && !APR_STATUS_IS_NOTFOUND(rv))) {
         sc->global->session_cache_provider->remove(
-            sc->global->session_cache, cc->server,
-            key->data, (unsigned int)key->len, c->pool);
+            sc->global->session_cache, cc->server, key->data, klen, c->pool);
     }
 
     tls_cache_unlock(sc->global);
@@ -239,17 +251,25 @@ static int tls_cache_put(
     tls_conf_conn_t *cc = tls_conf_conn_get(c);
     tls_conf_server_t *sc = tls_conf_server_get(cc->server);
     apr_status_t rv = APR_ENOENT;
-    apr_time_t expiry;
-    unsigned char *data;
+    apr_time_t expires_at;
+    unsigned int klen, vlen;
+    const unsigned char *kdata;
 
     if (!sc->global->session_cache) goto not_stored;
     tls_cache_lock(sc->global);
 
-    expiry = apr_time_now() + apr_time_from_sec(300);
-    data = (unsigned char *)apr_pstrmemdup(c->pool, (const char*)val->data, val->len);
+    expires_at = apr_time_now() + apr_time_from_sec(300);
+    kdata = key->data;
+    klen = (unsigned int)key->len;
+    vlen = (unsigned int)val->len;
     rv = sc->global->session_cache_provider->store(sc->global->session_cache, cc->server,
-        (unsigned char*)key->data, (unsigned int)key->len, expiry,
-        (unsigned char*)val->data, (unsigned int)val->len, c->pool);
+                                                   kdata, klen, expires_at,
+                                                   (unsigned char*)val->data, vlen, c->pool);
+    if (APLOGctrace4(c)) {
+        apr_ssize_t n = klen;
+        ap_log_cerror(APLOG_MARK, APLOG_TRACE4, rv, c, "stored key %d[%8x], with %d val",
+            klen, apr_hashfunc_default((const char*)kdata, &n), vlen);
+    }
     tls_cache_unlock(sc->global);
     if (APR_SUCCESS != rv) goto not_stored;
     return 1;
@@ -264,7 +284,8 @@ apr_status_t tls_cache_init_conn(
     tls_conf_conn_t *cc = tls_conf_conn_get(c);
     tls_conf_server_t *sc = cc? tls_conf_server_get(cc->server) : NULL;
 
-    if (sc && sc->global->session_cache && /* DISABLES CODE */(1)) {
+    if (sc && sc->global->session_cache) {
+        ap_log_cerror(APLOG_MARK, APLOG_TRACE3, 0, c, "adding session persistance to rustls");
         rustls_server_config_builder_set_persistence(
             builder, c, tls_cache_get, tls_cache_put);
     }

@@ -1,5 +1,11 @@
 Include "conf/modules.conf"
 
+ErrorLogFormat "[%{cu}t] [%-m:%l] [pid %P:tid %T] %7F: %E: %M"
+LogFormat "%h %l %u %t \"%r\" %>s %O \"%{Referer}i\" \"%{User-Agent}i\" %k" combined
+LogFormat "%h %l %u %t \"%r\" %>s %b" common
+CustomLog "logs/access_log" combined
+
+
 ServerName localhost
 ServerRoot "@GEN_DIR@/apache"
 DocumentRoot "htdocs"
@@ -27,12 +33,6 @@ AddHandler cgi-script .py
     ServerName b.mod-tls.test
     DocumentRoot "htdocs/b.mod-tls.test"
 </VirtualHost>
-
-<IfModule log_config_module>
-    LogFormat "%h %l %u %t \"%r\" %>s %O \"%{Referer}i\" \"%{User-Agent}i\" %k" combined
-    LogFormat "%h %l %u %t \"%r\" %>s %b" common
-    CustomLog "logs/access_log" combined
-</IfModule>
 
 <Directory "@GEN_DIR@/apache/htdocs/b.mod-tls.test">
     Options Indexes FollowSymLinks
