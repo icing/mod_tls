@@ -1,3 +1,5 @@
+ * Added test case for session storage in TLSv1.2 using openssl. TLSv1.3
+   test is incomplete and disabled for now.
  * Added support for new session store feature in my crustls branch.
  * Added test case for timeout handling during TLS handshake.
  * new config Directive `TLSOptions` similar for mod_ssl's `SSLOptions`.

@@ -2,6 +2,7 @@ import inspect
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import time
@@ -294,4 +295,30 @@ class TlsTestEnv:
             args.extend(extra_args)
         args.extend([])
         return self.openssl(args)
+
+    CURL_SUPPORTS_TLS_1_3 = None
+
+    def curl_supports_tls_1_3(self) -> bool:
+        if self.CURL_SUPPORTS_TLS_1_3 is None:
+            r = self.https_get(self.domain_a, "/index.json", extra_args=["--tlsv1.3"])
+            self.CURL_SUPPORTS_TLS_1_3 = r.exit_code == 0
+        return self.CURL_SUPPORTS_TLS_1_3
+
+    OPENSSL_SUPPORTED_PROTOCOLS = None
+
+    @staticmethod
+    def openssl_supports_tls_1_3() -> bool:
+        if TlsTestEnv.OPENSSL_SUPPORTED_PROTOCOLS is None:
+            env = TlsTestEnv()
+            r = env.openssl(args=["ciphers", "-v"])
+            protos = set()
+            ciphers = set()
+            for line in r.stdout.splitlines():
+                m = re.match(r'^(\S+)\s+(\S+)\s+(.*)$', line)
+                if m:
+                    ciphers.add(m.group(1))
+                    protos.add(m.group(2))
+            TlsTestEnv.OPENSSL_SUPPORTED_PROTOCOLS = protos
+            TlsTestEnv.OPENSSL_SUPPORTED_CIPHERS = ciphers
+        return "TLSv1.3" in TlsTestEnv.OPENSSL_SUPPORTED_PROTOCOLS
 
