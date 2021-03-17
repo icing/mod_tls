@@ -198,12 +198,12 @@ static void tls_cache_unlock(tls_conf_global_t *gconf)
     }
 }
 
-static int tls_cache_get(
+static rustls_result tls_cache_get(
     void *userdata,
     const rustls_slice_bytes *key,
+    int remove_after,
     unsigned char *buf,
     size_t count,
-    int remove_after,
     size_t *out_n)
 {
     conn_rec *c = userdata;
@@ -235,14 +235,14 @@ static int tls_cache_get(
     tls_cache_unlock(sc->global);
     if (APR_SUCCESS != rv) goto not_found;
     *out_n = count;
-    return 1;
+    return RUSTLS_RESULT_OK;
 
 not_found:
     *out_n = 0;
-    return 0;
+    return RUSTLS_RESULT_NOT_FOUND;
 }
 
-static int tls_cache_put(
+static rustls_result tls_cache_put(
     void *userdata,
     const rustls_slice_bytes *key,
     const rustls_slice_bytes *val)
@@ -272,10 +272,10 @@ static int tls_cache_put(
     }
     tls_cache_unlock(sc->global);
     if (APR_SUCCESS != rv) goto not_stored;
-    return 1;
+    return RUSTLS_RESULT_OK;
 
 not_stored:
-    return 0;
+    return RUSTLS_RESULT_NOT_FOUND;
 }
 
 apr_status_t tls_cache_init_conn(
