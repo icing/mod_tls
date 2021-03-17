@@ -7,13 +7,20 @@
 #ifndef tls_conf_h
 #define tls_conf_h
 
+/* Configuration flags */
+#define TLS_FLAG_UNSET  (-1)
+#define TLS_FLAG_FALSE  (0)
+#define TLS_FLAG_TRUE   (1)
+
+struct tls_proto_conf_t;
+
 /* The global module configuration, created after post-config
  * and then readonly.
  */
 typedef struct {
     server_rec *ap_server;            /* the gobal server we initialized on */
     server_addr_rec *tls_addresses;   /* the addresses/port we are active on */
-    apr_hash_t *supported_ciphers;    /* hash by name of tls_cipher_t* */
+    struct tls_proto_conf_t *proto;   /* TLS protocol/rustls specific globals */
     apr_hash_t *var_lookups;          /* variable lookup functions by var name */
 
     const char *session_cache_spec;   /* how the session cache was specified */
@@ -34,8 +41,8 @@ typedef struct {
 
     int enabled;
     apr_array_header_t *certificates; /* array of (tls_certificate_t*) available for server_rec */
-    int tls_protocols;                /* the minimum TLS protocol version */
-    apr_array_header_t *tls_ciphers;  /* List of tls_cipher_t*, if not default */
+    int tls_protocol_min;             /* the minimum TLS protocol version to use */
+    apr_array_header_t *tls_ciphers;  /* List of apr_uint16_t cipher ids, if not default */
     int honor_client_order;           /* honor client cipher ordering */
 
     int service_unavailable;          /* TLS not trustworthy configured, return 503s */

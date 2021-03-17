@@ -20,17 +20,11 @@ class TestProto:
     @classmethod
     def setup_class(cls):
         conf = TlsTestConf(env=cls.env)
-
-        if TlsTestEnv.CRUSTLY_SUPPORTS_TLS_VERSION:
-            conf.add_vhosts(domains=[cls.env.domain_a, cls.env.domain_b], extras={
-                'base': "LogLevel tls:debug",
-                cls.env.domain_a: "TLSProtocols v1.3",
-                cls.env.domain_b: "TLSProtocols v1.2",
-            })
-        else:
-            conf.add_vhosts(domains=[cls.env.domain_a, cls.env.domain_b], extras={
-                'base': "LogLevel tls:debug",
-            })
+        conf.add_vhosts(domains=[cls.env.domain_a, cls.env.domain_b], extras={
+            'base': "LogLevel tls:debug",
+            cls.env.domain_a: "TLSProtocols TLSv1.3+",
+            cls.env.domain_b: "TLSProtocols TLSv1.2+",
+        })
         conf.write()
         assert cls.env.apache_restart() == 0
 

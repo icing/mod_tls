@@ -7,6 +7,10 @@
 #ifndef tls_cache_h
 #define tls_cache_h
 
+/* name of the global session cache mutex, should we need it */
+#define TLS_SESSION_CACHE_MUTEX_TYPE    "tls-session-cache"
+
+
 /**
  * Set the specification of the session cache to use. The syntax is
  *   "default|none|<provider_name>(:<arguments>)?"

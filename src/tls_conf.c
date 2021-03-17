@@ -18,6 +18,7 @@
 #include <ap_socache.h>
 
 #include "tls_defs.h"
+#include "tls_proto.h"
 #include "tls_conf.h"
 #include "tls_util.h"
 #include "tls_var.h"
@@ -26,20 +27,6 @@
 
 extern module AP_MODULE_DECLARE_DATA tls_module;
 APLOG_USE_MODULE(tls);
-
-#if TLS_CIPHER_CONFIGURATION
-static void add_rustls_cipher(void *userdata, unsigned short id, const struct rustls_str *name)
-{
-    const tls_iter_ctx_t *ctx = userdata;
-    apr_hash_t *ciphers = ctx->userdata;
-    tls_cipher_t *cipher;
-
-    cipher = apr_pcalloc(ctx->pool, sizeof(*cipher));
-    cipher->id = id;
-    cipher->name = apr_pstrndup(ctx->pool, name->data, name->len);
-    apr_hash_set(ciphers, cipher->name, APR_HASH_KEY_STRING, cipher);
-}
-#endif /*TLS_CIPHER_CONFIGURATION*/
 
 static tls_conf_global_t *conf_global_get_or_make(apr_pool_t *pool, server_rec *s)
 {
@@ -57,18 +44,7 @@ static tls_conf_global_t *conf_global_get_or_make(apr_pool_t *pool, server_rec *
 
     gconf = apr_pcalloc(pool, sizeof(*gconf));
     gconf->ap_server = ap_server_conf;
-
-    gconf->supported_ciphers = apr_hash_make(pool);
-#if TLS_CIPHER_CONFIGURATION
-    {
-        tls_iter_ctx_t ctx;
-        memset(&ctx, 0, sizeof(ctx));
-        ctx.pool = pool;
-        ctx.s = s;
-        ctx.userdata = gconf->supported_ciphers;
-        rustls_supported_ciphersuite_iter(add_rustls_cipher, &ctx);
-    }
-#endif /*TLS_CIPHER_CONFIGURATION*/
+    gconf->proto = tls_proto_init(pool, s);
 
     gconf->var_lookups = apr_hash_make(pool);
     tls_var_init_lookup_hash(pool, gconf->var_lookups);
@@ -99,8 +75,8 @@ void *tls_conf_create_svr(apr_pool_t *pool, server_rec *s)
     conf->enabled = TLS_FLAG_UNSET;
     conf->certificates = apr_array_make(pool, 3, sizeof(tls_certificate_t*));
     conf->honor_client_order = TLS_FLAG_UNSET;
-    conf->tls_protocols = TLS_FLAG_UNSET;
-    conf->tls_ciphers = apr_array_make(pool, 3, sizeof(const tls_cipher_t*));;
+    conf->tls_protocol_min = TLS_FLAG_UNSET;
+    conf->tls_ciphers = apr_array_make(pool, 3, sizeof(apr_uint16_t));;
     return conf;
 }
 
@@ -121,7 +97,7 @@ void *tls_conf_merge_svr(apr_pool_t *pool, void *basev, void *addv)
 
     nconf->enabled = MERGE_INT(base, add, enabled);
     nconf->certificates = apr_array_append(pool, base->certificates, add->certificates);
-    nconf->tls_protocols = MERGE_INT(base, add, tls_protocols);
+    nconf->tls_protocol_min = MERGE_INT(base, add, tls_protocol_min);
     nconf->tls_ciphers = add->tls_ciphers->nelts? add->tls_ciphers : base->tls_ciphers;
     nconf->honor_client_order = MERGE_INT(base, add, honor_client_order);
     return nconf;
@@ -165,7 +141,7 @@ apr_status_t tls_conf_server_apply_defaults(tls_conf_server_t *sc, apr_pool_t *p
 {
     (void)p;
     if (sc->enabled == TLS_FLAG_UNSET) sc->enabled = TLS_FLAG_FALSE;
-    if (sc->tls_protocols == TLS_FLAG_UNSET) sc->tls_protocols = TLS_PROTOCOL_AUTO;
+    if (sc->tls_protocol_min == TLS_FLAG_UNSET) sc->tls_protocol_min = 0;
     if (sc->honor_client_order == TLS_FLAG_UNSET) sc->honor_client_order = TLS_FLAG_FALSE;
 
     return APR_SUCCESS;
@@ -298,6 +274,7 @@ static const char *tls_conf_set_ciphers(
 {
     tls_conf_server_t *sc = tls_conf_server_get(cmd->server);
     const char *err = NULL;
+    apr_uint16_t cipher;
 
     (void)dc;
     if (cmd->path) {
@@ -318,14 +295,13 @@ static const char *tls_conf_set_ciphers(
 
             name = apr_strtok(apr_pstrdup(cmd->pool, value), ":", &last);
             while (name) {
-                tls_cipher_t *cipher = apr_hash_get(sc->global->supported_ciphers,
-                    name, APR_HASH_KEY_STRING);
+                cipher = tls_proto_get_cipher_by_name(sc->global->proto, name);
                 if (!cipher) {
                     err = apr_pstrcat(cmd->pool, cmd->cmd->name,
                             ": cipher not supported '", name, "'", NULL);
                     goto cleanup;
                 }
-                *(const tls_cipher_t**)apr_array_push(sc->tls_ciphers) = cipher;
+                *(apr_uint16_t*)apr_array_push(sc->tls_ciphers) = cipher;
                 name = apr_strtok(NULL, ":", &last);
             }
         }
@@ -347,34 +323,33 @@ static const char *tls_conf_set_honor_client_order(
 }
 
 static const char *tls_conf_set_protocol(
-    cmd_parms *cmd, void *dc, int argc, char *const argv[])
+    cmd_parms *cmd, void *dc, const char *v)
 {
     tls_conf_server_t *sc = tls_conf_server_get(cmd->server);
     const char *err = NULL;
-    int i;
 
     (void)dc;
     if (cmd->path) {
         err = "TLS protocol versions cannot be set inside a directory context";
         goto cleanup;
     }
-    if (argc == 0) {
-        err = "specify the TLS protocol versions to use or 'default' for the rustls default ones.";
-        goto cleanup;
+    if (!apr_strnatcasecmp("default", v)) {
+        sc->tls_protocol_min = 0;
     }
-    sc->tls_protocols = TLS_PROTOCOL_AUTO;
-    if (argc > 1 || apr_strnatcasecmp("default", argv[0])) {
-        for (i = 0; i < argc; ++i) {
-            if (!apr_strnatcasecmp(argv[i], "v1.2")) {
-                sc->tls_protocols |= TLS_PROTOCOL_1_2;
-            } else if (!apr_strnatcasecmp(argv[i], "v1.3")) {
-                sc->tls_protocols |= TLS_PROTOCOL_1_3;
-            } else {
-                err = apr_pstrcat(cmd->pool, cmd->cmd->name,
-                    ": value must be 'default', 'v1.2' or 'v1.3': '", argv[i], "'", NULL);
-                goto cleanup;
-            }
+    else if (*v && v[strlen(v)-1] == '+') {
+        char *name = apr_pstrdup(cmd->pool, v);
+        name[strlen(name)-1] = '\0';
+        sc->tls_protocol_min = tls_proto_get_version_by_name(sc->global->proto, name);
+        if (!sc->tls_protocol_min) {
+            err = apr_pstrcat(cmd->pool, cmd->cmd->name,
+                ": unrecognized protocol version specifier (try v1.2+ or v1.3+): '", v, "'", NULL);
+            goto cleanup;
         }
+    }
+    else {
+        err = apr_pstrcat(cmd->pool, cmd->cmd->name,
+            ": value must be 'default', 'v1.2+' or 'v1.3+': '", v, "'", NULL);
+        goto cleanup;
     }
 cleanup:
     return err;
@@ -443,8 +418,8 @@ const command_rec tls_conf_cmds[] = {
         "Specify an adress+port where the module shall handle incoming TLS connections."),
     AP_INIT_TAKE_ARGV("TLSOptions", tls_conf_set_options, NULL, OR_OPTIONS,
         "En-/disables optional features in the module."),
-    AP_INIT_TAKE_ARGV("TLSProtocols", tls_conf_set_protocol, NULL, RSRC_CONF,
-        "Set the TLS protocol version to support."),
+    AP_INIT_TAKE1("TLSProtocols", tls_conf_set_protocol, NULL, RSRC_CONF,
+        "Set the minimum TLS protocol version to use."),
     AP_INIT_TAKE1("TLSSessionCache", tls_conf_set_session_cache, NULL, RSRC_CONF,
         "Set which cache to use for TLS sessions."),
     AP_INIT_TAKE1(NULL, NULL, NULL, RSRC_CONF, NULL)

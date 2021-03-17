@@ -18,6 +18,7 @@
 #include <ap_socache.h>
 
 #include "tls_defs.h"
+#include "tls_proto.h"
 #include "tls_conf.h"
 #include "tls_core.h"
 #include "tls_util.h"
@@ -100,7 +101,7 @@ static apr_status_t use_certificates(
 
         for (i = 0; i < cert_specs->nelts; ++i) {
             tls_certificate_t *spec = APR_ARRAY_IDX(cert_specs, i, tls_certificate_t*);
-            rv = tls_util_load_certified_key(p, spec, &ckey);
+            rv = tls_proto_load_certified_key(p, spec, &ckey);
             if (APR_SUCCESS != rv) goto cleanup;
             APR_ARRAY_PUSH(certified_keys, const rustls_certified_key*) = ckey;
         }
@@ -190,34 +191,36 @@ static apr_status_t server_conf_setup(
     rv = use_certificates(builder, ptemp, sc->server, certificates);
     if (APR_SUCCESS != rv) goto cleanup;
 
-    if (sc->tls_protocols != TLS_PROTOCOL_AUTO) {
-        apr_array_header_t *tls_versions = apr_array_make(ptemp, 3, sizeof(apr_uint16_t));
-        if (sc->tls_protocols & TLS_PROTOCOL_1_3) {
-            *(apr_uint16_t *)apr_array_push(tls_versions) = TLS_VERSION_1_3;
-        }
-        if (sc->tls_protocols & TLS_PROTOCOL_1_2) {
-            *(apr_uint16_t *)apr_array_push(tls_versions) = TLS_VERSION_1_2;
-        }
+    if (sc->tls_protocol_min > 0) {
+        apr_array_header_t *tls_versions;
+
+        tls_versions = tls_proto_create_versions_plus(
+            sc->global->proto, (apr_uint16_t)sc->tls_protocol_min, ptemp);
         if (tls_versions->nelts > 0) {
             rr = rustls_server_config_builder_set_versions(builder,
                 (const apr_uint16_t*)tls_versions->elts, (apr_size_t)tls_versions->nelts);
             if (RUSTLS_RESULT_OK != rr) goto cleanup;
+            if (sc->tls_protocol_min != APR_ARRAY_IDX(tls_versions, 0, apr_uint16_t)) {
+                ap_log_error(APLOG_MARK, APLOG_WARNING, 0, sc->server, APLOGNO()
+                             "Init: the minimum protocol version configured for %s (%04x) "
+                             "is not supported and version %04x was selected instead.",
+                             sc->server->server_hostname, sc->tls_protocol_min,
+                             APR_ARRAY_IDX(tls_versions, 0, apr_uint16_t));
+            }
+        }
+        else {
+            ap_log_error(APLOG_MARK, APLOG_ERR, 0, sc->server, APLOGNO()
+                         "Unable to configure the protocol version for %s: "
+                          "neither the configured minimum version (%04x), nor any higher one is "
+                         "available.", sc->server->server_hostname, sc->tls_protocol_min);
+            rv = APR_ENOTIMPL; goto cleanup;
         }
     }
 
 #if TLS_CIPHER_CONFIGURATION
     if (!apr_is_empty_array(sc->tls_ciphers)) {
-        apr_array_header_t *cipher_ids;
-        const tls_cipher_t *cipher;
-        int i;
-
-        cipher_ids = apr_array_make(ptemp, sc->tls_ciphers->nelts, sizeof(apr_uint16_t));
-        for (i = 0; i < sc->tls_ciphers->nelts; ++i) {
-            cipher = APR_ARRAY_IDX(sc->tls_ciphers, i, const tls_cipher_t*);
-            *(apr_uint16_t*)apr_array_push(cipher_ids) = cipher->id;
-        }
         rr = rustls_server_config_builder_set_ciphersuites(builder,
-            (apr_uint16_t*)cipher_ids->elts, (apr_size_t)cipher_ids->nelts);
+            (apr_uint16_t*)sc->tls_ciphers->elts, (apr_size_t)sc->tls_ciphers->nelts);
         if (RUSTLS_RESULT_OK != rr) goto cleanup;
     }
 #endif
@@ -256,18 +259,6 @@ cleanup:
     return rv;
 }
 
-static int log_cipher(void *userdata, const void *key, apr_ssize_t klen, const void *entry)
-{
-    tls_iter_ctx_t *ctx = userdata;
-    const tls_cipher_t *cipher = entry;
-
-    (void)key;
-    (void)klen;
-    ap_log_error(APLOG_MARK, APLOG_TRACE3, 0, ctx->s,
-        "supported cipher: %x %s", cipher->id, cipher->name);
-    return 1;
-}
-
 apr_status_t tls_core_init(apr_pool_t *p, apr_pool_t *ptemp, server_rec *base_server)
 {
     tls_conf_server_t *sc = tls_conf_server_get(base_server);
@@ -278,18 +269,6 @@ apr_status_t tls_core_init(apr_pool_t *p, apr_pool_t *ptemp, server_rec *base_se
     ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, base_server, "tls_core_init");
     apr_pool_cleanup_register(p, base_server, tls_core_free,
                               apr_pool_cleanup_null);
-
-    if (APLOGtrace3(base_server)) {
-        tls_iter_ctx_t ctx;
-
-        ap_log_error(APLOG_MARK, APLOG_TRACE3, 0, base_server,
-            "%d ciphers supported by rustls detected.",
-            apr_hash_count(gc->supported_ciphers));
-        memset(&ctx, 0, sizeof(ctx));
-        ctx.pool = p;
-        ctx.s = base_server;
-        apr_hash_do(log_cipher, &ctx, gc->supported_ciphers);
-    }
 
     for (s = base_server; s; s = s->next) {
         sc = tls_conf_server_get(s);
@@ -600,10 +579,9 @@ cleanup:
 apr_status_t tls_core_conn_post_handshake(conn_rec *c)
 {
     tls_conf_conn_t *cc = tls_conf_conn_get(c);
+    tls_conf_server_t *sc = tls_conf_server_get(cc->server);
     apr_status_t rv = APR_SUCCESS;
-    char buffer[HUGE_STRING_LEN];
-    apr_size_t len;
-    unsigned short n;
+    apr_uint16_t id;
 
     if (rustls_server_session_is_handshaking(cc->rustls_session)) {
         rv = APR_EGENERAL;
@@ -613,26 +591,14 @@ apr_status_t tls_core_conn_post_handshake(conn_rec *c)
         goto cleanup;
     }
 
-    n = rustls_server_session_get_protocol_version(cc->rustls_session);
-    switch (n) {
-    case TLS_VERSION_1_2:
-        cc->tls_version = "TLSv1.2";
-        break;
-    case TLS_VERSION_1_3:
-        cc->tls_version = "TLSv1.3";
-        break;
-    default:
-        cc->tls_version = apr_psprintf(c->pool, "TLSv-%0x", n);
-        break;
-    }
-
+    id = rustls_server_session_get_protocol_version(cc->rustls_session);
+    cc->tls_version = tls_proto_get_version_name(sc->global->proto, id, c->pool);
 #if TLS_CIPHER_CONFIGURATION
-    n = rustls_server_session_get_negotiated_ciphersuite(cc->rustls_session);
-    rustls_ciphersuite_get_name(n, buffer, sizeof(buffer), &len);
-    cc->tls_ciphersuite = apr_pstrndup(c->pool, buffer, len);
+    id = rustls_server_session_get_negotiated_ciphersuite(cc->rustls_session);
+    cc->tls_ciphersuite = tls_proto_get_cipher_name(sc->global->proto, id, c->pool);
 #else
     /* we do not know, but it is something like this */
-    (void)buffer; (void)len; (void)n;
+    (void)sc;
     cc->tls_ciphersuite = "ECDHE-RSA-AES128-GCM-SHA256";
 #endif
     ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, c, "post_handshake %s: %s [%s]",

@@ -89,9 +89,9 @@ class TestConf:
 
     @pytest.mark.parametrize("proto", [
         "default",
-        "v1.2",
-        "v1.3",
-        "v1.2 v1.3",
+        "TLSv1.2+",
+        "TLSv1.3+",
+        "TLSv0303+",
     ])
     def test_02_conf_proto_valid(self, proto):
         conf = TlsTestConf(env=self.env)
@@ -115,7 +115,7 @@ class TestConf:
         conf.write()
         assert self.env.apache_restart() == 0
 
-    @pytest.mark.skipif(not TlsTestEnv.CRUSTLY_SUPPORTS_TLS_CIPHER,
+    @pytest.mark.skipif(not TlsTestEnv.CRUSTLS_SUPPORTS_TLS_CIPHER,
                         reason="crustls-not-implemented")
     @pytest.mark.parametrize("cipher", [
         "default",
@@ -131,7 +131,7 @@ class TestConf:
         conf.write()
         assert self.env.apache_restart() == 0
 
-    @pytest.mark.skipif(not TlsTestEnv.CRUSTLY_SUPPORTS_TLS_CIPHER,
+    @pytest.mark.skipif(not TlsTestEnv.CRUSTLS_SUPPORTS_TLS_CIPHER,
                         reason="crustls-not-implemented")
     @pytest.mark.parametrize("cipher", [
         "wrong",

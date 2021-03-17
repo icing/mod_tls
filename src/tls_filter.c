@@ -16,6 +16,7 @@
 #include <ap_socache.h>
 
 #include "tls_defs.h"
+#include "tls_proto.h"
 #include "tls_conf.h"
 #include "tls_core.h"
 #include "tls_filter.h"

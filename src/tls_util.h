@@ -28,28 +28,6 @@ apr_status_t tls_util_file_load(
     unsigned char **pbuffer, apr_size_t *plen);
 
 /**
- * The PEM data of a certificate and its key.
- */
-typedef struct {
-    unsigned char *cert_pem_bytes;
-    size_t cert_pem_len;
-    unsigned char *pkey_pem_bytes;
-    size_t pkey_pem_len;
-} tls_util_cert_pem_t;
-
-/**
- * Load the PEM data for a certificate file and key file as given in `cert`.
- */
-apr_status_t tls_util_load_pem(apr_pool_t *p, tls_certificate_t *cert,
-    tls_util_cert_pem_t **ppem);
-
-/**
- * Load a rustls certified key from PEM data.
- */
-apr_status_t tls_util_load_certified_key(
-    apr_pool_t *p, tls_certificate_t *spec, const rustls_certified_key **pckey);
-
-/**
  * Transfer up to <length> bytes from <src> to <dest>, including all
  * encountered meta data buckets. The transfered buckets/data are
  * removed from <src>.

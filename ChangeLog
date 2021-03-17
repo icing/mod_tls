@@ -1,3 +1,7 @@
+ * TLSProtocols now takes only one argument and that is the minimum TLS protocol
+   to use: `TLSv1.2+`, `TLSv1.3+` or `TLSvXXXX+` where XXXX is the hexadecimal
+   protocol version. Specifying 'default' will use all protocols supported by
+   rustls and that is also the default.
  * Added test case for session storage in TLSv1.2 using openssl. TLSv1.3
    test is incomplete and disabled for now.
  * Added support for new session store feature in my crustls branch.
