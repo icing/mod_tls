@@ -87,8 +87,6 @@ class TestConf:
         conf.write()
         assert self.env.apache_fail() == 0
 
-    @pytest.mark.skipif(not TlsTestEnv.CRUSTLY_SUPPORTS_TLS_VERSION,
-                        reason="crustls-not-implemented")
     @pytest.mark.parametrize("proto", [
         "default",
         "v1.2",
