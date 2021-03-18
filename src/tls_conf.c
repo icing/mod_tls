@@ -76,7 +76,8 @@ void *tls_conf_create_svr(apr_pool_t *pool, server_rec *s)
     conf->certificates = apr_array_make(pool, 3, sizeof(tls_certificate_t*));
     conf->honor_client_order = TLS_FLAG_UNSET;
     conf->tls_protocol_min = TLS_FLAG_UNSET;
-    conf->tls_ciphers = apr_array_make(pool, 3, sizeof(apr_uint16_t));;
+    conf->tls_pref_ciphers = apr_array_make(pool, 3, sizeof(apr_uint16_t));;
+    conf->tls_supp_ciphers = apr_array_make(pool, 3, sizeof(apr_uint16_t));;
     return conf;
 }
 
@@ -98,7 +99,10 @@ void *tls_conf_merge_svr(apr_pool_t *pool, void *basev, void *addv)
     nconf->enabled = MERGE_INT(base, add, enabled);
     nconf->certificates = apr_array_append(pool, base->certificates, add->certificates);
     nconf->tls_protocol_min = MERGE_INT(base, add, tls_protocol_min);
-    nconf->tls_ciphers = add->tls_ciphers->nelts? add->tls_ciphers : base->tls_ciphers;
+    nconf->tls_pref_ciphers = add->tls_pref_ciphers->nelts?
+        add->tls_pref_ciphers : base->tls_pref_ciphers;
+    nconf->tls_supp_ciphers = add->tls_supp_ciphers->nelts?
+        add->tls_supp_ciphers : base->tls_supp_ciphers;
     nconf->honor_client_order = MERGE_INT(base, add, honor_client_order);
     return nconf;
 }
@@ -142,7 +146,7 @@ apr_status_t tls_conf_server_apply_defaults(tls_conf_server_t *sc, apr_pool_t *p
     (void)p;
     if (sc->enabled == TLS_FLAG_UNSET) sc->enabled = TLS_FLAG_FALSE;
     if (sc->tls_protocol_min == TLS_FLAG_UNSET) sc->tls_protocol_min = 0;
-    if (sc->honor_client_order == TLS_FLAG_UNSET) sc->honor_client_order = TLS_FLAG_FALSE;
+    if (sc->honor_client_order == TLS_FLAG_UNSET) sc->honor_client_order = TLS_FLAG_TRUE;
 
     return APR_SUCCESS;
 }
@@ -269,7 +273,7 @@ cleanup:
     return err;
 }
 
-static const char *tls_conf_set_ciphers(
+static const char *tls_conf_set_preferred_ciphers(
     cmd_parms *cmd, void *dc, int argc, char *const argv[])
 {
     tls_conf_server_t *sc = tls_conf_server_get(cmd->server);
@@ -278,14 +282,14 @@ static const char *tls_conf_set_ciphers(
 
     (void)dc;
     if (cmd->path) {
-        err = "ciphers cannot be set inside a directory context";
+        err = "ciphers cannot be configured inside a directory context";
         goto cleanup;
     }
     if (!argc) {
-        err = "specify the TLS ciphers to use or 'default' for the rustls default ones.";
+        err = "specify the TLS ciphers to prefer or 'default' for the rustls default ordering.";
         goto cleanup;
     }
-    apr_array_clear(sc->tls_ciphers);
+    apr_array_clear(sc->tls_pref_ciphers);
     if (argc > 1 || apr_strnatcasecmp("default", argv[0])) {
         int i;
 
@@ -301,7 +305,48 @@ static const char *tls_conf_set_ciphers(
                             ": cipher not supported '", name, "'", NULL);
                     goto cleanup;
                 }
-                *(apr_uint16_t*)apr_array_push(sc->tls_ciphers) = cipher;
+                *(apr_uint16_t*)apr_array_push(sc->tls_pref_ciphers) = cipher;
+                name = apr_strtok(NULL, ":", &last);
+            }
+        }
+    }
+cleanup:
+    return err;
+}
+
+static const char *tls_conf_set_suppressed_ciphers(
+    cmd_parms *cmd, void *dc, int argc, char *const argv[])
+{
+    tls_conf_server_t *sc = tls_conf_server_get(cmd->server);
+    const char *err = NULL;
+    apr_uint16_t cipher;
+
+    (void)dc;
+    if (cmd->path) {
+        err = "ciphers cannot be configured inside a directory context";
+        goto cleanup;
+    }
+    if (!argc) {
+        err = "specify the TLS ciphers to never use or 'none'.";
+        goto cleanup;
+    }
+    apr_array_clear(sc->tls_supp_ciphers);
+    if (argc > 1 || apr_strnatcasecmp("default", argv[0])) {
+        int i;
+
+        for (i = 0; i < argc; ++i) {
+            char *name, *last = NULL;
+            const char *value = argv[i];
+
+            name = apr_strtok(apr_pstrdup(cmd->pool, value), ":", &last);
+            while (name) {
+                cipher = tls_proto_get_cipher_by_name(sc->global->proto, name);
+                if (!cipher) {
+                    err = apr_pstrcat(cmd->pool, cmd->cmd->name,
+                            ": cipher not supported '", name, "'", NULL);
+                    goto cleanup;
+                }
+                *(apr_uint16_t*)apr_array_push(sc->tls_supp_ciphers) = cipher;
                 name = apr_strtok(NULL, ":", &last);
             }
         }
@@ -410,8 +455,10 @@ const command_rec tls_conf_cmds[] = {
         "Add a certificate to the server by specifying a file containing the "
         "certificate PEM, followed by its chain PEMs. The PEM of the key must "
         "either also be there or can be given as a separate file."),
-    AP_INIT_TAKE_ARGV("TLSCiphers", tls_conf_set_ciphers, NULL, RSRC_CONF,
-        "Set the TLS ciphers to use when negotiating with a client."),
+    AP_INIT_TAKE_ARGV("TLSCiphersPrefer", tls_conf_set_preferred_ciphers, NULL, RSRC_CONF,
+        "Set the TLS ciphers to prefer when negotiating with a client."),
+    AP_INIT_TAKE_ARGV("TLSCiphersSuppress", tls_conf_set_suppressed_ciphers, NULL, RSRC_CONF,
+        "Set the TLS ciphers to never use when negotiating with a client."),
     AP_INIT_TAKE1("TLSHonorClientOrder", tls_conf_set_honor_client_order, NULL, RSRC_CONF,
         "Set 'on' to have the server honor client preferences in cipher suites, default off."),
     AP_INIT_TAKE1("TLSListen", tls_conf_add_listener, NULL, RSRC_CONF,

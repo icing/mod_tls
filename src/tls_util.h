@@ -28,6 +28,18 @@ apr_status_t tls_util_file_load(
     unsigned char **pbuffer, apr_size_t *plen);
 
 /**
+ * Return != 0 iff the array of apr_uint16_t contains value n.
+ */
+int tls_util_array_uint16_contains(const apr_array_header_t* a, apr_uint16_t n);
+
+/**
+ * Remove all apr_uint16_t in `others` from array `from`.
+ * Returns the new array or, if no overlap was found, the `from` array unchanged.
+ */
+const apr_array_header_t *tls_util_array_uint16_remove(
+    apr_pool_t *pool, const apr_array_header_t* from, const apr_array_header_t* others);
+
+/**
  * Transfer up to <length> bytes from <src> to <dest>, including all
  * encountered meta data buckets. The transfered buckets/data are
  * removed from <src>.

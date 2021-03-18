@@ -41,6 +41,11 @@ apr_status_t tls_cache_post_config(apr_pool_t *p, apr_pool_t *ptemp, server_rec 
 void tls_cache_init_child(apr_pool_t *p, server_rec *s);
 
 /**
+ * Free all cache related resources.
+ */
+void tls_cache_free(server_rec *s);
+
+/**
  * Initialize the session store for the connections's config builder.
 
  * This needs to be done on the connection, and not globally or for a server,

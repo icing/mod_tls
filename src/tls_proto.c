@@ -16,6 +16,7 @@
 
 #include "tls_defs.h"
 #include "tls_proto.h"
+#include "tls_conf.h"
 #include "tls_util.h"
 
 extern module AP_MODULE_DECLARE_DATA tls_module;
@@ -474,19 +475,14 @@ static tls_cipher_t KNOWN_CIPHERS[] = {
     { "SSL_RSA_FIPS_WITH_3DES_EDE_CBC_SHA", 0xfeff },
 };
 
-#if TLS_CIPHER_CONFIGURATION
-static void add_rustls_cipher(void *userdata, unsigned short id, const struct rustls_str *name)
+static void copy_rustls_ciphers(void *userdata, const rustls_slice_u16* rustls_ciphers)
 {
-    const tls_iter_ctx_t *ctx = userdata;
-    apr_hash_t *ciphers = ctx->userdata;
-    tls_cipher_t *cipher;
-
-    cipher = apr_pcalloc(ctx->pool, sizeof(*cipher));
-    cipher->id = id;
-    cipher->name = apr_pstrndup(ctx->pool, name->data, name->len);
-    apr_hash_set(ciphers, cipher->name, APR_HASH_KEY_STRING, cipher);
+    apr_array_header_t *our_ciphers = userdata;
+    apr_size_t i;
+    for (i = 0; i < rustls_ciphers->len; ++i) {
+        APR_ARRAY_PUSH(our_ciphers, apr_uint16_t) = rustls_ciphers->data[i];
+    }
 }
-#endif /*TLS_CIPHER_CONFIGURATION*/
 
 tls_proto_conf_t *tls_proto_init(apr_pool_t *pool, server_rec *s)
 {
@@ -494,6 +490,7 @@ tls_proto_conf_t *tls_proto_init(apr_pool_t *pool, server_rec *s)
     tls_cipher_t *cipher;
     apr_size_t i;
 
+    (void)s;
     conf = apr_pcalloc(pool, sizeof(*conf));
 
     conf->supported_versions = apr_array_make(pool, 3, sizeof(apr_uint16_t));
@@ -509,31 +506,36 @@ tls_proto_conf_t *tls_proto_init(apr_pool_t *pool, server_rec *s)
         apr_hash_set(conf->known_ciphers_by_id, &cipher->id, sizeof(apr_uint16_t), cipher);
     }
 
-    conf->rustls_ciphers = apr_array_make(pool, 10, sizeof(tls_cipher_t*));
-#if TLS_CIPHER_CONFIGURATION
-    {
-        tls_iter_ctx_t ctx;
-        memset(&ctx, 0, sizeof(ctx));
-        ctx.pool = pool;
-        ctx.s = s;
-        ctx.userdata = conf;
-        rustls_supported_ciphersuite_iter(add_rustls_cipher, &ctx);
-    }
-#endif /*TLS_CIPHER_CONFIGURATION*/
-
-    if (APLOGtrace3(s)) {
-        int n;
-
-        ap_log_error(APLOG_MARK, APLOG_TRACE3, 0, s,
-            "%d ciphers supported by rustls detected.", conf->rustls_ciphers->nelts);
-        for (n = 0; n < conf->rustls_ciphers->nelts; ++n) {
-            cipher = APR_ARRAY_IDX(conf->rustls_ciphers, n, tls_cipher_t*);
-            ap_log_error(APLOG_MARK, APLOG_TRACE3, 0, s,
-                "supported cipher: %x %s", cipher->id, cipher->name);
-        }
-    }
-
+    conf->rustls_ciphers = apr_array_make(pool, 10, sizeof(apr_uint16_t));
+    rustls_cipher_visit_supported(copy_rustls_ciphers, conf->rustls_ciphers);
     return conf;
+}
+
+const char *tls_proto_get_cipher_names(
+    tls_proto_conf_t *conf, const apr_array_header_t *ciphers, apr_pool_t *pool)
+{
+    apr_array_header_t *names;
+    int n;
+
+    names = apr_array_make(pool, ciphers->nelts, sizeof(const char*));
+    for (n = 0; n < ciphers->nelts; ++n) {
+        apr_uint16_t id = APR_ARRAY_IDX(ciphers, n, apr_uint16_t);
+        APR_ARRAY_PUSH(names, const char *) = tls_proto_get_cipher_name(conf, id, pool);
+    }
+    return apr_array_pstrcat(pool, names, ':');
+}
+
+apr_status_t tls_proto_post_config(apr_pool_t *pool, apr_pool_t *ptemp, server_rec *s)
+{
+    (void)pool;
+    if (APLOGdebug(s)) {
+        tls_conf_server_t *sc = tls_conf_server_get(s);
+        tls_proto_conf_t *conf = sc->global->proto;
+        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, APLOGNO()
+                     "tls ciphers supported: %s",
+                     tls_proto_get_cipher_names(conf, conf->rustls_ciphers, ptemp));
+    }
+    return APR_SUCCESS;
 }
 
 static apr_uint16_t get_uint16_from(const char *name, const char *prefix)
@@ -602,9 +604,9 @@ apr_uint16_t tls_proto_get_cipher_by_name(tls_proto_conf_t *conf, const char *na
 const char *tls_proto_get_cipher_name(
     tls_proto_conf_t *conf, apr_uint16_t id, apr_pool_t *pool)
 {
-    tls_cipher_t *cipher = apr_hash_get(conf->known_ciphers_by_id, &cipher, sizeof(apr_uint16_t));
-    if (cipher) return cipher->name;
+    tls_cipher_t *cipher = apr_hash_get(conf->known_ciphers_by_id, &id, sizeof(apr_uint16_t));
+    if (cipher) {
+        return cipher->name;
+    }
     return apr_psprintf(pool, "TLS_CIPHER_%04x", id);
 }
-
-

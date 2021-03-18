@@ -57,7 +57,7 @@ class TestSni:
         conf = TlsTestConf(env=self.env)
         conf.add_vhosts(domains=[self.domain_a, self.domain_b], extras={
             self.domain_a: """
-    TLSHonorClientOrder on
+    TLSHonorClientOrder off
             """
         })
         conf.write()

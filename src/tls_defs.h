@@ -24,8 +24,5 @@ typedef struct {
     void *userdata;
 } tls_iter_ctx_t;
 
-#define TLS_VERSION_CONFIGURATION    0
-#define TLS_CIPHER_CONFIGURATION    0
-
 #endif /* tls_def_h */
 

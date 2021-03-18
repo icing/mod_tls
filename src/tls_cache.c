@@ -176,6 +176,14 @@ void tls_cache_init_child(apr_pool_t *p, server_rec *s)
     }
 }
 
+void tls_cache_free(server_rec *s)
+{
+    tls_conf_server_t *sc = tls_conf_server_get(s);
+    if (sc->global->session_cache_provider) {
+        sc->global->session_cache_provider->destroy(sc->global->session_cache, s);
+    }
+}
+
 static void tls_cache_lock(tls_conf_global_t *gconf)
 {
     if (gconf->session_cache_mutex) {

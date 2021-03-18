@@ -81,6 +81,7 @@ static apr_status_t tls_core_free(void *data)
             }
         }
     }
+    tls_cache_free(base_server);
 
     return APR_SUCCESS;
 }
@@ -146,6 +147,69 @@ static void add_file_specs(
         spec->pkey_file = (i < key_files->nelts)? APR_ARRAY_IDX(key_files, i, const char*) : NULL;
         *(const tls_certificate_t**)apr_array_push(certificates) = spec;
     }
+}
+
+static apr_status_t set_ciphers(
+    apr_pool_t *pool, tls_conf_server_t *sc,
+    rustls_server_config_builder *builder)
+{
+    apr_array_header_t *ordered_ciphers;
+    const apr_array_header_t *ciphers;
+    rustls_result rr = RUSTLS_RESULT_OK;
+    apr_status_t rv = APR_SUCCESS;
+    apr_uint16_t id;
+    int i;
+
+    /* remove all suppressed ciphers from the ones supported by rustls */
+    ciphers = tls_util_array_uint16_remove(pool,
+        sc->global->proto->rustls_ciphers, sc->tls_supp_ciphers);
+    ordered_ciphers = NULL;
+    /* if preferred ciphers are actually still present in allowed_ciphers, put
+     * them into `ciphers` in this order */
+    for (i = 0; i < sc->tls_pref_ciphers->nelts; ++i) {
+        id = APR_ARRAY_IDX(sc->tls_pref_ciphers, i, apr_uint16_t);
+        if (tls_util_array_uint16_contains(ciphers, id)) {
+            if (ordered_ciphers == NULL) {
+                ordered_ciphers = apr_array_make(pool, ciphers->nelts, sizeof(apr_uint16_t));
+            }
+            APR_ARRAY_PUSH(ordered_ciphers, apr_uint16_t) = id;
+        }
+    }
+    /* if we found ciphers with preference among allowed_ciphers,
+     * append all other allowed ciphers. */
+    if (ordered_ciphers) {
+        for (i = 0; i < ciphers->nelts; ++i) {
+            id = APR_ARRAY_IDX(ciphers, i, apr_uint16_t);
+            if (!tls_util_array_uint16_contains(ordered_ciphers, id)) {
+                APR_ARRAY_PUSH(ordered_ciphers, apr_uint16_t) = id;
+            }
+        }
+        ciphers = ordered_ciphers;
+    }
+
+    if (ciphers != sc->global->proto->rustls_ciphers) {
+        /* this changed the default rustls ciphers, configure it. */
+        if (APLOGtrace2(sc->server)) {
+            tls_proto_conf_t *conf = sc->global->proto;
+            ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, sc->server,
+                         "tls ciphers configured[%s]: %s",
+                         sc->server->server_hostname,
+                         tls_proto_get_cipher_names(conf, ciphers, pool));
+        }
+        rr = rustls_server_config_builder_set_ciphers(builder,
+            (apr_uint16_t*)ciphers->elts, (apr_size_t)ciphers->nelts);
+        if (RUSTLS_RESULT_OK != rr) goto cleanup;
+    }
+
+cleanup:
+    if (RUSTLS_RESULT_OK != rr) {
+        const char *err_descr;
+        rv = tls_util_rustls_error(pool, rr, &err_descr);
+        ap_log_error(APLOG_MARK, APLOG_ERR, rv, sc->server, APLOGNO()
+                     "Failed to configure ciphers %s: [%d] %s",
+                     sc->server->server_hostname, (int)rr, err_descr);
+    }
+    return rv;
 }
 
 static apr_status_t server_conf_setup(
@@ -217,13 +281,9 @@ static apr_status_t server_conf_setup(
         }
     }
 
-#if TLS_CIPHER_CONFIGURATION
-    if (!apr_is_empty_array(sc->tls_ciphers)) {
-        rr = rustls_server_config_builder_set_ciphersuites(builder,
-            (apr_uint16_t*)sc->tls_ciphers->elts, (apr_size_t)sc->tls_ciphers->nelts);
-        if (RUSTLS_RESULT_OK != rr) goto cleanup;
-    }
-#endif
+    rv = set_ciphers(ptemp, sc, builder);
+    if (APR_SUCCESS != rv) goto cleanup;
+
     rr = rustls_server_config_builder_set_ignore_client_order(
         builder, sc->honor_client_order == TLS_FLAG_FALSE);
     if (RUSTLS_RESULT_OK != rr) goto cleanup;
@@ -269,6 +329,9 @@ apr_status_t tls_core_init(apr_pool_t *p, apr_pool_t *ptemp, server_rec *base_se
     ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, base_server, "tls_core_init");
     apr_pool_cleanup_register(p, base_server, tls_core_free,
                               apr_pool_cleanup_null);
+
+    rv = tls_proto_post_config(p, ptemp, base_server);
+    if (APR_SUCCESS != rv) goto cleanup;
 
     for (s = base_server; s; s = s->next) {
         sc = tls_conf_server_get(s);
@@ -593,14 +656,8 @@ apr_status_t tls_core_conn_post_handshake(conn_rec *c)
 
     id = rustls_server_session_get_protocol_version(cc->rustls_session);
     cc->tls_version = tls_proto_get_version_name(sc->global->proto, id, c->pool);
-#if TLS_CIPHER_CONFIGURATION
-    id = rustls_server_session_get_negotiated_ciphersuite(cc->rustls_session);
+    id = rustls_server_session_get_negotiated_cipher(cc->rustls_session);
     cc->tls_ciphersuite = tls_proto_get_cipher_name(sc->global->proto, id, c->pool);
-#else
-    /* we do not know, but it is something like this */
-    (void)sc;
-    cc->tls_ciphersuite = "ECDHE-RSA-AES128-GCM-SHA256";
-#endif
     ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, c, "post_handshake %s: %s [%s]",
         cc->server->server_hostname, cc->tls_version, cc->tls_ciphersuite);
 

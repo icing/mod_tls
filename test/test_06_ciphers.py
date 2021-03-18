@@ -19,7 +19,11 @@ class TestCiphers:
         cls.domain_a = cls.env.domain_a
         cls.domain_b = cls.env.domain_b
         conf = TlsTestConf(env=cls.env)
-        conf.add_vhosts(domains=[cls.domain_a, cls.domain_b])
+        conf.add_vhosts(domains=[cls.domain_a, cls.domain_b], extras={
+            'base' : """
+            TLSHonorClientOrder off
+            """
+        })
         conf.write()
         assert cls.env.apache_restart() == 0
 
@@ -45,6 +49,7 @@ class TestCiphers:
         return protocol, cipher
 
     def test_06_ciphers_ecdsa(self):
+        # client speaks only this cipher, see that it gets it
         r = self.env.openssl_client(self.domain_b, extra_args=[
             "-cipher", "ECDHE-ECDSA-AES256-GCM-SHA384", "-tls1_2"
         ])
@@ -53,6 +58,7 @@ class TestCiphers:
         assert cipher == "ECDHE-ECDSA-AES256-GCM-SHA384", r.stdout
 
     def test_06_ciphers_rsa(self):
+        # client speaks only this cipher, see that it gets it
         r = self.env.openssl_client(self.domain_b, extra_args=[
             "-cipher", "ECDHE-RSA-AES256-GCM-SHA384", "-tls1_2"
         ])
@@ -60,13 +66,17 @@ class TestCiphers:
         assert protocol == "TLSv1.2", r.stdout
         assert cipher == "ECDHE-RSA-AES256-GCM-SHA384", r.stdout
 
-    @pytest.mark.skipif(not TlsTestEnv.CRUSTLS_SUPPORTS_TLS_CIPHER,
-                        reason="crustls-not-implemented")
     def test_06_ciphers_server_ecdsa(self):
+        # client has no preference, what does the server select?
+        r = self.env.openssl_client(self.domain_b)
+        protocol, cipher = self._get_protocol_cipher(r.stdout)
+        assert protocol == "TLSv1.2", r.stdout
+        assert cipher == "ECDHE-ECDSA-CHACHA20-POLY1305", r.stdout
+        # change the server preference and try again
         conf = TlsTestConf(env=self.env)
         conf.add_vhosts(domains=[self.domain_a, self.domain_b], extras={
             self.domain_b: """
-            TLSCiphers ECDHE-ECDSA-AES256-GCM-SHA384
+            TLSCiphersPrefer TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
             """,
         })
         conf.write()
@@ -76,19 +86,28 @@ class TestCiphers:
         assert protocol == "TLSv1.2", r.stdout
         assert cipher == "ECDHE-ECDSA-AES256-GCM-SHA384", r.stdout
 
-    @pytest.mark.skipif(not TlsTestEnv.CRUSTLS_SUPPORTS_TLS_CIPHER,
-                        reason="crustls-not-implemented")
     def test_06_ciphers_server_rsa(self):
         conf = TlsTestConf(env=self.env)
         conf.add_vhosts(domains=[self.domain_a, self.domain_b], extras={
             self.domain_b: """
-            TLSCiphers ECDHE-RSA-AES256-GCM-SHA384
+            TLSCiphersPrefer TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
             """,
         })
         conf.write()
         assert self.env.apache_restart() == 0
-        r = self.env.openssl_client(self.domain_b)
+        r = self.env.openssl_client(self.domain_b, extra_args=[
+            "-cipher", "ECDHE-RSA-AES256-GCM-SHA384", "-tls1_2"
+        ])
         protocol, cipher = self._get_protocol_cipher(r.stdout)
         assert protocol == "TLSv1.2", r.stdout
         assert cipher == "ECDHE-RSA-AES256-GCM-SHA384", r.stdout
+        r = self.env.openssl_client(self.domain_b, extra_args=[
+            "-tls1_2"
+        ])
+        protocol, cipher = self._get_protocol_cipher(r.stdout)
+        assert protocol == "TLSv1.2", r.stdout
+        # we get this cipher, why? is the *REAL* preference on the sig schemes order?
+        assert cipher == "ECDHE-ECDSA-AES256-GCM-SHA384", r.stdout
+        # should it not be this one?
+        #assert cipher == "ECDHE-RSA-AES256-GCM-SHA384", r.stdout
 

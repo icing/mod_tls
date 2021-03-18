@@ -13,6 +13,8 @@
 #define TLS_FLAG_TRUE   (1)
 
 struct tls_proto_conf_t;
+struct ap_socache_instance_t;
+struct ap_socache_provider_t;
 
 /* The global module configuration, created after post-config
  * and then readonly.
@@ -24,8 +26,8 @@ typedef struct {
     apr_hash_t *var_lookups;          /* variable lookup functions by var name */
 
     const char *session_cache_spec;   /* how the session cache was specified */
-    const ap_socache_provider_t *session_cache_provider;
-    ap_socache_instance_t *session_cache;
+    const struct ap_socache_provider_t *session_cache_provider;
+    struct ap_socache_instance_t *session_cache;
     apr_global_mutex_t *session_cache_mutex;
 
 } tls_conf_global_t;
@@ -42,7 +44,8 @@ typedef struct {
     int enabled;
     apr_array_header_t *certificates; /* array of (tls_certificate_t*) available for server_rec */
     int tls_protocol_min;             /* the minimum TLS protocol version to use */
-    apr_array_header_t *tls_ciphers;  /* List of apr_uint16_t cipher ids, if not default */
+    apr_array_header_t *tls_pref_ciphers;  /* List of apr_uint16_t cipher ids to prefer */
+    apr_array_header_t *tls_supp_ciphers;  /* List of apr_uint16_t cipher ids to suppress */
     int honor_client_order;           /* honor client cipher ordering */
 
     int service_unavailable;          /* TLS not trustworthy configured, return 503s */

@@ -96,6 +96,40 @@ cleanup:
     return rv;
 }
 
+int tls_util_array_uint16_contains(const apr_array_header_t* a, apr_uint16_t n)
+{
+    int i;
+    for (i = 0; i < a->nelts; ++i) {
+        if (APR_ARRAY_IDX(a, i, apr_uint16_t) == n) return 1;
+    }
+    return 0;
+}
+
+const apr_array_header_t *tls_util_array_uint16_remove(
+    apr_pool_t *pool, const apr_array_header_t* from, const apr_array_header_t* others)
+{
+    apr_array_header_t *na = NULL;
+    apr_uint16_t id;
+    int i, j;
+
+    for (i = 0; i < from->nelts; ++i) {
+        id = APR_ARRAY_IDX(from, i, apr_uint16_t);
+        if (tls_util_array_uint16_contains(others, id)) {
+            if (na == NULL) {
+                /* first removal, make a new result array, copy elements before */
+                na = apr_array_make(pool, from->nelts, sizeof(apr_uint16_t));
+                for (j = 0; j < i; ++j) {
+                    APR_ARRAY_PUSH(na, apr_uint16_t) = APR_ARRAY_IDX(from, i, apr_uint16_t);
+                }
+            }
+        }
+        else if (na) {
+            APR_ARRAY_PUSH(na, apr_uint16_t) = id;
+        }
+    }
+    return na? na : from;
+}
+
 apr_status_t tls_util_brigade_transfer(
     apr_bucket_brigade *dest, apr_bucket_brigade *src, apr_off_t length,
     apr_off_t *pnout)
