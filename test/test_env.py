@@ -17,6 +17,7 @@ from test_cert import TlsTestCA, CertificateSpec
 
 log = logging.getLogger(__name__)
 
+
 class ExecResult:
 
     def __init__(self, exit_code: int, stdout: str, stderr: str = None, duration: timedelta = None):
@@ -52,6 +53,33 @@ class ExecResult:
         return self._duration
 
 
+class TlsCipher:
+
+    def __init__(self, name: str, flavour: str,
+                 min_version: float, max_version: float = None,
+                 openssl: str = None):
+        self.name = name
+        self.flavour = flavour
+        self.min_version = min_version
+        self.max_version = max_version if max_version is not None else self.min_version
+        if openssl is None:
+            if name.startswith('TLS13_'):
+                openssl = re.sub(r'^TLS13_', 'TLS_', name)
+            else:
+                openssl = re.sub(r'^TLS_', '', name)
+                openssl = re.sub(r'_WITH_([^_]+)_', r'_\1_', openssl)
+                openssl = re.sub(r'_AES_(\d+)', r'_AES\1', openssl)
+                openssl = re.sub(r'(_POLY1305)_\S+$', r'\1', openssl)
+                openssl = re.sub(r'_', '-', openssl)
+        self.openssl_name = openssl
+
+    def __repr__(self):
+        return self.name
+
+    def __str__(self):
+        return self.name
+
+
 class TlsTestEnv:
 
     DOMAIN_A = "a.mod-tls.test"
@@ -65,7 +93,19 @@ class TlsTestEnv:
     CERT_FILES = {}
     CA = None
 
-    SNI_CERT_BROKEN = True  # cerrtificate selection based on SNI not implemented
+    # current rustls supported ciphers in their order of preference
+    # used to test cipher selection, see test_06_ciphers.py
+    RUSTLS_CIPHERS = [
+        TlsCipher("TLS13_CHACHA20_POLY1305_SHA256", "CHACHA", 1.3),
+        TlsCipher("TLS13_AES_256_GCM_SHA384", "AES", 1.3),
+        TlsCipher("TLS13_AES_128_GCM_SHA256", "AES", 1.3),
+        TlsCipher("TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256", "ECDSA", 1.2),
+        TlsCipher("TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256", "RSA", 1.2),
+        TlsCipher("TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", "ECDSA", 1.2),
+        TlsCipher("TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256", "ECDSA", 1.2),
+        TlsCipher("TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384", "RSA", 1.2),
+        TlsCipher("TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256", "RSA", 1.2),
+    ]
 
     @classmethod
     def init_class(cls, base_dir: str):
@@ -318,4 +358,3 @@ class TlsTestEnv:
             TlsTestEnv.OPENSSL_SUPPORTED_PROTOCOLS = protos
             TlsTestEnv.OPENSSL_SUPPORTED_CIPHERS = ciphers
         return "TLSv1.3" in TlsTestEnv.OPENSSL_SUPPORTED_PROTOCOLS
-

@@ -1,10 +1,9 @@
 import re
-import time
 from datetime import timedelta
 
 import pytest
 
-from test_env import TlsTestEnv, ExecResult
+from test_env import TlsTestEnv
 from test_conf import TlsTestConf
 
 
@@ -20,7 +19,7 @@ class TestCiphers:
         cls.domain_b = cls.env.domain_b
         conf = TlsTestConf(env=cls.env)
         conf.add_vhosts(domains=[cls.domain_a, cls.domain_b], extras={
-            'base' : """
+            'base': """
             TLSHonorClientOrder off
             """
         })
@@ -49,65 +48,74 @@ class TestCiphers:
         return protocol, cipher
 
     def test_06_ciphers_ecdsa(self):
+        ecdsa_1_2 = [c for c in self.env.RUSTLS_CIPHERS
+                     if c.max_version == 1.2 and c.flavour == 'ECDSA'][0]
         # client speaks only this cipher, see that it gets it
         r = self.env.openssl_client(self.domain_b, extra_args=[
-            "-cipher", "ECDHE-ECDSA-AES256-GCM-SHA384", "-tls1_2"
+            "-cipher", ecdsa_1_2.openssl_name, "-tls1_2"
         ])
         protocol, cipher = self._get_protocol_cipher(r.stdout)
         assert protocol == "TLSv1.2", r.stdout
-        assert cipher == "ECDHE-ECDSA-AES256-GCM-SHA384", r.stdout
+        assert cipher == ecdsa_1_2.openssl_name, r.stdout
 
     def test_06_ciphers_rsa(self):
+        rsa_1_2 = [c for c in self.env.RUSTLS_CIPHERS
+                   if c.max_version == 1.2 and c.flavour == 'RSA'][0]
         # client speaks only this cipher, see that it gets it
         r = self.env.openssl_client(self.domain_b, extra_args=[
-            "-cipher", "ECDHE-RSA-AES256-GCM-SHA384", "-tls1_2"
+            "-cipher", rsa_1_2.openssl_name, "-tls1_2"
         ])
         protocol, cipher = self._get_protocol_cipher(r.stdout)
         assert protocol == "TLSv1.2", r.stdout
-        assert cipher == "ECDHE-RSA-AES256-GCM-SHA384", r.stdout
+        assert cipher == rsa_1_2.openssl_name, r.stdout
 
-    def test_06_ciphers_server_ecdsa(self):
-        # client has no preference, what does the server select?
-        r = self.env.openssl_client(self.domain_b)
-        protocol, cipher = self._get_protocol_cipher(r.stdout)
-        assert protocol == "TLSv1.2", r.stdout
-        assert cipher == "ECDHE-ECDSA-CHACHA20-POLY1305", r.stdout
-        # change the server preference and try again
+    @pytest.mark.parametrize("cipher", [
+        c for c in TlsTestEnv.RUSTLS_CIPHERS if c.max_version == 1.2 and c.flavour == 'ECDSA'
+    ], ids=[
+        c.name for c in TlsTestEnv.RUSTLS_CIPHERS if c.max_version == 1.2 and c.flavour == 'ECDSA'
+    ])
+    def test_06_ciphers_server_prefer_ecdsa(self, cipher):
+        # Select a ECSDA ciphers as preference and suppress all RSA ciphers.
+        # The last is not strictly necessary since rustls prefers ECSDA anyway
+        suppress_names = [c.name for c in self.env.RUSTLS_CIPHERS
+                          if c.max_version == 1.2 and c.flavour == 'RSA']
         conf = TlsTestConf(env=self.env)
         conf.add_vhosts(domains=[self.domain_a, self.domain_b], extras={
             self.domain_b: """
-            TLSCiphersPrefer TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
-            """,
+            TLSHonorClientOrder off
+            TLSCiphersPrefer {0}
+            TLSCiphersSuppress {1}
+            """.format(cipher.name, ":".join(suppress_names)),
         })
         conf.write()
         assert self.env.apache_restart() == 0
-        r = self.env.openssl_client(self.domain_b)
-        protocol, cipher = self._get_protocol_cipher(r.stdout)
-        assert protocol == "TLSv1.2", r.stdout
-        assert cipher == "ECDHE-ECDSA-AES256-GCM-SHA384", r.stdout
+        r = self.env.openssl_client(self.domain_b, extra_args=["-tls1_2"])
+        client_proto, client_cipher = self._get_protocol_cipher(r.stdout)
+        assert client_proto == "TLSv1.2", r.stdout
+        assert client_cipher == cipher.openssl_name, r.stdout
 
-    def test_06_ciphers_server_rsa(self):
+    @pytest.mark.parametrize("cipher", [
+        c for c in TlsTestEnv.RUSTLS_CIPHERS if c.max_version == 1.2 and c.flavour == 'RSA'
+    ], ids=[
+        c.name for c in TlsTestEnv.RUSTLS_CIPHERS if c.max_version == 1.2 and c.flavour == 'RSA'
+    ])
+    def test_06_ciphers_server_prefer_rsa(self, cipher):
+        # Select a RSA ciphers as preference and suppress all ECDSA ciphers.
+        # The last is necessary since rustls prefers ECSDA and openssl leaks that it can.
+        suppress_names = [c.name for c in self.env.RUSTLS_CIPHERS
+                          if c.max_version == 1.2 and c.flavour == 'ECDSA']
         conf = TlsTestConf(env=self.env)
         conf.add_vhosts(domains=[self.domain_a, self.domain_b], extras={
             self.domain_b: """
-            TLSCiphersPrefer TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
-            """,
+            TLSHonorClientOrder off
+            TLSCiphersPrefer {0}
+            TLSCiphersSuppress {1}
+            """.format(cipher.name, ":".join(suppress_names)),
         })
         conf.write()
         assert self.env.apache_restart() == 0
-        r = self.env.openssl_client(self.domain_b, extra_args=[
-            "-cipher", "ECDHE-RSA-AES256-GCM-SHA384", "-tls1_2"
-        ])
-        protocol, cipher = self._get_protocol_cipher(r.stdout)
-        assert protocol == "TLSv1.2", r.stdout
-        assert cipher == "ECDHE-RSA-AES256-GCM-SHA384", r.stdout
-        r = self.env.openssl_client(self.domain_b, extra_args=[
-            "-tls1_2"
-        ])
-        protocol, cipher = self._get_protocol_cipher(r.stdout)
-        assert protocol == "TLSv1.2", r.stdout
-        # we get this cipher, why? is the *REAL* preference on the sig schemes order?
-        assert cipher == "ECDHE-ECDSA-AES256-GCM-SHA384", r.stdout
-        # should it not be this one?
-        #assert cipher == "ECDHE-RSA-AES256-GCM-SHA384", r.stdout
+        r = self.env.openssl_client(self.domain_b, extra_args=["-tls1_2"])
+        client_proto, client_cipher = self._get_protocol_cipher(r.stdout)
+        assert client_proto == "TLSv1.2", r.stdout
+        assert client_cipher == cipher.openssl_name, r.stdout
 

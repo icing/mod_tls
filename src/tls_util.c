@@ -119,7 +119,7 @@ const apr_array_header_t *tls_util_array_uint16_remove(
                 /* first removal, make a new result array, copy elements before */
                 na = apr_array_make(pool, from->nelts, sizeof(apr_uint16_t));
                 for (j = 0; j < i; ++j) {
-                    APR_ARRAY_PUSH(na, apr_uint16_t) = APR_ARRAY_IDX(from, i, apr_uint16_t);
+                    APR_ARRAY_PUSH(na, apr_uint16_t) = APR_ARRAY_IDX(from, j, apr_uint16_t);
                 }
             }
         }
