@@ -50,6 +50,17 @@ cleanup:
     return rv;
 }
 
+static void nullify_pems(tls_util_cert_pem_t *pems)
+{
+    if (pems->cert_pem_bytes && pems->cert_pem_len) {
+        memset(pems->cert_pem_bytes, 0, pems->cert_pem_len);
+    }
+    if (pems->pkey_pem_bytes && pems->pkey_pem_len
+        && pems->pkey_pem_bytes != pems->cert_pem_bytes) {
+        memset(pems->pkey_pem_bytes, 0, pems->pkey_pem_len);
+    }
+}
+
 apr_status_t tls_proto_load_certified_key(
     apr_pool_t *p, tls_certificate_t *spec, const rustls_certified_key **pckey)
 {
@@ -66,6 +77,8 @@ apr_status_t tls_proto_load_certified_key(
             pems->cert_pem_bytes, pems->cert_pem_len,
             pems->pkey_pem_bytes, pems->pkey_pem_len,
             &ckey);
+        /* dont want them hanging around in memory unnecessarily. */
+        nullify_pems(pems);
     }
     else if (spec->cert_pem) {
         const char *pkey_pem = spec->pkey_pem? spec->pkey_pem : spec->cert_pem;
@@ -73,6 +86,7 @@ apr_status_t tls_proto_load_certified_key(
             (const unsigned char*)spec->cert_pem, strlen(spec->cert_pem),
             (const unsigned char*)pkey_pem, strlen(pkey_pem),
             &ckey);
+        /* pems provided from outside are responsibility of the caller */
     }
     else {
         rv = APR_ENOENT; goto cleanup;

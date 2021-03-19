@@ -532,8 +532,8 @@ static apr_status_t process_alpn(
          * such as "acme-tls/1". Give handlers the opportunity to
          * override the certificate for this connection. */
         if (strcmp("h2", proposed) && strcmp("http/1.1", proposed)) {
-            const char *cert_file = NULL, *key_file = NULL;
-            if (ap_ssl_answer_challenge(c, cc->sni_hostname, &cert_file, &key_file)) {
+            const char *cert_pem = NULL, *key_pem = NULL;
+            if (ap_ssl_answer_challenge(c, cc->sni_hostname, &cert_pem, &key_pem)) {
                 /* With ACME we can have challenge connections to a unknown domains
                  * that need to be answered with a special certificate and will
                  * otherwise not answer any requests. See RFC 8555 */
@@ -541,8 +541,8 @@ static apr_status_t process_alpn(
                 tls_certificate_t *spec;
 
                 spec = apr_pcalloc(c->pool, sizeof(*spec));
-                spec->cert_file = cert_file;
-                spec->pkey_file = key_file;
+                spec->cert_pem = cert_pem;
+                spec->pkey_pem = key_pem;
                 cert_specs = apr_array_make(c->pool, 1, sizeof(tls_certificate_t*));
                 *(tls_certificate_t**)apr_array_push(cert_specs) = spec;
 
