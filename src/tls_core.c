@@ -223,6 +223,8 @@ static apr_status_t server_conf_setup(
     (void)p;
     if (!sc || sc->enabled != TLS_FLAG_TRUE) goto cleanup;
 
+    ap_log_error(APLOG_MARK, APLOG_TRACE1, rv, sc->server,
+                 "init server: %s", sc->server->server_hostname);
     rv = tls_conf_server_apply_defaults(sc, p);
     if (APR_SUCCESS != rv) goto cleanup;
 
@@ -235,11 +237,17 @@ static apr_status_t server_conf_setup(
     cert_adds = apr_array_make(ptemp, 2, sizeof(const char*));
     key_adds = apr_array_make(ptemp, 2, sizeof(const char*));
 
+    ap_log_error(APLOG_MARK, APLOG_TRACE1, rv, sc->server,
+                 "init server: ap_ssl_add_cert_files");
     rv = ap_ssl_add_cert_files(sc->server, ptemp, cert_adds, key_adds);
+    ap_log_error(APLOG_MARK, APLOG_TRACE1, rv, sc->server,
+                 "init server: ap_ssl_add_cert_files added %d certs", cert_adds->nelts);
     if (APR_SUCCESS != rv) goto cleanup;
     add_file_specs(certificates, ptemp, cert_adds, key_adds);
 
     if (apr_is_empty_array(certificates)) {
+        ap_log_error(APLOG_MARK, APLOG_TRACE1, rv, sc->server,
+                     "init server: ap_ssl_add_fallback");
         rv = ap_ssl_add_fallback_cert_files(sc->server, ptemp, cert_adds, key_adds);
         if (APR_SUCCESS != rv) goto cleanup;
         if (cert_adds->nelts > 0) {
@@ -252,12 +260,16 @@ static apr_status_t server_conf_setup(
         }
     }
 
+    ap_log_error(APLOG_MARK, APLOG_TRACE1, rv, sc->server,
+                 "init server: use certificates");
     rv = use_certificates(builder, ptemp, sc->server, certificates);
     if (APR_SUCCESS != rv) goto cleanup;
 
     if (sc->tls_protocol_min > 0) {
         apr_array_header_t *tls_versions;
 
+        ap_log_error(APLOG_MARK, APLOG_TRACE1, rv, sc->server,
+                     "init server: set protocol min version %04x", sc->tls_protocol_min);
         tls_versions = tls_proto_create_versions_plus(
             sc->global->proto, (apr_uint16_t)sc->tls_protocol_min, ptemp);
         if (tls_versions->nelts > 0) {

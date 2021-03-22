@@ -27,16 +27,25 @@ apr_status_t tls_proto_load_pem(
     apr_pool_t *p, tls_certificate_t *cert, tls_util_cert_pem_t **ppem)
 {
     apr_status_t rv;
+    const char *fpath;
     tls_util_cert_pem_t *cpem;
 
     ap_assert(cert->cert_file);
     cpem = apr_pcalloc(p, sizeof(*cpem));
-    rv = tls_util_file_load(p, cert->cert_file, 0, 100*1024,
+    fpath = ap_server_root_relative(p, cert->cert_file);
+    if (NULL == fpath) {
+        rv = APR_ENOENT; goto cleanup;
+    }
+    rv = tls_util_file_load(p, fpath, 0, 100*1024,
         &cpem->cert_pem_bytes, &cpem->cert_pem_len);
     if (APR_SUCCESS != rv) goto cleanup;
 
     if (cert->pkey_file) {
-        rv = tls_util_file_load(p, cert->pkey_file, 0, 100*1024,
+        fpath = ap_server_root_relative(p, cert->pkey_file);
+        if (NULL == fpath) {
+            rv = APR_ENOENT; goto cleanup;
+        }
+        rv = tls_util_file_load(p, fpath, 0, 100*1024,
             &cpem->pkey_pem_bytes, &cpem->pkey_pem_len);
         if (APR_SUCCESS != rv) goto cleanup;
     }
@@ -44,7 +53,6 @@ apr_status_t tls_proto_load_pem(
         cpem->pkey_pem_bytes = cpem->cert_pem_bytes;
         cpem->pkey_pem_len = cpem->cert_pem_len;
     }
-
 cleanup:
     *ppem = (APR_SUCCESS == rv)? cpem : NULL;
     return rv;

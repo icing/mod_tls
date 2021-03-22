@@ -151,7 +151,7 @@ apr_status_t tls_conf_server_apply_defaults(tls_conf_server_t *sc, apr_pool_t *p
     return APR_SUCCESS;
 }
 
-static const char *cmd_resolve_file(cmd_parms *cmd, const char **pfpath)
+static const char *cmd_check_file(cmd_parms *cmd, const char *fpath)
 {
     char *real_path;
 
@@ -159,16 +159,14 @@ static const char *cmd_resolve_file(cmd_parms *cmd, const char **pfpath)
     if (ap_state_query(AP_SQ_RUN_MODE) == AP_SQ_RM_CONFIG_DUMP) {
         return NULL;
     }
-    real_path = ap_server_root_relative(cmd->pool, *pfpath);
+    real_path = ap_server_root_relative(cmd->pool, fpath);
     if (!real_path) {
         return apr_pstrcat(cmd->pool, cmd->cmd->name,
-                           ": Invalid file path ", *pfpath, NULL);
+                           ": Invalid file path ", fpath, NULL);
     }
-    *pfpath = real_path;
-
-    if (!tls_util_is_file(cmd->pool, *pfpath)) {
+    if (!tls_util_is_file(cmd->pool, real_path)) {
         return apr_pstrcat(cmd->pool, cmd->cmd->name,
-                           ": file '", *pfpath,
+                           ": file '", real_path,
                            "' does not exist or is empty", NULL);
     }
     return NULL;
@@ -260,9 +258,9 @@ static const char *tls_conf_add_certificate(
     tls_certificate_t *cert;
 
     (void)dc;
-    if (NULL != (err = cmd_resolve_file(cmd, &cert_file))) goto cleanup;
+    if (NULL != (err = cmd_check_file(cmd, cert_file))) goto cleanup;
     /* key file may be NULL, in which case cert_file must contain the key PEM */
-    if (pkey_file && NULL != (err = cmd_resolve_file(cmd, &pkey_file))) goto cleanup;
+    if (pkey_file && NULL != (err = cmd_check_file(cmd, pkey_file))) goto cleanup;
 
     cert = apr_pcalloc(cmd->pool, sizeof(*cert));
     cert->cert_file = cert_file;

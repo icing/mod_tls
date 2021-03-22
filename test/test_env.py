@@ -107,9 +107,18 @@ class TlsTestEnv:
         TlsCipher("TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256", "RSA", 1.2),
     ]
 
+    LOG_FMT_TIGHT = '%(levelname)s: %(message)s'
+
     @classmethod
     def init_class(cls, base_dir: str):
         if cls.CA is None:
+            level = logging.INFO
+            console = logging.StreamHandler()
+            console.setLevel(level)
+            console.setFormatter(logging.Formatter(cls.LOG_FMT_TIGHT))
+            logging.getLogger('').addHandler(console)
+            logging.getLogger('').setLevel(level=level)
+
             cls.CA = TlsTestCA(ca_dir=os.path.join(base_dir, 'ca'), key_type="rsa4096")
             cls.CERT_FILES['ca'] = cls.CA.ca_cert_file, None
             for spec in cls.CERT_SPECS:
@@ -272,6 +281,8 @@ class TlsTestEnv:
             timeout = timedelta(seconds=10)
             if check_live:
                 rv = 0 if self.is_live(timeout=timeout) else -1
+                if rv != 0:
+                    log.warning("apache did not start: {0}".format(p.stderr))
             else:
                 rv = 0 if self.is_dead(timeout=timeout) else -1
                 log.debug("waited for a apache.is_dead, rv=%d" % rv)
