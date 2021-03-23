@@ -47,8 +47,8 @@ tls_conf_conn_t *tls_conf_conn_get(conn_rec *c);
 /* Set the module configuration for a connection. */
 void tls_conf_conn_set(conn_rec *c, tls_conf_conn_t *cc);
 
-/* Return != 0 iff this connection is a TSL connection (or a secondary on a TLS connection). */
-int tls_conn_is_ssl(conn_rec *c);
+/* Return OK iff this connection is a TSL connection (or a secondary on a TLS connection). */
+int tls_conn_check_ssl(conn_rec *c);
 
 /**
  * Initialize the module's global and server specific settings. This runs

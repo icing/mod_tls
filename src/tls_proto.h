@@ -41,7 +41,8 @@ apr_status_t tls_proto_load_pem(apr_pool_t *p, tls_certificate_t *cert,
  * Load a rustls certified key from PEM data.
  */
 apr_status_t tls_proto_load_certified_key(
-    apr_pool_t *p, tls_certificate_t *spec, const rustls_certified_key **pckey);
+    apr_pool_t *p, server_rec *s,
+    tls_certificate_t *spec, const rustls_certified_key **pckey);
 
 
 struct tls_proto_conf_t {

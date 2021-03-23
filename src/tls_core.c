@@ -38,10 +38,10 @@ void tls_conf_conn_set(conn_rec *c, tls_conf_conn_t *cc)
     ap_set_module_config(c->conn_config, &tls_module, cc);
 }
 
-int tls_conn_is_ssl(conn_rec *c)
+int tls_conn_check_ssl(conn_rec *c)
 {
     tls_conf_conn_t *cc = tls_conf_conn_get(c->master? c->master : c);
-    if (cc && TLS_CONN_ST_IGNORED != cc->state) {
+    if (cc && (TLS_CONN_ST_IGNORED != cc->state)) {
         return OK;
     }
     return DECLINED;
@@ -102,8 +102,15 @@ static apr_status_t use_certificates(
 
         for (i = 0; i < cert_specs->nelts; ++i) {
             tls_certificate_t *spec = APR_ARRAY_IDX(cert_specs, i, tls_certificate_t*);
-            rv = tls_proto_load_certified_key(p, spec, &ckey);
-            if (APR_SUCCESS != rv) goto cleanup;
+            rv = tls_proto_load_certified_key(p, s, spec, &ckey);
+            if (APR_SUCCESS != rv) {
+                ap_log_error(APLOG_MARK, APLOG_ERR, rv, s, APLOGNO()
+                             "Failed to load certified key[cert=%s(%d), key=%s(%d)]: %s",
+                             spec->cert_file, (int)(spec->cert_pem? strlen(spec->cert_pem) : 0),
+                             spec->pkey_file, (int)(spec->pkey_pem? strlen(spec->pkey_pem) : 0),
+                             s->server_hostname);
+                goto cleanup;
+            }
             APR_ARRAY_PUSH(certified_keys, const rustls_certified_key*) = ckey;
         }
 
@@ -248,14 +255,19 @@ static apr_status_t server_conf_setup(
     if (apr_is_empty_array(certificates)) {
         ap_log_error(APLOG_MARK, APLOG_TRACE1, rv, sc->server,
                      "init server: ap_ssl_add_fallback");
-        rv = ap_ssl_add_fallback_cert_files(sc->server, ptemp, cert_adds, key_adds);
-        if (APR_SUCCESS != rv) goto cleanup;
+        ap_ssl_add_fallback_cert_files(sc->server, ptemp, cert_adds, key_adds);
         if (cert_adds->nelts > 0) {
             add_file_specs(certificates, ptemp, cert_adds, key_adds);
             sc->service_unavailable = 1;
             ap_log_error(APLOG_MARK, APLOG_WARNING, 0, sc->server, APLOGNO()
                          "Init: %s will respond with '503 Service Unavailable' for now. There "
                          "are no SSL certificates configured and no other module contributed any.",
+                         sc->server->server_hostname);
+        }
+        else {
+            ap_log_error(APLOG_MARK, APLOG_ERR, 0, sc->server, APLOGNO()
+                         "Init: %s has no certificates configured. Use 'TLSCertificate' to "
+                         "configure a certificate and key file.",
                          sc->server->server_hostname);
         }
     }
@@ -450,18 +462,19 @@ int tls_core_conn_base_init(conn_rec *c)
     rustls_result rr = RUSTLS_RESULT_OK;
 
     /* Are we configured to work here? */
-    if (!sc->rustls_config) goto cleanup;
+    if (sc->enabled != TLS_FLAG_TRUE) goto cleanup;
     if (!cc) {
         rustls_server_config_builder *builder;
 
-        ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, c->base_server, "tls_core_conn_init on %s",
-            c->base_server->server_hostname);
         cc = apr_pcalloc(c->pool, sizeof(*cc));
         cc->server = c->base_server;
         cc->state = TLS_CONN_ST_PRE_HANDSHAKE;
         tls_conf_conn_set(c, cc);
         apr_pool_cleanup_register(c->pool, cc, tls_core_conn_free,
                                   apr_pool_cleanup_null);
+        ap_log_error(APLOG_MARK, APLOG_TRACE3, 0, c->base_server,
+            "tls_core_conn_init, prep for tls: %s",
+            c->base_server->server_hostname);
 
         /* Use a generic rustls_session with its defaults, which we feed
          * the first TLS bytes from the client. Its Hello message will trigger
@@ -576,6 +589,7 @@ cleanup:
         c->aborted = 1;
         goto cleanup;
     }
+    ap_log_cerror(APLOG_MARK, APLOG_TRACE2, rv, c, "process_alpn done");
     return rv;
 }
 
@@ -646,8 +660,10 @@ cleanup:
                      "Failed to init session for server %s: [%d] %s",
                      sc->server->server_hostname, (int)rr, err_descr);
         c->aborted = 1;
-        goto cleanup;
     }
+    ap_log_error(APLOG_MARK, APLOG_TRACE1, rv, sc->server,
+                 "tls_core_conn_server_init done: %s",
+                 sc->server->server_hostname);
     return rv;
 }
 
@@ -714,7 +730,7 @@ int tls_core_request_check(request_rec *r)
      * - with vhosts configured and no SNI from the client, deny access.
      * - are servers compatible for connection sharing?
      */
-    if (!cc || TLS_CONN_ST_IGNORED == cc->state) goto cleanup;
+    if (!cc || (TLS_CONN_ST_IGNORED == cc->state)) goto cleanup;
     if (cc->service_unavailable) {
         rv = HTTP_SERVICE_UNAVAILABLE; goto cleanup;
     }

@@ -70,11 +70,12 @@ static void nullify_pems(tls_util_cert_pem_t *pems)
 }
 
 apr_status_t tls_proto_load_certified_key(
-    apr_pool_t *p, tls_certificate_t *spec, const rustls_certified_key **pckey)
+    apr_pool_t *p, server_rec *s,
+    tls_certificate_t *spec, const rustls_certified_key **pckey)
 {
     const rustls_certified_key *ckey = NULL;
     rustls_result rr = RUSTLS_RESULT_OK;
-    apr_status_t rv;
+    apr_status_t rv = APR_SUCCESS;
 
     if (spec->cert_file) {
         tls_util_cert_pem_t *pems;
@@ -104,7 +105,7 @@ cleanup:
     if (RUSTLS_RESULT_OK != rr) {
         const char *err_descr;
         rv = tls_util_rustls_error(p, rr, &err_descr);
-        ap_log_perror(APLOG_MARK, APLOG_ERR, rv, p, APLOGNO()
+        ap_log_error(APLOG_MARK, APLOG_ERR, rv, s, APLOGNO()
                      "Failed to load certified key %s: [%d] %s",
                      spec->cert_file, (int)rr, err_descr);
     }

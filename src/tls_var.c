@@ -88,7 +88,7 @@ void tls_var_init_lookup_hash(apr_pool_t *pool, apr_hash_t *map)
 
 static const char *invoke(var_def_t* def, const tls_var_lookup_ctx_t *ctx)
 {
-    if ((def->flags&VAR_ONLY_SSL) && (!ctx->cc || ctx->cc->state == TLS_CONN_ST_IGNORED)) {
+    if ((def->flags&VAR_ONLY_SSL) && (!ctx->cc || (ctx->cc->state == TLS_CONN_ST_IGNORED))) {
         return NULL;
     }
     return def->fn(ctx);
@@ -145,7 +145,7 @@ int tls_var_request_fixup(request_rec *r)
     apr_size_t i;
 
     cc = tls_conf_conn_get(c->master? c->master : c);
-    if (!cc || TLS_CONN_ST_IGNORED == cc->state) goto cleanup;
+    if (!cc || (TLS_CONN_ST_IGNORED == cc->state)) goto cleanup;
 
     apr_table_setn(r->subprocess_env, "HTTPS", "on");
 

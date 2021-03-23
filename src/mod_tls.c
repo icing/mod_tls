@@ -75,8 +75,7 @@ static apr_status_t tls_post_config(apr_pool_t *p, apr_pool_t *plog,
         * to see if the config is ok in principle.
          */
         dry_run = 1;
-        ap_log_error(APLOG_MARK, APLOG_TRACE1, 0, s,
-                     APLOGNO() "post config dry run");
+        ap_log_error(APLOG_MARK, APLOG_TRACE1, 0, s, "post config dry run");
         apr_pool_userdata_set((const void *)1, tls_init_key,
                               apr_pool_cleanup_null, s->process->pool);
     }
@@ -96,7 +95,6 @@ static void tls_init_child(apr_pool_t *p, server_rec *s)
 
 static int hook_pre_connection(conn_rec *c, void *csd)
 {
-    tls_conf_conn_t *cc;
     int rv = DECLINED;
 
     (void)csd; /* mpm specific socket data, not used */
@@ -104,12 +102,7 @@ static int hook_pre_connection(conn_rec *c, void *csd)
     /* are we on a primary connection? */
     if (c->master) goto cleanup;
 
-    /* Are we configured active here? */
-    cc = tls_conf_conn_get(c);
-    if (cc && TLS_CONN_ST_IGNORED == cc->state) goto cleanup;
-
-    /* Configure settings for the base server. We have not seen any
-     * client hello yet and do not know for which vhost this is intended. */
+    /* Configure settings for the base server. */
     rv = tls_core_conn_base_init(c);
     if (OK != rv) goto cleanup;
 
@@ -123,7 +116,7 @@ static int hook_connection(conn_rec* c)
 {
     tls_conf_conn_t *cc = tls_conf_conn_get(c);
 
-    if (cc && TLS_CONN_ST_PRE_HANDSHAKE == cc->state) {
+    if (cc && (TLS_CONN_ST_PRE_HANDSHAKE == cc->state)) {
         /* Send the initialization signal down the filter chain. */
         apr_bucket_brigade* temp = apr_brigade_create(c->pool, c->bucket_alloc);
         ap_get_brigade(c->input_filters, temp, AP_MODE_INIT, APR_BLOCK_READ, 0);
@@ -135,12 +128,12 @@ static int hook_connection(conn_rec* c)
 
 static const char *tls_hook_http_scheme(const request_rec *r)
 {
-    return tls_conn_is_ssl(r->connection) ? "https" : NULL;
+    return (tls_conn_check_ssl(r->connection) == OK)? "https" : NULL;
 }
 
 static apr_port_t tls_hook_default_port(const request_rec *r)
 {
-    return tls_conn_is_ssl(r->connection) ? 443 : 0;
+    return (tls_conn_check_ssl(r->connection) == OK) ? 443 : 0;
 }
 
 static const char* const mod_http2[]        = { "mod_http2.c", NULL};
@@ -173,6 +166,6 @@ static void tls_hooks(apr_pool_t *pool)
     ap_hook_post_read_request(tls_core_request_check, pre_req_check, NULL, APR_HOOK_MIDDLE);
     ap_hook_fixups(tls_var_request_fixup, NULL,NULL, APR_HOOK_MIDDLE);
 
-    ap_hook_ssl_conn_is_ssl(tls_conn_is_ssl, NULL, NULL, APR_HOOK_MIDDLE);
+    ap_hook_ssl_conn_is_ssl(tls_conn_check_ssl, NULL, NULL, APR_HOOK_MIDDLE);
     ap_hook_ssl_var_lookup(tls_var_lookup, NULL, NULL, APR_HOOK_MIDDLE);
 }

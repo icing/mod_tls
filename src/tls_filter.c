@@ -259,6 +259,7 @@ static apr_status_t filter_do_pre_handshake(
                 rv = read_tls_to_rustls(fctx, fctx->fin_max_in_rustls);
                 if (APR_SUCCESS != rv) {
                     if (fctx->cc->client_hello_seen) {
+                        rv = APR_EAGAIN;  /* we got what we needed */
                         break;
                     }
                     /* Something went wrong before we saw the client hello.
@@ -663,7 +664,7 @@ static apr_status_t filter_conn_output(
         rv = APR_ECONNABORTED; goto  cleanup;
     }
 
-    if (!fctx->cc->rustls_session || fctx->cc->state == TLS_CONN_ST_DONE) {
+    if (!fctx->cc->rustls_session || (fctx->cc->state == TLS_CONN_ST_DONE)) {
         /* have done everything, just pass through */
         ap_log_error(APLOG_MARK, APLOG_TRACE4, 0, fctx->cc->server,
             "tls_filter_conn_output: ssl done conn");
@@ -806,7 +807,7 @@ static int tls_filter_input_pending(conn_rec *c)
 {
     tls_conf_conn_t *cc = tls_conf_conn_get(c);
 
-    if (c->aborted || !cc || TLS_CONN_ST_IGNORED == cc->state) return DECLINED;
+    if (c->aborted || !cc || (TLS_CONN_ST_IGNORED == cc->state)) return DECLINED;
     if (cc && cc->filter_ctx && !APR_BRIGADE_EMPTY(cc->filter_ctx->fin_plain_bb)) return OK;
     return DECLINED;
 }
