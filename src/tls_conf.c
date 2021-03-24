@@ -256,7 +256,7 @@ static const char *tls_conf_add_certificate(
     cmd_parms *cmd, void *dc, const char *cert_file, const char *pkey_file)
 {
     tls_conf_server_t *sc = tls_conf_server_get(cmd->server);
-    const char *err = NULL;
+    const char *err = NULL, *fpath;
     tls_certificate_t *cert;
 
     (void)dc;
@@ -265,7 +265,17 @@ static const char *tls_conf_add_certificate(
     if (pkey_file && NULL != (err = cmd_check_file(cmd, pkey_file))) goto cleanup;
 
     cert = apr_pcalloc(cmd->pool, sizeof(*cert));
+    fpath = ap_server_root_relative(cmd->pool, cert_file);
+    if (!tls_util_is_file(cmd->pool, fpath)) {
+        return apr_pstrcat(cmd->pool, cmd->cmd->name,
+            ": unable to find certificate file: '", fpath, "'", NULL);
+    }
     cert->cert_file = cert_file;
+    fpath = ap_server_root_relative(cmd->pool, pkey_file);
+    if (!tls_util_is_file(cmd->pool, fpath)) {
+        return apr_pstrcat(cmd->pool, cmd->cmd->name,
+            ": unable to find certificate key file: '", fpath, "'", NULL);
+    }
     cert->pkey_file = pkey_file;
     *(const tls_certificate_t **)apr_array_push(sc->certificates) = cert;
 

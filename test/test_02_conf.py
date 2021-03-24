@@ -49,7 +49,7 @@ class TestConf:
         for name in ["test-02-cert.pem", "test-02-key.pem"]:
             with open(os.path.join(self.env.server_dir, name), "w") as fd:
                 fd.write("")
-        assert self.env.apache_restart() == 0
+        assert self.env.apache_fail() == 0
 
     def test_02_conf_cert_listen_missing(self):
         conf = TlsTestConf(env=self.env)
