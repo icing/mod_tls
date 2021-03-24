@@ -359,10 +359,6 @@ static apr_status_t filter_conn_input(
     apr_size_t in_buf_len;
     char *in_buf = NULL;
 
-    ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, fctx->cc->server,
-        "tls_filter_conn_input, server=%s, mode=%d, block=%d, readbytes=%ld",
-        fctx->cc->server->server_hostname, mode, block, (long)readbytes);
-
     fctx->fin_block = block;
     if (f->c->aborted) {
         rv = filter_abort(fctx); goto cleanup;
@@ -371,6 +367,10 @@ static apr_status_t filter_conn_input(
     if (!fctx->cc->rustls_session) {
         return ap_get_brigade(f->next, bb, mode, block, readbytes);
     }
+
+    ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, fctx->cc->server,
+        "tls_filter_conn_input, server=%s, mode=%d, block=%d, readbytes=%ld",
+        fctx->cc->server->server_hostname, mode, block, (long)readbytes);
 
     if (TLS_CONN_ST_PRE_HANDSHAKE == fctx->cc->state) {
         ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, fctx->cc->server,
@@ -653,12 +653,8 @@ static apr_status_t filter_conn_output(
     apr_off_t passed = 0;
     apr_size_t wlen;
 
-    ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, fctx->cc->server,
-        "tls_filter_conn_output, server=%s", fctx->cc->server->server_hostname);
-    tls_util_bb_log(fctx->c, APLOG_TRACE3, "filter_conn_output", bb);
-
     if (f->c->aborted) {
-        ap_log_error(APLOG_MARK, APLOG_TRACE4, 0, fctx->cc->server,
+        ap_log_cerror(APLOG_MARK, APLOG_TRACE4, 0, fctx->c,
             "tls_filter_conn_output: aborted conn");
         apr_brigade_cleanup(bb);
         rv = APR_ECONNABORTED; goto  cleanup;
@@ -666,11 +662,15 @@ static apr_status_t filter_conn_output(
 
     if (!fctx->cc->rustls_session || (fctx->cc->state == TLS_CONN_ST_DONE)) {
         /* have done everything, just pass through */
-        ap_log_error(APLOG_MARK, APLOG_TRACE4, 0, fctx->cc->server,
+        ap_log_cerror(APLOG_MARK, APLOG_TRACE4, 0, fctx->c,
             "tls_filter_conn_output: ssl done conn");
         rv = ap_pass_brigade(f->next, bb);
         goto cleanup;
     }
+
+    ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, fctx->cc->server,
+        "tls_filter_conn_output, server=%s", fctx->cc->server->server_hostname);
+    tls_util_bb_log(fctx->c, APLOG_TRACE3, "filter_conn_output", bb);
 
     while (!APR_BRIGADE_EMPTY(bb)) {
         apr_bucket *b = APR_BRIGADE_FIRST(bb);
