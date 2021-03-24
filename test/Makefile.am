@@ -48,4 +48,4 @@ $(SERVER_DIR)/.test-setup: \
 
 clean-local:
 	rm -rf *.pyc __pycache__
-	rm -rf $(SERVER_DIR)
+	rm -rf $(GEN)

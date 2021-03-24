@@ -271,10 +271,12 @@ static const char *tls_conf_add_certificate(
             ": unable to find certificate file: '", fpath, "'", NULL);
     }
     cert->cert_file = cert_file;
-    fpath = ap_server_root_relative(cmd->pool, pkey_file);
-    if (!tls_util_is_file(cmd->pool, fpath)) {
-        return apr_pstrcat(cmd->pool, cmd->cmd->name,
-            ": unable to find certificate key file: '", fpath, "'", NULL);
+    if (pkey_file) {
+        fpath = ap_server_root_relative(cmd->pool, pkey_file);
+        if (!tls_util_is_file(cmd->pool, fpath)) {
+            return apr_pstrcat(cmd->pool, cmd->cmd->name,
+                ": unable to find certificate key file: '", fpath, "'", NULL);
+        }
     }
     cert->pkey_file = pkey_file;
     *(const tls_certificate_t **)apr_array_push(sc->certificates) = cert;
