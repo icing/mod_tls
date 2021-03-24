@@ -75,6 +75,7 @@ void *tls_conf_create_svr(apr_pool_t *pool, server_rec *s)
     conf->enabled = TLS_FLAG_UNSET;
     conf->certificates = apr_array_make(pool, 3, sizeof(tls_certificate_t*));
     conf->honor_client_order = TLS_FLAG_UNSET;
+    conf->strict_sni = TLS_FLAG_UNSET;
     conf->tls_protocol_min = TLS_FLAG_UNSET;
     conf->tls_pref_ciphers = apr_array_make(pool, 3, sizeof(apr_uint16_t));;
     conf->tls_supp_ciphers = apr_array_make(pool, 3, sizeof(apr_uint16_t));;
@@ -147,6 +148,7 @@ apr_status_t tls_conf_server_apply_defaults(tls_conf_server_t *sc, apr_pool_t *p
     if (sc->enabled == TLS_FLAG_UNSET) sc->enabled = TLS_FLAG_FALSE;
     if (sc->tls_protocol_min == TLS_FLAG_UNSET) sc->tls_protocol_min = 0;
     if (sc->honor_client_order == TLS_FLAG_UNSET) sc->honor_client_order = TLS_FLAG_TRUE;
+    if (sc->strict_sni == TLS_FLAG_UNSET) sc->strict_sni = TLS_FLAG_TRUE;
 
     return APR_SUCCESS;
 }
@@ -365,6 +367,18 @@ static const char *tls_conf_set_honor_client_order(
     return NULL;
 }
 
+static const char *tls_conf_set_strict_sni(
+    cmd_parms *cmd, void *dc, const char *v)
+{
+    tls_conf_server_t *sc = tls_conf_server_get(cmd->server);
+    int flag = flag_value(v);
+
+    (void)dc;
+    if (TLS_FLAG_UNSET == flag) return flag_err(cmd, v);
+    sc->strict_sni = flag;
+    return NULL;
+}
+
 static const char *tls_conf_set_protocol(
     cmd_parms *cmd, void *dc, const char *v)
 {
@@ -465,6 +479,8 @@ const command_rec tls_conf_cmds[] = {
         "En-/disables optional features in the module."),
     AP_INIT_TAKE1("TLSProtocols", tls_conf_set_protocol, NULL, RSRC_CONF,
         "Set the minimum TLS protocol version to use."),
+    AP_INIT_TAKE1("TLSStrictSNI", tls_conf_set_strict_sni, NULL, RSRC_CONF,
+        "Set strictness of client server name (SNI) check against hosts, default on."),
     AP_INIT_TAKE1("TLSSessionCache", tls_conf_set_session_cache, NULL, RSRC_CONF,
         "Set which cache to use for TLS sessions."),
     AP_INIT_TAKE1(NULL, NULL, NULL, RSRC_CONF, NULL)

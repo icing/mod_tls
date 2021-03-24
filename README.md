@@ -103,6 +103,8 @@ The following configuration directives are available once `mod_tls` is loaded in
 
  * `TLSOptions [+|-]StdEnvVars` this is analog to `SSLOptions` in `mod_ssl` and only relevant if you want to have certain TLS connection properties visible to request processing. This can be set per directory/location.
 
+ * `TLSStrictSNI on|off` to enforce exact matches of client server indicators (SNI) against host names. Client connections will be unsuccessful if no match is found. This is `on` by default.
+
  * `TLSSessionCache cache-spec` to specify the cache for TLS session resumption. This uses a cache on the server side to allow clients to resume connections. You can set this to `none` or define a cache as in the [`SSLSessionCache`](https://httpd.apache.org/docs/current/mod/mod_ssl.html#sslsessioncache) directive. If not configured, `mod_tls` will try to create a shared memory cache on its own, using `shmcb:tls/session-cache` as specification. Should that fail, a warning is logged, but the server continues.
 
 The gist of all this to give the server administrator enough control to ensure the safety of the system without it necessarily becoming *ossified*. Many installations have copy+paste TLS specifications from years ago and those can hinder deployment of improved implementations. On the other hand, should a specific setting turn out to be non-secure, an admin needs to be able to disable it right away (until the proper fix comes down the release lines). That is why one may suppress ciphers (and if one supresses all ciphers in a protocol version, that version is effectively disabled as well).

@@ -47,6 +47,7 @@ typedef struct {
     apr_array_header_t *tls_pref_ciphers;  /* List of apr_uint16_t cipher ids to prefer */
     apr_array_header_t *tls_supp_ciphers;  /* List of apr_uint16_t cipher ids to suppress */
     int honor_client_order;           /* honor client cipher ordering */
+    int strict_sni;
 
     int service_unavailable;          /* TLS not trustworthy configured, return 503s */
     const rustls_server_config *rustls_config; /* config to use for TLS against this very server */

@@ -1,3 +1,8 @@
+ * Sucessfull run with the `mod_md` extended test suite that allows specification
+   of the ssl module to test with.
+ * Fixed various edge cases about vhost selection, fallback and challenge certificates
+   and added a new directive `TLSStrictSNI` to allow relaxed checks of client
+   host names for people who run "catch all" servers.
  * First tests with the latest mod_md to enable supplying static certificates
    to mod_tls.
  * TLSProtocols now takes only one argument and that is the minimum TLS protocol

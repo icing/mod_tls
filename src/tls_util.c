@@ -253,8 +253,8 @@ int tls_util_name_matches_server(const char *name, server_rec *s)
     char **alias;
     int i;
 
+    if (!s || !s->server_hostname) return 0;
     if (!strcasecmp(name, s->server_hostname)) return 1;
-
     /* first the fast equality match, then the pattern wild_name matches */
     names = s->names;
     if (!names) return 0;

@@ -15,6 +15,7 @@
 #include <http_log.h>
 #include <http_protocol.h>
 #include <http_vhost.h>
+#include <http_main.h>
 #include <ap_socache.h>
 
 #include "tls_defs.h"
@@ -244,12 +245,9 @@ static apr_status_t server_conf_setup(
     cert_adds = apr_array_make(ptemp, 2, sizeof(const char*));
     key_adds = apr_array_make(ptemp, 2, sizeof(const char*));
 
-    ap_log_error(APLOG_MARK, APLOG_TRACE1, rv, sc->server,
-                 "init server: ap_ssl_add_cert_files");
-    rv = ap_ssl_add_cert_files(sc->server, ptemp, cert_adds, key_adds);
+    ap_ssl_add_cert_files(sc->server, ptemp, cert_adds, key_adds);
     ap_log_error(APLOG_MARK, APLOG_TRACE1, rv, sc->server,
                  "init server: ap_ssl_add_cert_files added %d certs", cert_adds->nelts);
-    if (APR_SUCCESS != rv) goto cleanup;
     add_file_specs(certificates, ptemp, cert_adds, key_adds);
 
     if (apr_is_empty_array(certificates)) {
@@ -374,9 +372,9 @@ apr_status_t tls_core_init(apr_pool_t *p, apr_pool_t *ptemp, server_rec *base_se
             && strcmp("https", ap_get_server_protocol(s)) == 0) {
             sc->enabled = TLS_FLAG_TRUE;
         }
-        /* otherwise, we always fallback to disabled */
+        /* otherwise, we always fallback to disabled for virtual hosts */
         if (sc->enabled == TLS_FLAG_UNSET) {
-            sc->enabled = TLS_FLAG_FALSE;
+            sc->enabled = s->is_virtual? TLS_FLAG_FALSE : TLS_FLAG_TRUE;
         }
     }
 
@@ -384,13 +382,19 @@ apr_status_t tls_core_init(apr_pool_t *p, apr_pool_t *ptemp, server_rec *base_se
     for (s = base_server; s; s = s->next) {
         sc = tls_conf_server_get(s);
         rv = server_conf_setup(p, ptemp, sc);
-        if (APR_SUCCESS != rv) goto cleanup;
+        if (APR_SUCCESS != rv) {
+            ap_log_error(APLOG_MARK, APLOG_ERR, rv, s, "server setup failed: %s",
+                s->server_hostname);
+            goto cleanup;
+        }
     }
 
     rv = tls_cache_post_config(p, ptemp, base_server);
 
 cleanup:
-    ap_log_error(APLOG_MARK, APLOG_TRACE2, rv, base_server, "tls_core_init done.");
+    if (APR_SUCCESS != rv) {
+        ap_log_error(APLOG_MARK, APLOG_ERR, rv, base_server, "error during post_config");
+    }
     return rv;
 }
 
@@ -596,25 +600,40 @@ cleanup:
 apr_status_t tls_core_conn_server_init(conn_rec *c)
 {
     tls_conf_conn_t *cc = tls_conf_conn_get(c);
-    tls_conf_server_t *sc;
+    tls_conf_server_t *sc, *initial_sc;
+    const rustls_server_config *base_config = NULL;
     rustls_server_config_builder *builder = NULL;
     rustls_result rr = RUSTLS_RESULT_OK;
     apr_status_t rv = APR_SUCCESS;
+    int sni_match = 0;
 
     ap_assert(cc);
-    sc = tls_conf_server_get(cc->server);
+    initial_sc = sc = tls_conf_server_get(cc->server);
 
     if (cc->client_hello_seen) {
         if (cc->sni_hostname) {
             if (ap_vhost_iterate_given_conn(c, find_vhost, (void*)cc->sni_hostname)) {
                 ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, c, APLOGNO()
                     "vhost_init: virtual host found for SNI '%s'", cc->sni_hostname);
-                /* reinit, we might have a new server selected */
-                sc = tls_conf_server_get(cc->server);
+                sni_match = 1;
+            }
+            else if (tls_util_name_matches_server(cc->sni_hostname, ap_server_conf)) {
+                ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, c, APLOGNO()
+                    "vhost_init: virtual host NOT found, but base server[%s] matches SNI '%s'",
+                    ap_server_conf->server_hostname, cc->sni_hostname);
+                cc->server = ap_server_conf;
+                sni_match = 1;
+            }
+            else if (sc->strict_sni == TLS_FLAG_FALSE) {
+                ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, c, APLOGNO()
+                    "vhost_init: no virtual host found, relaxed SNI checking enabled, SNI '%s'",
+                    cc->sni_hostname);
             }
             else {
                 ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, c, APLOGNO()
-                    "vhost_init: virtual host NOT found for SNI '%s'", cc->sni_hostname);
+                    "vhost_init: no virtual host, nor base server[%s] matches SNI '%s'",
+                    c->base_server->server_hostname, cc->sni_hostname);
+                cc->server = sc->global->ap_server;
                 rv = APR_NOTFOUND; goto cleanup;
             }
         }
@@ -623,8 +642,19 @@ apr_status_t tls_core_conn_server_init(conn_rec *c)
                 "vhost_init: no SNI hostname provided by client");
         }
 
-        ap_assert(sc->rustls_config);
-        builder = rustls_server_config_builder_from_config(sc->rustls_config);
+        /* reinit, we might have a new server selected */
+        sc = tls_conf_server_get(cc->server);
+        /* on relaxed SNI matches, we do not enforce the 503 of fallback
+         * certificates. */
+        cc->service_unavailable = sni_match? sc->service_unavailable : 0;
+
+        base_config = sc->rustls_config? sc->rustls_config : initial_sc->rustls_config;
+        if (!base_config) {
+            ap_log_cerror(APLOG_MARK, APLOG_DEBUG, 0, c, APLOGNO()
+                "vhost_init: no base rustls config found, denying to serve");
+            rv = APR_NOTFOUND; goto cleanup;
+        }
+        builder = rustls_server_config_builder_from_config(base_config);
         if (NULL == builder) {
             rv = APR_ENOMEM; goto cleanup;
         }
@@ -730,6 +760,9 @@ int tls_core_request_check(request_rec *r)
      * - with vhosts configured and no SNI from the client, deny access.
      * - are servers compatible for connection sharing?
      */
+    ap_log_rerror(APLOG_MARK, APLOG_TRACE2, 0, r,
+                 "tls_core_request_check[%s, %d]: %s", r->hostname,
+                 cc? cc->service_unavailable : 2, r->the_request);
     if (!cc || (TLS_CONN_ST_IGNORED == cc->state)) goto cleanup;
     if (cc->service_unavailable) {
         rv = HTTP_SERVICE_UNAVAILABLE; goto cleanup;
@@ -745,7 +778,6 @@ int tls_core_request_check(request_rec *r)
                      cc->server->server_hostname, r->hostname);
         goto cleanup;
     }
-
 cleanup:
     return rv;
 }
