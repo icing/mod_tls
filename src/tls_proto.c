@@ -123,6 +123,10 @@ typedef struct {
     apr_uint16_t id;
 } tls_cipher_t;
 
+/**
+ * Known cipher as registered in
+ * <https://www.iana.org/assignments/tls-parameters/tls-parameters.xhtml#tls-parameters-4>
+ */
 static tls_cipher_t KNOWN_CIPHERS[] = {
     { "TLS_NULL_WITH_NULL_NULL", 0x0000 },
     { "TLS_RSA_WITH_NULL_MD5", 0x0001 },
@@ -561,7 +565,7 @@ apr_status_t tls_proto_post_config(apr_pool_t *pool, apr_pool_t *ptemp, server_r
     return APR_SUCCESS;
 }
 
-static apr_uint16_t get_uint16_from(const char *name, const char *prefix)
+static apr_status_t get_uint16_from(const char *name, const char *prefix, apr_uint16_t *pint)
 {
     apr_size_t plen = strlen(prefix);
     if (strlen(name) == plen+4 && !strncmp(name, prefix, plen)) {
@@ -569,14 +573,16 @@ static apr_uint16_t get_uint16_from(const char *name, const char *prefix)
         char *end = NULL;
         apr_int64_t code = apr_strtoi64(name + plen, &end, 16);
         if ((!end || !*end) && code && code <= APR_UINT16_MAX) {
-            return (apr_uint16_t)code;
+            *pint = (apr_uint16_t)code;
+            return APR_SUCCESS;
         }
     }
-    return 0;
+    return APR_ENOENT;
 }
 
 apr_uint16_t tls_proto_get_version_by_name(tls_proto_conf_t *conf, const char *name)
 {
+    apr_uint16_t version;
     (void)conf;
     if (!apr_strnatcasecmp(name, "TLSv1.2")) {
         return TLS_VERSION_1_2;
@@ -584,7 +590,10 @@ apr_uint16_t tls_proto_get_version_by_name(tls_proto_conf_t *conf, const char *n
     else if (!apr_strnatcasecmp(name, "TLSv1.3")) {
         return TLS_VERSION_1_3;
     }
-    return get_uint16_from(name, "TLSv");
+    if (APR_SUCCESS == get_uint16_from(name, "TLSv", &version)) {
+        return version;
+    }
+    return 0;
 }
 
 const char *tls_proto_get_version_name(
@@ -617,11 +626,20 @@ apr_array_header_t *tls_proto_create_versions_plus(
     return versions;
 }
 
-apr_uint16_t tls_proto_get_cipher_by_name(tls_proto_conf_t *conf, const char *name)
+int tls_proto_is_cipher_supported(tls_proto_conf_t *conf, apr_uint16_t cipher)
+{
+    return tls_util_array_uint16_contains(conf->rustls_ciphers, cipher);
+}
+
+apr_status_t tls_proto_get_cipher_by_name(
+    tls_proto_conf_t *conf, const char *name, apr_uint16_t *pcipher)
 {
     tls_cipher_t *cipher = apr_hash_get(conf->known_ciphers_by_name, name, APR_HASH_KEY_STRING);
-    if (cipher) return cipher->id;
-    return get_uint16_from(name, "TLS_CIPHER_");
+    if (cipher) {
+        *pcipher = cipher->id;
+        return APR_SUCCESS;
+    }
+    return get_uint16_from(name, "TLS_CIPHER_", pcipher);
 }
 
 const char *tls_proto_get_cipher_name(

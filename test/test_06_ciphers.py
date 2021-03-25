@@ -119,3 +119,59 @@ class TestCiphers:
         assert client_proto == "TLSv1.2", r.stdout
         assert client_cipher == cipher.openssl_name, r.stdout
 
+    def test_06_ciphers_pref_unknown(self):
+        self.env.apache_stop()
+        conf = TlsTestConf(env=self.env)
+        conf.add_vhosts(domains=[self.domain_a, self.domain_b], extras={
+            self.domain_b: """
+            TLSCiphersPrefer TLS_MY_SUPER_CIPHER:SSL_WHAT_NOT
+            """
+        })
+        conf.write()
+        assert self.env.apache_restart() != 0
+
+    def test_06_ciphers_pref_unsupported(self):
+        # a warning on prefering a known, but not supported cipher
+        self.env.apache_stop()
+        self.env.apache_error_log_clear()
+        conf = TlsTestConf(env=self.env)
+        conf.add_vhosts(domains=[self.domain_a, self.domain_b], extras={
+            self.domain_b: """
+            TLSCiphersPrefer TLS_NULL_WITH_NULL_NULL
+            """
+        })
+        conf.write()
+        r = self.env.apache_try_start()
+        assert r.exit_code == 0, r.stderr
+        (errors, warnings) = self.env.apache_error_log_count()
+        assert errors == 0
+        assert warnings == 1
+
+    def test_06_ciphers_supp_unknown(self):
+        self.env.apache_stop()
+        conf = TlsTestConf(env=self.env)
+        conf.add_vhosts(domains=[self.domain_a, self.domain_b], extras={
+            self.domain_b: """
+            TLSCiphersSuppress TLS_MY_SUPER_CIPHER:SSL_WHAT_NOT
+            """
+        })
+        conf.write()
+        assert self.env.apache_restart() != 0
+
+    def test_06_ciphers_supp_unsupported(self):
+        # no warnings on suppressing known, but not supported ciphers
+        self.env.apache_stop()
+        self.env.apache_error_log_clear()
+        conf = TlsTestConf(env=self.env)
+        conf.add_vhosts(domains=[self.domain_a, self.domain_b], extras={
+            self.domain_b: """
+            TLSCiphersSuppress TLS_NULL_WITH_NULL_NULL
+            """
+        })
+        conf.write()
+        r = self.env.apache_try_start()
+        assert r.exit_code == 0, r.stderr
+        (errors, warnings) = self.env.apache_error_log_count()
+        assert errors == 0
+        assert warnings == 0
+

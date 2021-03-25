@@ -163,10 +163,12 @@ static apr_status_t set_ciphers(
 {
     apr_array_header_t *ordered_ciphers;
     const apr_array_header_t *ciphers;
+    apr_array_header_t *unsupported = NULL;
     rustls_result rr = RUSTLS_RESULT_OK;
     apr_status_t rv = APR_SUCCESS;
     apr_uint16_t id;
     int i;
+
 
     /* remove all suppressed ciphers from the ones supported by rustls */
     ciphers = tls_util_array_uint16_remove(pool,
@@ -181,6 +183,10 @@ static apr_status_t set_ciphers(
                 ordered_ciphers = apr_array_make(pool, ciphers->nelts, sizeof(apr_uint16_t));
             }
             APR_ARRAY_PUSH(ordered_ciphers, apr_uint16_t) = id;
+        }
+        else if (!tls_proto_is_cipher_supported(sc->global->proto, id)) {
+            if (!unsupported) unsupported = apr_array_make(pool, 5, sizeof(apr_uint16_t));
+            APR_ARRAY_PUSH(unsupported, apr_uint16_t) = id;
         }
     }
     /* if we found ciphers with preference among allowed_ciphers,
@@ -207,6 +213,15 @@ static apr_status_t set_ciphers(
         rr = rustls_server_config_builder_set_ciphers(builder,
             (apr_uint16_t*)ciphers->elts, (apr_size_t)ciphers->nelts);
         if (RUSTLS_RESULT_OK != rr) goto cleanup;
+    }
+
+    if ((ap_state_query(AP_SQ_MAIN_STATE) == AP_SQ_MS_CREATE_PRE_CONFIG)
+        && unsupported && unsupported->nelts) {
+        ap_log_error(APLOG_MARK, APLOG_WARNING, rv, sc->server, APLOGNO()
+                     "Server '%s' has TLSCiphersPrefer configured that are not "
+                     "supported by rustls. These will not have an effect: %s",
+                     sc->server->server_hostname,
+                     tls_proto_get_cipher_names(sc->global->proto, unsupported, pool));
     }
 
 cleanup:

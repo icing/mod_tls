@@ -138,6 +138,7 @@ class TlsTestEnv:
         self._server_dir = os.path.join(self._gen_dir, 'apache')
         self._server_conf_dir = os.path.join(self._server_dir, "conf")
         self._server_docs_dir = os.path.join(self._server_dir, "htdocs")
+        self._server_error_log = os.path.join(self._server_dir, "logs", "error_log")
         self._mpm_type = os.environ['MPM'] if 'MPM' in os.environ else 'event'
 
         self._apachectl = os.path.join(self._prefix, 'bin', 'apachectl')
@@ -305,6 +306,39 @@ class TlsTestEnv:
             log.warning("graceful restart returned: {0}".format(rv))
             return 0 if self.is_dead(timeout=timedelta(seconds=5)) else -1
         return rv
+
+    def apache_try_start(self):
+        args = [self._apachectl, "-d", self._server_dir, "-k", "start"]
+        return self.run(args)
+
+    def apache_error_log_clear(self):
+        if os.path.isfile(self._server_error_log):
+            os.remove(self._server_error_log)
+
+    RE_MD_RESET = re.compile(r'.*\[tls:info].*initializing\.\.\.')
+    RE_MD_ERROR = re.compile(r'.*\[tls:error].*')
+    RE_MD_WARN = re.compile(r'.*\[tls:warn].*')
+
+    def apache_error_log_count(self):
+        ecount = 0
+        wcount = 0
+
+        if os.path.isfile(self._server_error_log):
+            fin = open(self._server_error_log)
+            for line in fin:
+                m = self.RE_MD_ERROR.match(line)
+                if m:
+                    ecount += 1
+                    continue
+                m = self.RE_MD_WARN.match(line)
+                if m:
+                    wcount += 1
+                    continue
+                m = self.RE_MD_RESET.match(line)
+                if m:
+                    ecount = 0
+                    wcount = 0
+        return ecount, wcount
 
     def curl(self, args: List[str]) -> ExecResult:
         return self.run([self._curl] + args)

@@ -311,10 +311,10 @@ static const char *tls_conf_set_preferred_ciphers(
 
             name = apr_strtok(apr_pstrdup(cmd->pool, value), ":", &last);
             while (name) {
-                cipher = tls_proto_get_cipher_by_name(sc->global->proto, name);
-                if (!cipher) {
+                if (tls_proto_get_cipher_by_name(sc->global->proto,
+                    name, &cipher) != APR_SUCCESS) {
                     err = apr_pstrcat(cmd->pool, cmd->cmd->name,
-                            ": cipher not supported '", name, "'", NULL);
+                            ": cipher not recognized '", name, "'", NULL);
                     goto cleanup;
                 }
                 *(apr_uint16_t*)apr_array_push(sc->tls_pref_ciphers) = cipher;
@@ -352,10 +352,10 @@ static const char *tls_conf_set_suppressed_ciphers(
 
             name = apr_strtok(apr_pstrdup(cmd->pool, value), ":", &last);
             while (name) {
-                cipher = tls_proto_get_cipher_by_name(sc->global->proto, name);
-                if (!cipher) {
+                if (tls_proto_get_cipher_by_name(sc->global->proto,
+                    name, &cipher) != APR_SUCCESS) {
                     err = apr_pstrcat(cmd->pool, cmd->cmd->name,
-                            ": cipher not supported '", name, "'", NULL);
+                            ": cipher not recognized '", name, "'", NULL);
                     goto cleanup;
                 }
                 *(apr_uint16_t*)apr_array_push(sc->tls_supp_ciphers) = cipher;

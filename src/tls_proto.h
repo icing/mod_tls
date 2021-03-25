@@ -65,7 +65,10 @@ const char *tls_proto_get_version_name(
 apr_array_header_t *tls_proto_create_versions_plus(
     tls_proto_conf_t *conf, apr_uint16_t min_version, apr_pool_t *pool);
 
-apr_uint16_t tls_proto_get_cipher_by_name(tls_proto_conf_t *conf, const char *name);
+apr_status_t tls_proto_get_cipher_by_name(
+    tls_proto_conf_t *conf, const char *name, apr_uint16_t *pcipher);
+
+int tls_proto_is_cipher_supported(tls_proto_conf_t *conf, apr_uint16_t cipher);
 
 const char *tls_proto_get_cipher_name(
     tls_proto_conf_t *conf, apr_uint16_t cipher, apr_pool_t *pool);

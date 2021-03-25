@@ -1,3 +1,5 @@
+ * A warning will be logged when TLS ciphers are configured for preference, but
+   not supported by rustls. Test cases added.
  * Sucessfull run with the `mod_md` extended test suite that allows specification
    of the ssl module to test with.
  * Fixed various edge cases about vhost selection, fallback and challenge certificates
