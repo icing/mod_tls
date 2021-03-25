@@ -23,7 +23,7 @@ class TestMD:
         assert cls.env.apache_restart() == 0
 
     @classmethod
-    def XXXteardown_class(cls):
+    def teardown_class(cls):
         if cls.env.is_live(timeout=timedelta(milliseconds=100)):
             assert cls.env.apache_stop() == 0
 

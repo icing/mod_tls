@@ -34,8 +34,10 @@ typedef struct {
     const char *sni_hostname;         /* the SNI value from the client hello, if present */
     const apr_array_header_t *alpn;   /* the protocols proposed via ALPN by the client */
     const char *protocol_selected;    /* the ALPN selected a protocol or NULL if not done yet */
-    const char *tls_version;          /* the TLS version negotiated as string */
-    const char *tls_ciphersuite;      /* the TLS cipher suite negotiated as string */
+    apr_uint16_t tls_protocol_id;      /* the TLS version negotiated */
+    const char *tls_protocol_name;     /* the name of the TLS version negotiated */
+    apr_uint16_t tls_cipher_id;       /* the TLS cipher suite negotiated */
+    const char *tls_cipher_name;      /* the name of TLS cipher suite negotiated */
     int service_unavailable;          /* we 503 all requests on this connection */
 
     struct tls_filter_ctx_t *filter_ctx;

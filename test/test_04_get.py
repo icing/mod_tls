@@ -79,7 +79,6 @@ class TestGet:
     def test_04_double_get(self, fname, flen):
         # we'd like to check that we can do >1 requests on the same connection
         # however curl hides that from us, unless we analyze its verbose output
-        # TODO: should we?
         docs_a = os.path.join(self.env.server_docs_dir, self.domain_a)
         r = self.env.https_get(self.domain_a, paths=[
             "/{0}".format(fname),

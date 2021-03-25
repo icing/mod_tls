@@ -269,7 +269,7 @@ class TlsTestEnv:
     # --------- control apache ---------
 
     def httpd(self):
-        args = [self._httpd, "-X", "-d", self._server_dir]
+        args = [self._httpd, "-d", self._server_dir]
         p = subprocess.run(args, capture_output=True, text=True)
         rv = p.returncode
         return rv

@@ -1,3 +1,5 @@
+ * Implemented checks on minimum TLS version and suppressed ciphers when
+   serving requests to server A on a connection opened on server B.
  * A warning will be logged when TLS ciphers are configured for preference, but
    not supported by rustls. Test cases added.
  * Sucessfull run with the `mod_md` extended test suite that allows specification

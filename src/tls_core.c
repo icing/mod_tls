@@ -717,7 +717,6 @@ apr_status_t tls_core_conn_post_handshake(conn_rec *c)
     tls_conf_conn_t *cc = tls_conf_conn_get(c);
     tls_conf_server_t *sc = tls_conf_server_get(cc->server);
     apr_status_t rv = APR_SUCCESS;
-    apr_uint16_t id;
 
     if (rustls_server_session_is_handshaking(cc->rustls_session)) {
         rv = APR_EGENERAL;
@@ -727,24 +726,24 @@ apr_status_t tls_core_conn_post_handshake(conn_rec *c)
         goto cleanup;
     }
 
-    id = rustls_server_session_get_protocol_version(cc->rustls_session);
-    cc->tls_version = tls_proto_get_version_name(sc->global->proto, id, c->pool);
-    id = rustls_server_session_get_negotiated_cipher(cc->rustls_session);
-    cc->tls_ciphersuite = tls_proto_get_cipher_name(sc->global->proto, id, c->pool);
+    cc->tls_protocol_id = rustls_server_session_get_protocol_version(cc->rustls_session);
+    cc->tls_protocol_name = tls_proto_get_version_name(sc->global->proto,
+        cc->tls_protocol_id, c->pool);
+    cc->tls_cipher_id = rustls_server_session_get_negotiated_cipher(cc->rustls_session);
+    cc->tls_cipher_name = tls_proto_get_cipher_name(sc->global->proto,
+        cc->tls_cipher_id, c->pool);
     ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, c, "post_handshake %s: %s [%s]",
-        cc->server->server_hostname, cc->tls_version, cc->tls_ciphersuite);
+        cc->server->server_hostname, cc->tls_protocol_name, cc->tls_cipher_name);
 
 cleanup:
     return rv;
 }
 
 /**
- * Return != 0, if a connection opened on <base> can also serve
- * requests for server <other>. From our side of TLS limited point of view.
+ * Return != 0, if a connection also serve requests for server <other>.
  */
-static int tls_servers_compatible(server_rec *base, server_rec *other)
+static int tls_conn_compatible_for(tls_conf_conn_t *cc, server_rec *other)
 {
-    tls_conf_server_t *bc;
     tls_conf_server_t *oc;
 
     /*   - differences in certificates are the responsibility of the client.
@@ -752,14 +751,16 @@ static int tls_servers_compatible(server_rec *base, server_rec *other)
      *   - if there are differences in requirements to client certificates, we
      *     need to deny the request.
      */
-    if (!base || !other) return 0;
-    if (base == other) return 1;
-    bc = tls_conf_server_get(base);
+    if (!cc->server || !other) return 0;
+    if (cc->server == other) return 1;
     oc = tls_conf_server_get(other);
-    if (!bc || !oc) return 0;
+    if (!oc) return 0;
 
-    if (bc->honor_client_order != oc->honor_client_order) return 0;
-    /* TODO: check config details for ciphers/protocols/client auth/etc. */
+    /* If the connection TLS version is below other other min one, no */
+    if (oc->tls_protocol_min > 0 && cc->tls_protocol_id < oc->tls_protocol_min) return 0;
+    /* If the connection TLS cipher is listed as suppressed by other, no */
+    if (oc->tls_supp_ciphers && tls_util_array_uint16_contains(
+        oc->tls_supp_ciphers, cc->tls_cipher_id)) return 0;
     return 1;
 }
 
@@ -785,7 +786,7 @@ int tls_core_request_check(request_rec *r)
     if (!cc->sni_hostname && r->connection->vhost_lookup_data) {
         rv = HTTP_FORBIDDEN; goto cleanup;
     }
-    if (!tls_servers_compatible(cc->server, r->server)) {
+    if (!tls_conn_compatible_for(cc, r->server)) {
         rv = HTTP_MISDIRECTED_REQUEST;
         ap_log_rerror(APLOG_MARK, APLOG_ERR, rv, r, APLOGNO()
                      "Connection host %s, selected via SNI, and request host %s"

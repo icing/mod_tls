@@ -38,12 +38,12 @@ typedef const char *var_lookup(const tls_var_lookup_ctx_t *ctx);
 
 static const char *var_get_ssl_protocol(const tls_var_lookup_ctx_t *ctx)
 {
-    return ctx->cc->tls_version;
+    return ctx->cc->tls_protocol_name;
 }
 
 static const char *var_get_ssl_cipher(const tls_var_lookup_ctx_t *ctx)
 {
-    return ctx->cc->tls_ciphersuite;
+    return ctx->cc->tls_cipher_name;
 }
 
 static const char *var_get_sni_hostname(const tls_var_lookup_ctx_t *ctx)
