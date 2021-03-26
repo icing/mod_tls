@@ -14,6 +14,7 @@
 #include <http_core.h>
 #include <http_log.h>
 #include <http_protocol.h>
+#include <http_ssl.h>
 #include <http_vhost.h>
 #include <http_main.h>
 #include <ap_socache.h>
