@@ -46,6 +46,8 @@ class TestTimeout:
                 if not buf:
                     break
                 print("recv() -> {0}".format(buf))
+        except socket.timeout:
+            print("timeout, as should be")
         except BlockingIOError:
             assert False, "socket not closed as handshake timeout should trigger"
         s.close()
