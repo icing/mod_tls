@@ -55,9 +55,10 @@ class ExecResult:
 
 class TlsCipher:
 
-    def __init__(self, name: str, flavour: str,
+    def __init__(self, id: int, name: str, flavour: str,
                  min_version: float, max_version: float = None,
                  openssl: str = None):
+        self.id = id
         self.name = name
         self.flavour = flavour
         self.min_version = min_version
@@ -72,6 +73,7 @@ class TlsCipher:
                 openssl = re.sub(r'(_POLY1305)_\S+$', r'\1', openssl)
                 openssl = re.sub(r'_', '-', openssl)
         self.openssl_name = openssl
+        self.id_name = "TLS_CIPHER_0x{0:04x}".format(self.id)
 
     def __repr__(self):
         return self.name
@@ -96,15 +98,15 @@ class TlsTestEnv:
     # current rustls supported ciphers in their order of preference
     # used to test cipher selection, see test_06_ciphers.py
     RUSTLS_CIPHERS = [
-        TlsCipher("TLS13_CHACHA20_POLY1305_SHA256", "CHACHA", 1.3),
-        TlsCipher("TLS13_AES_256_GCM_SHA384", "AES", 1.3),
-        TlsCipher("TLS13_AES_128_GCM_SHA256", "AES", 1.3),
-        TlsCipher("TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256", "ECDSA", 1.2),
-        TlsCipher("TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256", "RSA", 1.2),
-        TlsCipher("TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", "ECDSA", 1.2),
-        TlsCipher("TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256", "ECDSA", 1.2),
-        TlsCipher("TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384", "RSA", 1.2),
-        TlsCipher("TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256", "RSA", 1.2),
+        TlsCipher(0x1303, "TLS13_CHACHA20_POLY1305_SHA256", "CHACHA", 1.3),
+        TlsCipher(0x1302, "TLS13_AES_256_GCM_SHA384", "AES", 1.3),
+        TlsCipher(0x1301, "TLS13_AES_128_GCM_SHA256", "AES", 1.3),
+        TlsCipher(0xcca9, "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256", "ECDSA", 1.2),
+        TlsCipher(0xcca8, "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256", "RSA", 1.2),
+        TlsCipher(0xc02c, "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", "ECDSA", 1.2),
+        TlsCipher(0xc02b, "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256", "ECDSA", 1.2),
+        TlsCipher(0xc030, "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384", "RSA", 1.2),
+        TlsCipher(0xc02f, "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256", "RSA", 1.2),
     ]
 
     LOG_FMT_TIGHT = '%(levelname)s: %(message)s'

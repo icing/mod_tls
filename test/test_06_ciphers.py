@@ -119,6 +119,54 @@ class TestCiphers:
         assert client_proto == "TLSv1.2", r.stdout
         assert client_cipher == cipher.openssl_name, r.stdout
 
+    @pytest.mark.parametrize("cipher", [
+        c for c in TlsTestEnv.RUSTLS_CIPHERS if c.max_version == 1.2 and c.flavour == 'RSA'
+    ], ids=[
+        c.openssl_name for c in TlsTestEnv.RUSTLS_CIPHERS if c.max_version == 1.2 and c.flavour == 'RSA'
+    ])
+    def test_06_ciphers_server_prefer_rsa_alias(self, cipher):
+        # same as above, but using openssl names for ciphers
+        suppress_names = [c.openssl_name for c in self.env.RUSTLS_CIPHERS
+                          if c.max_version == 1.2 and c.flavour == 'ECDSA']
+        conf = TlsTestConf(env=self.env)
+        conf.add_vhosts(domains=[self.domain_a, self.domain_b], extras={
+            self.domain_b: """
+            TLSHonorClientOrder off
+            TLSCiphersPrefer {0}
+            TLSCiphersSuppress {1}
+            """.format(cipher.openssl_name, ":".join(suppress_names)),
+        })
+        conf.write()
+        assert self.env.apache_restart() == 0
+        r = self.env.openssl_client(self.domain_b, extra_args=["-tls1_2"])
+        client_proto, client_cipher = self._get_protocol_cipher(r.stdout)
+        assert client_proto == "TLSv1.2", r.stdout
+        assert client_cipher == cipher.openssl_name, r.stdout
+
+    @pytest.mark.parametrize("cipher", [
+        c for c in TlsTestEnv.RUSTLS_CIPHERS if c.max_version == 1.2 and c.flavour == 'RSA'
+    ], ids=[
+        c.id_name for c in TlsTestEnv.RUSTLS_CIPHERS if c.max_version == 1.2 and c.flavour == 'RSA'
+    ])
+    def test_06_ciphers_server_prefer_rsa_id(self, cipher):
+        # same as above, but using openssl names for ciphers
+        suppress_names = [c.id_name for c in self.env.RUSTLS_CIPHERS
+                          if c.max_version == 1.2 and c.flavour == 'ECDSA']
+        conf = TlsTestConf(env=self.env)
+        conf.add_vhosts(domains=[self.domain_a, self.domain_b], extras={
+            self.domain_b: """
+            TLSHonorClientOrder off
+            TLSCiphersPrefer {0}
+            TLSCiphersSuppress {1}
+            """.format(cipher.id_name, ":".join(suppress_names)),
+        })
+        conf.write()
+        assert self.env.apache_restart() == 0
+        r = self.env.openssl_client(self.domain_b, extra_args=["-tls1_2"])
+        client_proto, client_cipher = self._get_protocol_cipher(r.stdout)
+        assert client_proto == "TLSv1.2", r.stdout
+        assert client_cipher == cipher.openssl_name, r.stdout
+
     def test_06_ciphers_pref_unknown(self):
         self.env.apache_stop()
         conf = TlsTestConf(env=self.env)

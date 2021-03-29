@@ -411,13 +411,13 @@ static const char *tls_conf_set_protocol(
         sc->tls_protocol_min = tls_proto_get_version_by_name(sc->global->proto, name);
         if (!sc->tls_protocol_min) {
             err = apr_pstrcat(cmd->pool, cmd->cmd->name,
-                ": unrecognized protocol version specifier (try v1.2+ or v1.3+): '", v, "'", NULL);
+                ": unrecognized protocol version specifier (try TLSv1.2+ or TLSv1.3+): '", v, "'", NULL);
             goto cleanup;
         }
     }
     else {
         err = apr_pstrcat(cmd->pool, cmd->cmd->name,
-            ": value must be 'default', 'v1.2+' or 'v1.3+': '", v, "'", NULL);
+            ": value must be 'default', 'TLSv1.2+' or 'TLSv1.3+': '", v, "'", NULL);
         goto cleanup;
     }
 cleanup:

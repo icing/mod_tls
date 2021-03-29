@@ -91,7 +91,7 @@ class TestConf:
         "default",
         "TLSv1.2+",
         "TLSv1.3+",
-        "TLSv0303+",
+        "TLSv0x0303+",
     ])
     def test_02_conf_proto_valid(self, proto):
         conf = TlsTestConf(env=self.env)
