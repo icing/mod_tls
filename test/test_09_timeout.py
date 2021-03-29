@@ -39,7 +39,7 @@ class TestTimeout:
             assert False, "able to recv() on a TLS connection before we sent a hello"
         except BlockingIOError:
             pass
-        time.sleep(1.2)  # handhshake timeout should kick in
+        s.settimeout(2.0)
         try:
             while True:
                 buf = s.recv(1024)
