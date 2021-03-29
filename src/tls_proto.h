@@ -44,12 +44,18 @@ apr_status_t tls_proto_load_certified_key(
     apr_pool_t *p, server_rec *s,
     tls_certificate_t *spec, const rustls_certified_key **pckey);
 
+typedef struct {
+    apr_uint16_t id;
+    const char *name;
+    const char *alias;
+} tls_cipher_t;
 
 struct tls_proto_conf_t {
     apr_array_header_t *supported_versions; /* supported protocol versions (apr_uint16_t) */
     apr_hash_t *known_ciphers_by_name; /* hash by name of known tls_cipher_t* */
     apr_hash_t *known_ciphers_by_id; /* hash by id of known tls_cipher_t* */
-    apr_array_header_t *rustls_ciphers; /* ciphers (apr_uint16_t) supported by rustls */
+    apr_hash_t *rustls_ciphers_by_id; /* hash by id of rustls rustls_supported_ciphersuite* */
+    apr_array_header_t *supported_cipher_ids; /* cipher ids (apr_uint16_t) supported by rustls */
 };
 typedef struct tls_proto_conf_t tls_proto_conf_t;
 
@@ -75,5 +81,8 @@ const char *tls_proto_get_cipher_name(
 
 const char *tls_proto_get_cipher_names(
     tls_proto_conf_t *conf, const apr_array_header_t *ciphers, apr_pool_t *pool);
+
+apr_array_header_t *tls_proto_get_rustls_suites(
+    tls_proto_conf_t *conf, const apr_array_header_t *ids, apr_pool_t *pool);
 
 #endif /* tls_proto_h */

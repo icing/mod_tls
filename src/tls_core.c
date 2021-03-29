@@ -173,7 +173,7 @@ static apr_status_t set_ciphers(
 
     /* remove all suppressed ciphers from the ones supported by rustls */
     ciphers = tls_util_array_uint16_remove(pool,
-        sc->global->proto->rustls_ciphers, sc->tls_supp_ciphers);
+        sc->global->proto->supported_cipher_ids, sc->tls_supp_ciphers);
     ordered_ciphers = NULL;
     /* if preferred ciphers are actually still present in allowed_ciphers, put
      * them into `ciphers` in this order */
@@ -202,7 +202,9 @@ static apr_status_t set_ciphers(
         ciphers = ordered_ciphers;
     }
 
-    if (ciphers != sc->global->proto->rustls_ciphers) {
+    if (ciphers != sc->global->proto->supported_cipher_ids) {
+        apr_array_header_t *suites = tls_proto_get_rustls_suites(
+            sc->global->proto, ciphers, pool);
         /* this changed the default rustls ciphers, configure it. */
         if (APLOGtrace2(sc->server)) {
             tls_proto_conf_t *conf = sc->global->proto;
@@ -211,8 +213,9 @@ static apr_status_t set_ciphers(
                          sc->server->server_hostname,
                          tls_proto_get_cipher_names(conf, ciphers, pool));
         }
-        rr = rustls_server_config_builder_set_ciphers(builder,
-            (apr_uint16_t*)ciphers->elts, (apr_size_t)ciphers->nelts);
+        rr = rustls_server_config_builder_set_ciphersuites(builder,
+            (const struct rustls_supported_ciphersuite* const*)suites->elts,
+            (apr_size_t)suites->nelts);
         if (RUSTLS_RESULT_OK != rr) goto cleanup;
     }
 
@@ -717,12 +720,13 @@ apr_status_t tls_core_conn_post_handshake(conn_rec *c)
 {
     tls_conf_conn_t *cc = tls_conf_conn_get(c);
     tls_conf_server_t *sc = tls_conf_server_get(cc->server);
+    const struct rustls_supported_ciphersuite *rsuite;
     apr_status_t rv = APR_SUCCESS;
 
     if (rustls_server_session_is_handshaking(cc->rustls_session)) {
         rv = APR_EGENERAL;
         ap_log_error(APLOG_MARK, APLOG_ERR, rv, cc->server, APLOGNO()
-                     "post handshake, but rustls claims to still be handshaking %s",
+                     "post handshake, but rustls claims to still be handshaking: %s",
                      cc->server->server_hostname);
         goto cleanup;
     }
@@ -730,7 +734,15 @@ apr_status_t tls_core_conn_post_handshake(conn_rec *c)
     cc->tls_protocol_id = rustls_server_session_get_protocol_version(cc->rustls_session);
     cc->tls_protocol_name = tls_proto_get_version_name(sc->global->proto,
         cc->tls_protocol_id, c->pool);
-    cc->tls_cipher_id = rustls_server_session_get_negotiated_cipher(cc->rustls_session);
+    rsuite = rustls_server_session_get_negotiated_ciphersuite(cc->rustls_session);
+    if (!rsuite) {
+        rv = APR_EGENERAL;
+        ap_log_error(APLOG_MARK, APLOG_ERR, rv, cc->server, APLOGNO()
+                     "post handshake, but rustls does not report negotiated cipher suite: %s",
+                     cc->server->server_hostname);
+        goto cleanup;
+    }
+    cc->tls_cipher_id = rustls_supported_ciphersuite_get_suite(rsuite);
     cc->tls_cipher_name = tls_proto_get_cipher_name(sc->global->proto,
         cc->tls_cipher_id, c->pool);
     ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, c, "post_handshake %s: %s [%s]",

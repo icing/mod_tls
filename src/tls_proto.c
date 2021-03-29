@@ -118,12 +118,6 @@ cleanup:
     return rv;
 }
 
-typedef struct {
-    apr_uint16_t id;
-    const char *name;
-    const char *alias;
-} tls_cipher_t;
-
 /**
  * Known cipher as registered in
  * <https://www.iana.org/assignments/tls-parameters/tls-parameters.xhtml#tls-parameters-4>
@@ -503,19 +497,18 @@ static tls_cipher_t KNOWN_CIPHERS[] = {
     { 0xfeff, "SSL_RSA_FIPS_WITH_3DES_EDE_CBC_SHA", NULL },
 };
 
-static void copy_rustls_ciphers(void *userdata, const rustls_slice_u16* rustls_ciphers)
-{
-    apr_array_header_t *our_ciphers = userdata;
-    apr_size_t i;
-    for (i = 0; i < rustls_ciphers->len; ++i) {
-        APR_ARRAY_PUSH(our_ciphers, apr_uint16_t) = rustls_ciphers->data[i];
-    }
-}
+typedef struct {
+    apr_uint16_t id;
+    const struct rustls_supported_ciphersuite *rustls_suite;
+} rustls_cipher_t;
 
 tls_proto_conf_t *tls_proto_init(apr_pool_t *pool, server_rec *s)
 {
     tls_proto_conf_t *conf;
     tls_cipher_t *cipher;
+    const struct rustls_supported_ciphersuite *rustls_suite;
+    rustls_cipher_t *rcipher;
+    apr_uint16_t id;
     apr_size_t i;
 
     (void)s;
@@ -537,8 +530,18 @@ tls_proto_conf_t *tls_proto_init(apr_pool_t *pool, server_rec *s)
         }
     }
 
-    conf->rustls_ciphers = apr_array_make(pool, 10, sizeof(apr_uint16_t));
-    rustls_cipher_visit_supported(copy_rustls_ciphers, conf->rustls_ciphers);
+    conf->supported_cipher_ids = apr_array_make(pool, 10, sizeof(apr_uint16_t));
+    conf->rustls_ciphers_by_id = apr_hash_make(pool);
+    i = 0;
+    while ((rustls_suite = rustls_all_ciphersuites_get(i++))) {
+        id = rustls_supported_ciphersuite_get_suite(rustls_suite);
+        rcipher = apr_pcalloc(pool, sizeof(*rcipher));
+        rcipher->id = id;
+        rcipher->rustls_suite = rustls_suite;
+        APR_ARRAY_PUSH(conf->supported_cipher_ids, apr_uint16_t) = id;
+        apr_hash_set(conf->rustls_ciphers_by_id, &rcipher->id, sizeof(apr_uint16_t), rcipher);
+
+    }
     return conf;
 }
 
@@ -564,7 +567,7 @@ apr_status_t tls_proto_post_config(apr_pool_t *pool, apr_pool_t *ptemp, server_r
         tls_proto_conf_t *conf = sc->global->proto;
         ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, APLOGNO()
                      "tls ciphers supported: %s",
-                     tls_proto_get_cipher_names(conf, conf->rustls_ciphers, ptemp));
+                     tls_proto_get_cipher_names(conf, conf->supported_cipher_ids, ptemp));
     }
     return APR_SUCCESS;
 }
@@ -632,7 +635,7 @@ apr_array_header_t *tls_proto_create_versions_plus(
 
 int tls_proto_is_cipher_supported(tls_proto_conf_t *conf, apr_uint16_t cipher)
 {
-    return tls_util_array_uint16_contains(conf->rustls_ciphers, cipher);
+    return tls_util_array_uint16_contains(conf->supported_cipher_ids, cipher);
 }
 
 apr_status_t tls_proto_get_cipher_by_name(
@@ -654,4 +657,23 @@ const char *tls_proto_get_cipher_name(
         return cipher->name;
     }
     return apr_psprintf(pool, "TLS_CIPHER_0x%04x", id);
+}
+
+apr_array_header_t *tls_proto_get_rustls_suites(
+    tls_proto_conf_t *conf, const apr_array_header_t *ids, apr_pool_t *pool)
+{
+    apr_array_header_t *suites;
+    rustls_cipher_t *rcipher;
+    apr_uint16_t id;
+    int i;
+
+    suites = apr_array_make(pool, ids->nelts, sizeof(const rustls_supported_ciphersuite*));
+    for (i = 0; i < ids->nelts; ++i) {
+        id = APR_ARRAY_IDX(ids, i, apr_uint16_t);
+        rcipher = apr_hash_get(conf->rustls_ciphers_by_id, &id, sizeof(apr_uint16_t));
+        if (rcipher) {
+            APR_ARRAY_PUSH(suites, const struct rustls_supported_ciphersuite *) = rcipher->rustls_suite;
+        }
+    }
+    return suites;
 }
