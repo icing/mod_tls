@@ -18,6 +18,7 @@ class TestSni:
         conf.add_vhosts(domains=[cls.domain_a, cls.domain_b])
         conf.write()
         assert cls.env.apache_restart() == 0
+        cls.env.curl_supports_tls_1_3()  # init
 
     @classmethod
     def teardown_class(cls):
@@ -53,6 +54,9 @@ class TestSni:
         assert r.json == {'domain': self.domain_b}
 
     def test_03_sni_request_other_other_honor(self):
+        if self.env.curl_supports_tls_1_3():
+            # can't do this test then
+            return
         # do we see the first vhost respone for an unknown domain?
         conf = TlsTestConf(env=self.env)
         conf.add_vhosts(domains=[self.domain_a, self.domain_b], extras={
