@@ -94,11 +94,11 @@ static apr_status_t read_tls_to_rustls(
                 apr_bucket_delete(b);
             }
             else {
-                b->start += rlen;
+                b->start += (apr_off_t)rlen;
                 b->length -= rlen;
             }
-            fctx->fin_bytes_in_rustls += dlen;
-            passed += rlen;
+            fctx->fin_bytes_in_rustls += (apr_off_t)dlen;
+            passed += (apr_off_t)rlen;
         }
         else if (dlen == 0) {
             apr_bucket_delete(b);
@@ -167,7 +167,7 @@ static apr_status_t brigade_tls_from_rustls(
             b = apr_bucket_heap_create(buffer, dlen, free, fctx->c->bucket_alloc);
             buffer = NULL;
             APR_BRIGADE_INSERT_TAIL(fctx->fout_tls_bb, b);
-            fctx->fout_bytes_in_tls_bb += dlen;
+            fctx->fout_bytes_in_tls_bb += (apr_off_t)dlen;
         }
         while (rustls_server_session_wants_write(fctx->cc->rustls_session));
         fctx->fout_bytes_in_rustls = 0;
@@ -499,7 +499,7 @@ static apr_status_t fout_plain_buf_to_rustls(
         rr = rustls_server_session_write(fctx->cc->rustls_session,
             (unsigned char*)fctx->fout_buf_plain, fctx->fout_buf_plain_len, &wlen);
         if (rr != RUSTLS_RESULT_OK) goto cleanup;
-        fctx->fout_bytes_in_rustls += wlen;
+        fctx->fout_bytes_in_rustls += (apr_off_t)wlen;
         ap_log_cerror(APLOG_MARK, APLOG_TRACE2, 0, fctx->c,
                      "fout_plain_buf_to_rustls: %ld bytes passed to rustls", (long)wlen);
         if (wlen >= fctx->fout_buf_plain_len) {
@@ -603,12 +603,12 @@ static apr_status_t fout_plain_buf_append(
             rr = rustls_server_session_write(fctx->cc->rustls_session,
                 (unsigned char*)data, dlen, &wlen);
             if (rr != RUSTLS_RESULT_OK) goto cleanup;
-            fctx->fout_bytes_in_rustls += wlen;
+            fctx->fout_bytes_in_rustls += (apr_off_t)wlen;
             if (wlen >= dlen) {
                 apr_bucket_delete(b);
             }
             else {
-                b->start += wlen;
+                b->start += (apr_off_t)wlen;
                 b->length -= wlen;
             }
         }
@@ -712,7 +712,7 @@ static apr_status_t filter_conn_output(
             }
             rv = fout_plain_buf_append(fctx, b, &wlen);
             if (APR_SUCCESS != rv) goto cleanup;
-            passed += wlen;
+            passed += (apr_off_t)wlen;
         }
 
         /* did we w supply 'enough' plain bytes to rustls? If so,
