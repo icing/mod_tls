@@ -48,7 +48,7 @@ class TestProto:
         if self.env.curl_supports_tls_1_3():
             r = self.env.https_get(self.env.domain_b, "/index.json",
                                    extra_args=["--tlsv1.3"])
-            assert r.exit_code != 0, r.stderr
+            assert r.exit_code == 0, r.stderr
 
     def test_05_proto_1_3(self):
         r = self.env.https_get(self.env.domain_a, "/index.json",
