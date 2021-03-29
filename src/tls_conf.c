@@ -317,7 +317,7 @@ static const char *tls_conf_set_preferred_ciphers(
                             ": cipher not recognized '", name, "'", NULL);
                     goto cleanup;
                 }
-                *(apr_uint16_t*)apr_array_push(sc->tls_pref_ciphers) = cipher;
+                APR_ARRAY_PUSH(sc->tls_pref_ciphers, apr_uint16_t) = cipher;
                 name = apr_strtok(NULL, ":", &last);
             }
         }

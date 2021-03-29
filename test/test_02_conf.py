@@ -59,7 +59,7 @@ class TestConf:
 
     def test_02_conf_cert_listen_wrong(self):
         conf = TlsTestConf(env=self.env)
-        conf.add("TLSListen invalid")
+        conf.add("TLSListen ^^^^^")
         conf.write()
         assert self.env.apache_fail() == 0
 

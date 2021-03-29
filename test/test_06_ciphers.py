@@ -1,4 +1,5 @@
 import re
+import time
 from datetime import timedelta
 
 import pytest
@@ -168,7 +169,6 @@ class TestCiphers:
         assert client_cipher == cipher.openssl_name, r.stdout
 
     def test_06_ciphers_pref_unknown(self):
-        self.env.apache_stop()
         conf = TlsTestConf(env=self.env)
         conf.add_vhosts(domains=[self.domain_a, self.domain_b], extras={
             self.domain_b: """
@@ -177,10 +177,14 @@ class TestCiphers:
         })
         conf.write()
         assert self.env.apache_restart() != 0
+        # get a working config again, so that subsequent test cases do not stumble
+        conf = TlsTestConf(env=self.env)
+        conf.add_vhosts(domains=[self.domain_a, self.domain_b])
+        conf.write()
+        self.env.apache_restart()
 
     def test_06_ciphers_pref_unsupported(self):
         # a warning on prefering a known, but not supported cipher
-        self.env.apache_stop()
         self.env.apache_error_log_clear()
         conf = TlsTestConf(env=self.env)
         conf.add_vhosts(domains=[self.domain_a, self.domain_b], extras={
@@ -189,14 +193,12 @@ class TestCiphers:
             """
         })
         conf.write()
-        r = self.env.apache_try_start()
-        assert r.exit_code == 0, r.stderr
+        assert self.env.apache_restart() == 0
         (errors, warnings) = self.env.apache_error_log_count()
         assert errors == 0
         assert warnings == 1
 
     def test_06_ciphers_supp_unknown(self):
-        self.env.apache_stop()
         conf = TlsTestConf(env=self.env)
         conf.add_vhosts(domains=[self.domain_a, self.domain_b], extras={
             self.domain_b: """
@@ -208,7 +210,6 @@ class TestCiphers:
 
     def test_06_ciphers_supp_unsupported(self):
         # no warnings on suppressing known, but not supported ciphers
-        self.env.apache_stop()
         self.env.apache_error_log_clear()
         conf = TlsTestConf(env=self.env)
         conf.add_vhosts(domains=[self.domain_a, self.domain_b], extras={
@@ -217,8 +218,7 @@ class TestCiphers:
             """
         })
         conf.write()
-        r = self.env.apache_try_start()
-        assert r.exit_code == 0, r.stderr
+        assert self.env.apache_restart() == 0
         (errors, warnings) = self.env.apache_error_log_count()
         assert errors == 0
         assert warnings == 0

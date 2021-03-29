@@ -64,7 +64,6 @@ static apr_status_t tls_post_config(apr_pool_t *p, apr_pool_t *plog,
                                     apr_pool_t *ptemp, server_rec *s)
 {
     const char *tls_init_key = "mod_tls_init_counter";
-    int dry_run = 0;
     void *data = NULL;
 
     (void)p;
@@ -75,7 +74,6 @@ static apr_status_t tls_post_config(apr_pool_t *p, apr_pool_t *plog,
         /* At the first start, httpd makes a config check dry run
         * to see if the config is ok in principle.
          */
-        dry_run = 1;
         ap_log_error(APLOG_MARK, APLOG_TRACE1, 0, s, "post config dry run");
         apr_pool_userdata_set((const void *)1, tls_init_key,
                               apr_pool_cleanup_null, s->process->pool);
