@@ -33,21 +33,20 @@ class TestTimeout:
     def test_09_timeout_handshake(self):
         # in domain_b root, the StdEnvVars is switch on
         s = socket.create_connection(('localhost', self.env.https_port))
+        s.send(b'1234')
         s.settimeout(0.0)
         try:
             s.recv(1024)
             assert False, "able to recv() on a TLS connection before we sent a hello"
         except BlockingIOError:
             pass
-        s.settimeout(2.0)
+        s.settimeout(3.0)
         try:
             while True:
                 buf = s.recv(1024)
                 if not buf:
                     break
                 print("recv() -> {0}".format(buf))
-        except socket.timeout:
-            print("timeout, as should be")
-        except BlockingIOError:
+        except (socket.timeout, BlockingIOError):
             assert False, "socket not closed as handshake timeout should trigger"
         s.close()
