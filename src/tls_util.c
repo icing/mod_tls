@@ -166,8 +166,8 @@ apr_status_t tls_util_brigade_transfer(
             }
             APR_BUCKET_REMOVE(b);
             APR_BRIGADE_INSERT_TAIL(dest, b);
-            remain -= b->length;
-            *pnout += b->length;
+            remain -= (apr_off_t)b->length;
+            *pnout += (apr_off_t)b->length;
         }
     }
 cleanup:
@@ -213,8 +213,8 @@ apr_status_t tls_util_brigade_copy(
         rv = apr_bucket_copy(b, &b);
         if (APR_SUCCESS != rv) goto cleanup;
         APR_BRIGADE_INSERT_TAIL(dest, b);
-        remain -= b->length;
-        *pnout += b->length;
+        remain -= (apr_off_t)b->length;
+        *pnout += (apr_off_t)b->length;
     }
 cleanup:
     return rv;
