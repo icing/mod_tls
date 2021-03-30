@@ -1,3 +1,6 @@
+ * Added Docker support for setting up an images based on debian sid,
+   build current apache 2.4.x patch, current crustls PR branch and the
+   local mod_tls sources and have the test suite run in the image.
  * Updated documentation on protocol version/cipher configuring.
  * Changed numerical names to include `0x`, for example `TLS_CIPHER_0xc024`,
    to avoid ambiguities.

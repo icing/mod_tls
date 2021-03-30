@@ -148,9 +148,9 @@ class TlsTestEnv:
         self._http_port = int(config.get('global', 'http_port'))
         self._https_port = int(config.get('global', 'https_port'))
 
-        self._http_base = "http://localhost:{port}".format(port=self._http_port)
+        self._http_base = "http://127.0.0.1:{port}".format(port=self._http_port)
         self._httpd_check_url = self._http_base
-        self._https_base = "https://localhost:{port}".format(port=self._https_port)
+        self._https_base = "https://127.0.0.1:{port}".format(port=self._https_port)
 
         self._curl = config.get('global', 'curl_bin')
         if self._curl is None or len(self._curl) == 0:

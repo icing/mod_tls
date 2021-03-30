@@ -54,6 +54,18 @@ Run the usual autoconf/automake magic incantations.
 > make
 ```
 
+### Docker Test Image
+
+There is now support for building a Docker image based on `debian sid` to run the test suite in.
+
+```
+> cd mod_tls
+> docker-compose build debian-test
+> docker-compose run debian-test
+```
+
+This clone the git repository from `apache` and `crustls`, switched to the necessary branches and builds a copy of the local `mod_tls` sources. If you want to setup your own build, you'll find the instructions in `docker/debian-test/bin/update.sh`.
+
 ## Tests
 
 ### Functional Tests

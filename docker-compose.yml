@@ -1,0 +1,28 @@
+version: '3.7'
+services:
+  debian-test:
+    # build and run tests in a debian sid container
+    image: ${DOCKER_REGISTRY}/mod-tls-debian-test:0.0.1
+    container_name: mod-tls-debian-test
+    build:
+      context: .
+      dockerfile: docker/debian-test/Dockerfile
+      labels:
+        - "description=mod_tls debian test server"
+        - "maintainer=stefan@eissing.org"
+    expose:
+      - "5010"
+      - "5011"
+    volumes:
+      - mod-tls-debian-test-data:/abetterinternet/data
+    ports:
+      - "5010"
+      - "5011"
+
+volumes:
+  mod-tls-debian-test-data:
+    name: mod-tls-debian-test-data
+    labels:
+      - "description=debian test data for mod_tls"
+      - "maintainer=stefan@eissing.org"
+
