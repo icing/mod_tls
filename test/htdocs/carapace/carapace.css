@@ -1,0 +1,43 @@
+.carapace {
+    color: #d0d0d0;
+    font-family: arial;
+    font-size: 11pt;
+    line-height: 150%;
+    padding: 0;
+    margin: 0;
+    background: #4f4f4f;
+}
+a, a:visited {
+    color: #986B2A;
+    text-decoration: none;
+}
+
+h1, h2, h3 {
+    color: #E0C093;
+}
+
+h1 {
+    margin: 0 -.5em;
+    padding: 2em .5em .5em .5em;
+    background-color: #C18732;
+    color: #1e1e1e;
+}
+
+.carapace .content {
+    background: #1e1e1e url(carapace.png) left 5em no-repeat;
+    background-size: 40%;
+    margin-top: 5em;
+    padding-left: 40%;
+    padding-right: 2em;
+}
+.carapace .page {
+    padding: 1em .5em 2em .5em;
+    background: #d0d0d0;
+    color: #4f4f4f;
+}
+
+.carapace .footnotes {
+    padding-bottom: 2em;
+    margin-top: .5 em;
+    font-size: smaller;
+}

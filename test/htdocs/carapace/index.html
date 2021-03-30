@@ -1,0 +1,76 @@
+<html>
+    <head>
+        <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+        <title>carapace - crustls in apache</title>
+        <link href="carapace.css" type="text/css" rel="stylesheet">
+    </head>
+    <body class="carapace">
+        <div class="content">
+            <div class="page">
+                <h1>carapace - rustls in apache</h1>
+                <p>
+                    This site uses crustls to embed rustls into mod_tls to
+                    enable secury and memory safe access to apache. What a
+                    jumble of words!
+                </p>
+                <p>
+                    There is a technology that makes crashes much more rare and
+                    exploitations of weaknesses much harder. This is called `Rust`
+                    and it is a programming language that enforces more discipline
+                    and rewards efforts with less likely screw-ups by the
+                    programmer.
+                </p>
+                <p>
+                    Since web servers on the internet are exposed to the Bad Guys,
+                    making your web server more secure seems a good idea.
+                </p>
+                <p>
+                    This site runs a new apache module named `mod_tls`, which
+                    does basically what the well known `mod_ssl` does: securing
+                    your server with `https`. Only instead of the `OpenSSL` library
+                    it uses `rustls` which provides the encryption of your site
+                    using Rust, memory-safe technology.
+                </p>
+                <p>
+                    Added protection for your apache web server.
+                </p>
+                <p>
+                    The projects
+                </p>
+                <ul>
+                    <li>
+                        <a href="https://github.com/ctz/rustls">rustls</a>:
+                        the implementation of the TLS (aka SSL) protocol.
+                    </li>
+                    <li>
+                        <a href="https://github.com/abetterinternet/crustls">crustls</a>:
+                        the C binding for the rustls component.
+                    </li>
+                    <li>
+                        <a href="https://github.com/icing/mod_tls">mod_tls</a>:
+                        the module bringing crustls into apache.
+                    </li>
+                    <li>
+                        <a href="https://httpd.apache.org">httpd</a>:
+                        the apache web server for the internet since 1997.
+                    </li>
+
+                </ul>
+                <p>
+                </p>
+
+                <div class="footnotes">
+                    <div class="footnote">
+                        This project is led by the
+                        <a href="https://www.abetterinternet.org">Internet Security Research Group</a>
+                        and funded by <a href="https://www.google.com">Google</a>.
+                    </div>
+                    <div class="footnote">
+                        Image from the Wikipedia article on
+                        <a href="https://en.wikipedia.org/wiki/Crustacean">Crustacean</a>.
+                    </div>
+                </div>
+            </div>
+        </div>
+    </body>
+</html>
