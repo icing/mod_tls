@@ -499,14 +499,14 @@ static tls_cipher_t KNOWN_CIPHERS[] = {
 
 typedef struct {
     apr_uint16_t id;
-    const struct rustls_supported_ciphersuite *rustls_suite;
+    const rustls_supported_ciphersuite *rustls_suite;
 } rustls_cipher_t;
 
 tls_proto_conf_t *tls_proto_init(apr_pool_t *pool, server_rec *s)
 {
     tls_proto_conf_t *conf;
     tls_cipher_t *cipher;
-    const struct rustls_supported_ciphersuite *rustls_suite;
+    const rustls_supported_ciphersuite *rustls_suite;
     rustls_cipher_t *rcipher;
     apr_uint16_t id;
     apr_size_t i;
@@ -672,7 +672,7 @@ apr_array_header_t *tls_proto_get_rustls_suites(
         id = APR_ARRAY_IDX(ids, i, apr_uint16_t);
         rcipher = apr_hash_get(conf->rustls_ciphers_by_id, &id, sizeof(apr_uint16_t));
         if (rcipher) {
-            APR_ARRAY_PUSH(suites, const struct rustls_supported_ciphersuite *) = rcipher->rustls_suite;
+            APR_ARRAY_PUSH(suites, const rustls_supported_ciphersuite *) = rcipher->rustls_suite;
         }
     }
     return suites;

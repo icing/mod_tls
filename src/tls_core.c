@@ -223,7 +223,7 @@ static apr_status_t set_ciphers(
                          tls_proto_get_cipher_names(conf, ciphers, pool));
         }
         rr = rustls_server_config_builder_set_ciphersuites(builder,
-            (const struct rustls_supported_ciphersuite* const*)suites->elts,
+            (const rustls_supported_ciphersuite* const*)suites->elts,
             (apr_size_t)suites->nelts);
         if (RUSTLS_RESULT_OK != rr) goto cleanup;
     }
@@ -728,7 +728,7 @@ apr_status_t tls_core_conn_post_handshake(conn_rec *c)
 {
     tls_conf_conn_t *cc = tls_conf_conn_get(c);
     tls_conf_server_t *sc = tls_conf_server_get(cc->server);
-    const struct rustls_supported_ciphersuite *rsuite;
+    const rustls_supported_ciphersuite *rsuite;
     apr_status_t rv = APR_SUCCESS;
 
     if (rustls_server_session_is_handshaking(cc->rustls_session)) {
