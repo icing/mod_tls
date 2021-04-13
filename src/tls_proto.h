@@ -24,9 +24,9 @@ typedef struct {
  * The PEM data of a certificate and its key.
  */
 typedef struct {
-    unsigned char *cert_pem_bytes;
+    char *cert_pem_bytes;
     size_t cert_pem_len;
-    unsigned char *pkey_pem_bytes;
+    char *pkey_pem_bytes;
     size_t pkey_pem_len;
 } tls_util_cert_pem_t;
 

@@ -37,7 +37,7 @@ apr_status_t tls_proto_load_pem(
         rv = APR_ENOENT; goto cleanup;
     }
     rv = tls_util_file_load(p, fpath, 0, 100*1024,
-        &cpem->cert_pem_bytes, &cpem->cert_pem_len);
+        (unsigned char**)&cpem->cert_pem_bytes, &cpem->cert_pem_len);
     if (APR_SUCCESS != rv) goto cleanup;
 
     if (cert->pkey_file) {
@@ -46,7 +46,7 @@ apr_status_t tls_proto_load_pem(
             rv = APR_ENOENT; goto cleanup;
         }
         rv = tls_util_file_load(p, fpath, 0, 100*1024,
-            &cpem->pkey_pem_bytes, &cpem->pkey_pem_len);
+            (unsigned char**)&cpem->pkey_pem_bytes, &cpem->pkey_pem_len);
         if (APR_SUCCESS != rv) goto cleanup;
     }
     else {
@@ -69,45 +69,27 @@ static void nullify_pems(tls_util_cert_pem_t *pems)
     }
 }
 
-apr_status_t tls_proto_load_certified_key(
-    apr_pool_t *p, server_rec *s,
-    tls_certificate_t *spec, const rustls_certified_key **pckey)
+static apr_status_t make_certified_key(
+    apr_pool_t *p, server_rec *s, const char *name,
+    const char *cert_pem, apr_size_t cert_len,
+    const char *pkey_pem, apr_size_t pkey_len,
+    const rustls_certified_key **pckey)
 {
     const rustls_certified_key *ckey = NULL;
     rustls_result rr = RUSTLS_RESULT_OK;
     apr_status_t rv = APR_SUCCESS;
 
-    if (spec->cert_file) {
-        tls_util_cert_pem_t *pems;
+    rr = rustls_certified_key_build(
+        (const unsigned char*)cert_pem, cert_len,
+        (const unsigned char*)pkey_pem, pkey_len,
+        &ckey);
 
-        rv = tls_proto_load_pem(p, spec, &pems);
-        if (APR_SUCCESS != rv) goto cleanup;
-        rr = rustls_certified_key_build(
-            pems->cert_pem_bytes, pems->cert_pem_len,
-            pems->pkey_pem_bytes, pems->pkey_pem_len,
-            &ckey);
-        /* dont want them hanging around in memory unnecessarily. */
-        nullify_pems(pems);
-    }
-    else if (spec->cert_pem) {
-        const char *pkey_pem = spec->pkey_pem? spec->pkey_pem : spec->cert_pem;
-        rr = rustls_certified_key_build(
-            (const unsigned char*)spec->cert_pem, strlen(spec->cert_pem),
-            (const unsigned char*)pkey_pem, strlen(pkey_pem),
-            &ckey);
-        /* pems provided from outside are responsibility of the caller */
-    }
-    else {
-        rv = APR_ENOENT; goto cleanup;
-    }
-
-cleanup:
     if (RUSTLS_RESULT_OK != rr) {
         const char *err_descr;
         rv = tls_util_rustls_error(p, rr, &err_descr);
         ap_log_error(APLOG_MARK, APLOG_ERR, rv, s, APLOGNO()
                      "Failed to load certified key %s: [%d] %s",
-                     spec->cert_file, (int)rr, err_descr);
+                     name, (int)rr, err_descr);
     }
     if (APR_SUCCESS == rv) {
         *pckey = ckey;
@@ -115,6 +97,39 @@ cleanup:
     else if (ckey) {
         rustls_certified_key_free(ckey);
     }
+    return rv;
+}
+
+apr_status_t tls_proto_load_certified_key(
+    apr_pool_t *p, server_rec *s,
+    tls_certificate_t *spec, const rustls_certified_key **pckey)
+{
+    apr_status_t rv = APR_SUCCESS;
+
+    if (spec->cert_file) {
+        tls_util_cert_pem_t *pems;
+
+        rv = tls_proto_load_pem(p, spec, &pems);
+        if (APR_SUCCESS != rv) goto cleanup;
+        rv = make_certified_key(p, s, spec->cert_file,
+            pems->cert_pem_bytes, pems->cert_pem_len,
+            pems->pkey_pem_bytes, pems->pkey_pem_len,
+            pckey);
+        /* dont want them hanging around in memory unnecessarily. */
+        nullify_pems(pems);
+    }
+    else if (spec->cert_pem) {
+        const char *pkey_pem = spec->pkey_pem? spec->pkey_pem : spec->cert_pem;
+        rv = make_certified_key(p, s, "memory",
+            spec->cert_pem, strlen(spec->cert_pem),
+            pkey_pem, strlen(pkey_pem),
+            pckey);
+        /* pems provided from outside are responsibility of the caller */
+    }
+    else {
+        rv = APR_ENOENT; goto cleanup;
+    }
+cleanup:
     return rv;
 }
 
