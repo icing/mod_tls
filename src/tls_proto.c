@@ -24,7 +24,7 @@ APLOG_USE_MODULE(tls);
 
 
 apr_status_t tls_proto_load_pem(
-    apr_pool_t *p, tls_certificate_t *cert, tls_util_cert_pem_t **ppem)
+    apr_pool_t *p, tls_cert_spec_t *cert, tls_util_cert_pem_t **ppem)
 {
     apr_status_t rv;
     const char *fpath;
@@ -78,10 +78,12 @@ static apr_status_t make_certified_key(
     const rustls_certified_key *ckey = NULL;
     rustls_result rr = RUSTLS_RESULT_OK;
     apr_status_t rv = APR_SUCCESS;
+    const char *id = "test";
 
     rr = rustls_certified_key_build(
         (const unsigned char*)cert_pem, cert_len,
         (const unsigned char*)pkey_pem, pkey_len,
+        (const unsigned char*)id, strlen(id),
         &ckey);
 
     if (RUSTLS_RESULT_OK != rr) {
@@ -102,7 +104,7 @@ static apr_status_t make_certified_key(
 
 apr_status_t tls_proto_load_certified_key(
     apr_pool_t *p, server_rec *s,
-    tls_certificate_t *spec, const rustls_certified_key **pckey)
+    tls_cert_spec_t *spec, const rustls_certified_key **pckey)
 {
     apr_status_t rv = APR_SUCCESS;
 

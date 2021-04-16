@@ -18,7 +18,7 @@ typedef struct {
     const char *pkey_file;
     const char *cert_pem;
     const char *pkey_pem;
-} tls_certificate_t;
+} tls_cert_spec_t;
 
 /**
  * The PEM data of a certificate and its key.
@@ -34,7 +34,7 @@ typedef struct {
 /**
  * Load the PEM data for a certificate file and key file as given in `cert`.
  */
-apr_status_t tls_proto_load_pem(apr_pool_t *p, tls_certificate_t *cert,
+apr_status_t tls_proto_load_pem(apr_pool_t *p, tls_cert_spec_t *cert,
     tls_util_cert_pem_t **ppem);
 
 /**
@@ -42,7 +42,7 @@ apr_status_t tls_proto_load_pem(apr_pool_t *p, tls_certificate_t *cert,
  */
 apr_status_t tls_proto_load_certified_key(
     apr_pool_t *p, server_rec *s,
-    tls_certificate_t *spec, const rustls_certified_key **pckey);
+    tls_cert_spec_t *spec, const rustls_certified_key **pckey);
 
 typedef struct {
     apr_uint16_t id;

@@ -88,10 +88,34 @@ static apr_status_t tls_core_free(void *data)
     return APR_SUCCESS;
 }
 
+typedef struct {
+    apr_pool_t *pool;
+    apr_hash_t *id2certified_key;
+} tls_cert_reg_t;
+
+static apr_status_t cert_reg_get_certified_key(
+    tls_cert_reg_t *cert_reg,
+    server_rec *s, int i,
+    tls_cert_spec_t *spec,
+    const rustls_certified_key **pckey)
+{
+    /* TODO: check if cert is already loaded and return instance or load and add */
+    apr_status_t rv = tls_proto_load_certified_key(cert_reg->pool, s, spec, pckey);
+    if (APR_SUCCESS != rv) {
+        ap_log_error(APLOG_MARK, APLOG_ERR, rv, s, APLOGNO()
+                     "Failed to load certificate %d[cert=%s(%d), key=%s(%d)] for %s",
+                     i, spec->cert_file, (int)(spec->cert_pem? strlen(spec->cert_pem) : 0),
+                     spec->pkey_file, (int)(spec->pkey_pem? strlen(spec->pkey_pem) : 0),
+                     s->server_hostname);
+    }
+    return rv;
+}
+
 static apr_status_t use_certificates(
     rustls_server_config_builder *builder,
     apr_pool_t *p, server_rec *s,
-    apr_array_header_t *cert_specs)
+    apr_array_header_t *cert_specs,
+    tls_cert_reg_t *cert_reg)
 {
     rustls_result rr = RUSTLS_RESULT_OK;
     apr_array_header_t *certified_keys = NULL;
@@ -103,22 +127,15 @@ static apr_status_t use_certificates(
         certified_keys = apr_array_make(p, cert_specs->nelts, sizeof(rustls_certified_key *));
 
         for (i = 0; i < cert_specs->nelts; ++i) {
-            tls_certificate_t *spec = APR_ARRAY_IDX(cert_specs, i, tls_certificate_t*);
-            rv = tls_proto_load_certified_key(p, s, spec, &ckey);
-            if (APR_SUCCESS != rv) {
-                ap_log_error(APLOG_MARK, APLOG_ERR, rv, s, APLOGNO()
-                             "Failed to load certified key[cert=%s(%d), key=%s(%d)]: %s",
-                             spec->cert_file, (int)(spec->cert_pem? strlen(spec->cert_pem) : 0),
-                             spec->pkey_file, (int)(spec->pkey_pem? strlen(spec->pkey_pem) : 0),
-                             s->server_hostname);
-                goto cleanup;
-            }
+            tls_cert_spec_t *spec = APR_ARRAY_IDX(cert_specs, i, tls_cert_spec_t*);
+            rv = cert_reg_get_certified_key(cert_reg, s, i, spec, &ckey);
+            if (APR_SUCCESS != rv) goto cleanup;
             APR_ARRAY_PUSH(certified_keys, const rustls_certified_key*) = ckey;
         }
 
         rr = rustls_server_config_builder_set_certified_keys(
             builder, (const rustls_certified_key**)certified_keys->elts,
-            (size_t)certified_keys->nelts);
+            (size_t)certified_keys->nelts, NULL, NULL);
         if (RUSTLS_RESULT_OK != rr) goto cleanup;
     }
 
@@ -141,20 +158,54 @@ cleanup:
     return rv;
 }
 
+static apr_status_t use_challenge_certificate(
+    rustls_server_config_builder *builder,
+    apr_pool_t *p, server_rec *s,
+    const char *cert_pem, const char *pkey_pem
+    )
+{
+    rustls_result rr = RUSTLS_RESULT_OK;
+    const rustls_certified_key *ckey = NULL;
+    tls_cert_spec_t spec;
+    apr_status_t rv = APR_SUCCESS;
+
+    memset(&spec, 0, sizeof(spec));
+    spec.cert_pem = cert_pem;
+    spec.pkey_pem = pkey_pem;
+    rv = tls_proto_load_certified_key(p, s, &spec, &ckey);
+    if (APR_SUCCESS != rv) goto cleanup;
+
+    rr = rustls_server_config_builder_set_certified_keys(
+        builder, (const rustls_certified_key**)&ckey, 1, NULL, NULL);
+    if (RUSTLS_RESULT_OK != rr) goto cleanup;
+
+cleanup:
+    if (ckey != NULL) rustls_certified_key_free(ckey);
+    if (RUSTLS_RESULT_OK != rr) {
+        const char *err_descr;
+        rv = tls_util_rustls_error(p, rr, &err_descr);
+        ap_log_error(APLOG_MARK, APLOG_ERR, rv, s, APLOGNO()
+                     "Failed to configure challenge certificate for %s: [%d] %s",
+                     s->server_hostname, (int)rr, err_descr);
+        goto cleanup;
+    }
+    return rv;
+}
+
 static void add_file_specs(
     apr_array_header_t *certificates,
     apr_pool_t *p,
     apr_array_header_t *cert_files,
     apr_array_header_t *key_files)
 {
-    tls_certificate_t *spec;
+    tls_cert_spec_t *spec;
     int i;
 
     for (i = 0; i < cert_files->nelts; ++i) {
         spec = apr_pcalloc(p, sizeof(*spec));
         spec->cert_file = APR_ARRAY_IDX(cert_files, i, const char*);
         spec->pkey_file = (i < key_files->nelts)? APR_ARRAY_IDX(key_files, i, const char*) : NULL;
-        *(const tls_certificate_t**)apr_array_push(certificates) = spec;
+        *(const tls_cert_spec_t**)apr_array_push(certificates) = spec;
     }
 }
 
@@ -247,11 +298,57 @@ cleanup:
     return rv;
 }
 
+static apr_array_header_t *complete_cert_specs(
+    apr_pool_t *p, tls_conf_server_t *sc)
+{
+    apr_array_header_t *cert_adds, *key_adds, *specs;
+
+    /* Take the configured certificate specifications and ask
+     * around for other modules to add specifications to this server.
+     * This is the way mod_md provides certificates.
+     *
+     * If the server then still has no cert specifications, ask
+     * around for `fallback` certificates which are commonly self-signed,
+     * temporary ones which let the server startup in order to
+     * obtain the `real` certificates from sources like ACME.
+     * Servers will fallbacks will answer all requests with 503.
+     */
+    specs = apr_array_copy(p, sc->cert_specs);
+    cert_adds = apr_array_make(p, 2, sizeof(const char*));
+    key_adds = apr_array_make(p, 2, sizeof(const char*));
+
+    ap_ssl_add_cert_files(sc->server, p, cert_adds, key_adds);
+    ap_log_error(APLOG_MARK, APLOG_TRACE1, 0, sc->server,
+                 "init server: complete_cert_specs added %d certs", cert_adds->nelts);
+    add_file_specs(specs, p, cert_adds, key_adds);
+
+    if (apr_is_empty_array(specs)) {
+        ap_log_error(APLOG_MARK, APLOG_TRACE1, 0, sc->server,
+                     "init server: no certs configured, looking for fallback");
+        ap_ssl_add_fallback_cert_files(sc->server, p, cert_adds, key_adds);
+        if (cert_adds->nelts > 0) {
+            add_file_specs(specs, p, cert_adds, key_adds);
+            sc->service_unavailable = 1;
+            ap_log_error(APLOG_MARK, APLOG_WARNING, 0, sc->server, APLOGNO()
+                         "Init: %s will respond with '503 Service Unavailable' for now. There "
+                         "are no SSL certificates configured and no other module contributed any.",
+                         sc->server->server_hostname);
+        }
+        else {
+            ap_log_error(APLOG_MARK, APLOG_ERR, 0, sc->server, APLOGNO()
+                         "Init: %s has no certificates configured. Use 'TLSCertificate' to "
+                         "configure a certificate and key file.",
+                         sc->server->server_hostname);
+        }
+    }
+    return specs;
+}
+
 static apr_status_t server_conf_setup(
-    apr_pool_t *p, apr_pool_t *ptemp, tls_conf_server_t *sc)
+    apr_pool_t *p, apr_pool_t *ptemp, tls_conf_server_t *sc, tls_cert_reg_t *cert_reg)
 {
     rustls_server_config_builder *builder = NULL;
-    apr_array_header_t *cert_adds, *key_adds, *certificates;
+    apr_array_header_t *cert_specs;
     rustls_result rr = RUSTLS_RESULT_OK;
     apr_status_t rv = APR_SUCCESS;
 
@@ -268,38 +365,8 @@ static apr_status_t server_conf_setup(
         rv = APR_ENOMEM; goto cleanup;
     }
 
-    certificates = apr_array_copy(ptemp, sc->certificates);
-    cert_adds = apr_array_make(ptemp, 2, sizeof(const char*));
-    key_adds = apr_array_make(ptemp, 2, sizeof(const char*));
-
-    ap_ssl_add_cert_files(sc->server, ptemp, cert_adds, key_adds);
-    ap_log_error(APLOG_MARK, APLOG_TRACE1, rv, sc->server,
-                 "init server: ap_ssl_add_cert_files added %d certs", cert_adds->nelts);
-    add_file_specs(certificates, ptemp, cert_adds, key_adds);
-
-    if (apr_is_empty_array(certificates)) {
-        ap_log_error(APLOG_MARK, APLOG_TRACE1, rv, sc->server,
-                     "init server: ap_ssl_add_fallback");
-        ap_ssl_add_fallback_cert_files(sc->server, ptemp, cert_adds, key_adds);
-        if (cert_adds->nelts > 0) {
-            add_file_specs(certificates, ptemp, cert_adds, key_adds);
-            sc->service_unavailable = 1;
-            ap_log_error(APLOG_MARK, APLOG_WARNING, 0, sc->server, APLOGNO()
-                         "Init: %s will respond with '503 Service Unavailable' for now. There "
-                         "are no SSL certificates configured and no other module contributed any.",
-                         sc->server->server_hostname);
-        }
-        else {
-            ap_log_error(APLOG_MARK, APLOG_ERR, 0, sc->server, APLOGNO()
-                         "Init: %s has no certificates configured. Use 'TLSCertificate' to "
-                         "configure a certificate and key file.",
-                         sc->server->server_hostname);
-        }
-    }
-
-    ap_log_error(APLOG_MARK, APLOG_TRACE1, rv, sc->server,
-                 "init server: use certificates");
-    rv = use_certificates(builder, ptemp, sc->server, certificates);
+    cert_specs = complete_cert_specs(ptemp, sc);
+    rv = use_certificates(builder, ptemp, sc->server, cert_specs, cert_reg);
     if (APR_SUCCESS != rv) goto cleanup;
 
     if (sc->tls_protocol_min > 0) {
@@ -373,6 +440,7 @@ apr_status_t tls_core_init(apr_pool_t *p, apr_pool_t *ptemp, server_rec *base_se
     tls_conf_server_t *sc = tls_conf_server_get(base_server);
     tls_conf_global_t *gc = sc->global;
     server_rec *s;
+    tls_cert_reg_t *cert_reg;
     apr_status_t rv = APR_ENOMEM;
 
     ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, base_server, "tls_core_init");
@@ -405,10 +473,14 @@ apr_status_t tls_core_init(apr_pool_t *p, apr_pool_t *ptemp, server_rec *base_se
         }
     }
 
+    cert_reg = apr_pcalloc(ptemp, sizeof(*cert_reg));
+    cert_reg->pool = ptemp;
+    cert_reg->id2certified_key = apr_hash_make(ptemp);
+
     /* Create server configs for enabled servers */
     for (s = base_server; s; s = s->next) {
         sc = tls_conf_server_get(s);
-        rv = server_conf_setup(p, ptemp, sc);
+        rv = server_conf_setup(p, ptemp, sc, cert_reg);
         if (APR_SUCCESS != rv) {
             ap_log_error(APLOG_MARK, APLOG_ERR, rv, s, "server setup failed: %s",
                 s->server_hostname);
@@ -516,7 +588,7 @@ int tls_core_conn_base_init(conn_rec *c)
         if (!builder) {
             rr = RUSTLS_RESULT_PANIC; goto cleanup;
         }
-        rustls_server_config_builder_set_hello_callback(builder, tls_conn_hello_cb, c);
+        rustls_server_config_builder_set_hello_callback(builder, tls_conn_hello_cb, c, NULL, NULL);
         cc->rustls_config = rustls_server_config_builder_build(builder);
         if (!cc->rustls_config) {
             rr = RUSTLS_RESULT_PANIC; goto cleanup;
@@ -593,16 +665,7 @@ static apr_status_t process_alpn(
                 /* With ACME we can have challenge connections to a unknown domains
                  * that need to be answered with a special certificate and will
                  * otherwise not answer any requests. See RFC 8555 */
-                apr_array_header_t *cert_specs;
-                tls_certificate_t *spec;
-
-                spec = apr_pcalloc(c->pool, sizeof(*spec));
-                spec->cert_pem = cert_pem;
-                spec->pkey_pem = key_pem;
-                cert_specs = apr_array_make(c->pool, 1, sizeof(tls_certificate_t*));
-                *(tls_certificate_t**)apr_array_push(cert_specs) = spec;
-
-                rv = use_certificates(builder, c->pool, s, cert_specs);
+                rv = use_challenge_certificate(builder, c->pool, s, cert_pem, key_pem);
                 if (APR_SUCCESS != rv) goto cleanup;
 
                 cc->service_unavailable = 1;

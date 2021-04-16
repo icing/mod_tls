@@ -1,5 +1,4 @@
 import argparse
-import itertools
 import logging
 import multiprocessing
 import os
@@ -174,7 +173,7 @@ def mk_text_file(fpath: str, lines: int):
             fd.write("\n")
 
 
-class LoadTest:
+class LoadTestCase:
 
     @staticmethod
     def from_scenario(scenario: Dict, env: TlsTestEnv) -> 'SingleFileLoadTest':
@@ -186,8 +185,27 @@ class LoadTest:
     def format_result(self, summary: H2LoadLogSummary) -> str:
         raise NotImplemented
 
+    def setup_base_conf(self, env: TlsTestEnv, worker_count: int = 5000) -> TlsTestConf:
+        conf = TlsTestConf(env=env)
+        # ylavic's formula
+        process_count = int(max(10, min(100, int(worker_count / 100))))
+        thread_count = int(max(25, worker_count / process_count))
+        conf.add(f"""
+        StartServers             1
+        ServerLimit              {int(process_count * 2.5)}
+        ThreadLimit              {thread_count}
+        ThreadsPerChild          {thread_count}
+        MinSpareThreads          {thread_count}
+        MaxSpareThreads          {int(worker_count / 2)}
+        MaxRequestWorkers        {worker_count}
+        MaxConnectionsPerChild   0
+        KeepAliveTimeout         60
+        MaxKeepAliveRequests     0
+                """)
+        return conf
 
-class SingleFileLoadTest(LoadTest):
+
+class SingleFileLoadTest(LoadTestCase):
 
     def __init__(self, env: TlsTestEnv, server: str,
                  clients: int, requests: int, resource_kb: int,
@@ -214,7 +232,7 @@ class SingleFileLoadTest(LoadTest):
         )
 
     def _setup(self) -> str:
-        conf = TlsTestConf(env=self.env)
+        conf = self.setup_base_conf(env=self.env)
         extras = {
             'base': self._server
         }
@@ -235,15 +253,15 @@ class SingleFileLoadTest(LoadTest):
         if self.env.is_live(timeout=timedelta(milliseconds=100)):
             assert self.env.apache_stop() == 0
 
-    def run(self) -> H2LoadLogSummary:
-        resource_path = self._setup()
+    def run_test(self, mode: str, path: str) -> H2LoadLogSummary:
         monitor = None
         try:
             log_file = "{gen_dir}/h2load.log".format(gen_dir=self.env.gen_dir)
             if os.path.isfile(log_file):
                 os.remove(log_file)
             monitor = H2LoadMonitor(log_file, expected=self._requests,
-                                    title="{module}/h{http_version}/{conn}c/{kb}MB".format(
+                                    title="{module}/h{http_version}/{conn}c/{kb}MB[{mode}]".format(
+                                        mode=mode,
                                         conn=self._clients,
                                         module=self._ssl_module,
                                         kb=(self._resource_kb / 1024),
@@ -260,8 +278,10 @@ class SingleFileLoadTest(LoadTest):
             ]
             if self._http_version == 1:
                 args.append('--h1')
+            else:
+                args.extend(['-m', "6"])
             r = self.env.run(args + [
-                'https://{0}:{1}{2}'.format(self.domain_a, self.env.https_port, resource_path)
+                'https://{0}:{1}{2}'.format(self.domain_a, self.env.https_port, path)
             ])
             if r.exit_code != 0:
                 raise LoadTestException("h2load returned {0}: {1}".format(r.exit_code, r.stderr))
@@ -273,13 +293,20 @@ class SingleFileLoadTest(LoadTest):
         finally:
             if monitor is not None:
                 monitor.stop()
+
+    def run(self) -> H2LoadLogSummary:
+        path = self._setup()
+        try:
+            self.run_test(mode="warmup", path=path)
+            return self.run_test(mode="measure", path=path)
+        finally:
             self._teardown()
 
     def format_result(self, summary: H2LoadLogSummary) -> str:
         return "{0:.1f}".format(summary.throughput_mb)
 
 
-class MultiFileLoadTest(LoadTest):
+class MultiFileLoadTest(LoadTestCase):
 
     SETUP_DONE = False
 
@@ -312,7 +339,7 @@ class MultiFileLoadTest(LoadTest):
         )
 
     def _setup(self):
-        conf = TlsTestConf(env=self.env)
+        conf = self.setup_base_conf(env=self.env)
         extras = {
             'base': self._server
         }
@@ -345,15 +372,15 @@ class MultiFileLoadTest(LoadTest):
         if self.env.is_live(timeout=timedelta(milliseconds=100)):
             assert self.env.apache_stop() == 0
 
-    def run(self) -> H2LoadLogSummary:
-        self._setup()
+    def run_test(self, mode: str, path: str) -> H2LoadLogSummary:
         monitor = None
         try:
             log_file = "{gen_dir}/h2load.log".format(gen_dir=self.env.gen_dir)
             if os.path.isfile(log_file):
                 os.remove(log_file)
             monitor = H2LoadMonitor(log_file, expected=self._requests,
-                                    title="{module}/h{http_version}//{files}f/{conn}c".format(
+                                    title="{module}/h{http_version}//{files}f/{conn}c[{mode}]".format(
+                                        mode=mode,
                                         conn=self._clients,
                                         module=self._ssl_module,
                                         files=(self._file_count / 1024),
@@ -371,7 +398,7 @@ class MultiFileLoadTest(LoadTest):
             if self._http_version == 1:
                 args.append('--h1')
             else:
-                args.extend(['-m', "1"])
+                args.extend(['-m', "6"])
             r = self.env.run(args + [
                 '--base-uri=https://{0}:{1}/'.format(
                     self.domain_a, self.env.https_port)
@@ -385,6 +412,13 @@ class MultiFileLoadTest(LoadTest):
         finally:
             if monitor is not None:
                 monitor.stop()
+
+    def run(self) -> H2LoadLogSummary:
+        path = self._setup()
+        try:
+            self.run_test(mode="warmup", path=path)
+            return self.run_test(mode="measure", path=path)
+        finally:
             self._teardown()
 
     def format_result(self, summary: H2LoadLogSummary) -> str:
@@ -436,7 +470,7 @@ class LoadTest:
 
         if args.verbose > 0:
             console = logging.StreamHandler()
-            console.setLevel(logging.DEBUG)
+            console.setLevel(logging.INFO)
             console.setFormatter(logging.Formatter(logging.BASIC_FORMAT))
             logging.getLogger('').addHandler(console)
 
@@ -446,13 +480,6 @@ class LoadTest:
             server_config = """
         LogLevel tls:info
         Protocols h2 http/1.1
-        KeepAliveTimeout 60
-        MaxKeepAliveRequests 0
-        MaxConnectionsPerChild 0
-        MaxRequestWorkers 1024
-        StartServers 4
-        ServerLimit 4
-        ThreadLimit 2048
                 """
 
             scenario_sf = {
@@ -542,6 +569,7 @@ class LoadTest:
                         {"clients": 16},
                         {"clients": 32},
                         {"clients": 64},
+                        {"clients": 128},
                     ],
                 }),
             }
@@ -580,7 +608,7 @@ class LoadTest:
                                 summary.expected_responses
                             )
                         if not summary.all_200():
-                            fnote += "non 200s:"
+                            fnote += ", non 200s:"
                             for status in [n for n in summary.response_stati.keys() if n != 200]:
                                 fnote += " {0}={1}".format(status, summary.response_stati[status])
 

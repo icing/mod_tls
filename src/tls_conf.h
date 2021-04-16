@@ -42,7 +42,7 @@ typedef struct {
     tls_conf_global_t *global;        /* global module config, singleton */
 
     int enabled;
-    apr_array_header_t *certificates; /* array of (tls_certificate_t*) available for server_rec */
+    apr_array_header_t *cert_specs;   /* array of (tls_cert_spec_t*) of configured certificates */
     int tls_protocol_min;             /* the minimum TLS protocol version to use */
     apr_array_header_t *tls_pref_ciphers;  /* List of apr_uint16_t cipher ids to prefer */
     apr_array_header_t *tls_supp_ciphers;  /* List of apr_uint16_t cipher ids to suppress */

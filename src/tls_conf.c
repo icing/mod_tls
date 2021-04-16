@@ -73,7 +73,7 @@ void *tls_conf_create_svr(apr_pool_t *pool, server_rec *s)
     conf->server = s;
 
     conf->enabled = TLS_FLAG_UNSET;
-    conf->certificates = apr_array_make(pool, 3, sizeof(tls_certificate_t*));
+    conf->cert_specs = apr_array_make(pool, 3, sizeof(tls_cert_spec_t*));
     conf->honor_client_order = TLS_FLAG_UNSET;
     conf->strict_sni = TLS_FLAG_UNSET;
     conf->tls_protocol_min = TLS_FLAG_UNSET;
@@ -98,7 +98,7 @@ void *tls_conf_merge_svr(apr_pool_t *pool, void *basev, void *addv)
     nconf->global = add->global? add->global : base->global;
 
     nconf->enabled = MERGE_INT(base, add, enabled);
-    nconf->certificates = apr_array_append(pool, base->certificates, add->certificates);
+    nconf->cert_specs = apr_array_append(pool, base->cert_specs, add->cert_specs);
     nconf->tls_protocol_min = MERGE_INT(base, add, tls_protocol_min);
     nconf->tls_pref_ciphers = add->tls_pref_ciphers->nelts?
         add->tls_pref_ciphers : base->tls_pref_ciphers;
@@ -257,7 +257,7 @@ static const char *tls_conf_add_certificate(
 {
     tls_conf_server_t *sc = tls_conf_server_get(cmd->server);
     const char *err = NULL, *fpath;
-    tls_certificate_t *cert;
+    tls_cert_spec_t *cert;
 
     (void)dc;
     if (NULL != (err = cmd_check_file(cmd, cert_file))) goto cleanup;
@@ -279,7 +279,7 @@ static const char *tls_conf_add_certificate(
         }
     }
     cert->pkey_file = pkey_file;
-    *(const tls_certificate_t **)apr_array_push(sc->certificates) = cert;
+    *(const tls_cert_spec_t **)apr_array_push(sc->cert_specs) = cert;
 
 cleanup:
     return err;
