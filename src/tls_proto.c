@@ -78,12 +78,10 @@ static apr_status_t make_certified_key(
     const rustls_certified_key *ckey = NULL;
     rustls_result rr = RUSTLS_RESULT_OK;
     apr_status_t rv = APR_SUCCESS;
-    const char *id = "test";
 
     rr = rustls_certified_key_build(
         (const unsigned char*)cert_pem, cert_len,
         (const unsigned char*)pkey_pem, pkey_len,
-        (const unsigned char*)id, strlen(id),
         &ckey);
 
     if (RUSTLS_RESULT_OK != rr) {
