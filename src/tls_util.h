@@ -7,6 +7,20 @@
 #ifndef tls_util_h
 #define tls_util_h
 
+#define TLS_DIM(a)      (sizeof(a)/sizeof(a[0]))
+
+
+typedef struct tls_data_t tls_data_t;
+struct tls_data_t {
+    const unsigned char* data;
+    apr_size_t len;
+};
+
+tls_data_t tls_data_from_str(const char *s);
+tls_data_t *tls_data_copy(apr_pool_t *p, const tls_data_t *d);
+tls_data_t tls_data_assign_copy(apr_pool_t *p, const tls_data_t *d);
+const char *tls_data_to_str(apr_pool_t *p, const tls_data_t *d);
+
 /**
  * Return != 0 if fpath is a 'real' file.
  */
@@ -24,8 +38,7 @@ apr_status_t tls_util_rustls_error(apr_pool_t *p, rustls_result rr, const char *
  *          APR_EINVAL when the file was not a regular file or is too large.
  */
 apr_status_t tls_util_file_load(
-    apr_pool_t *p, const char *fpath, size_t min_len, size_t max_len,
-    unsigned char **pbuffer, apr_size_t *plen);
+    apr_pool_t *p, const char *fpath, size_t min_len, size_t max_len, tls_data_t *data);
 
 /**
  * Return != 0 iff the array of apr_uint16_t contains value n.

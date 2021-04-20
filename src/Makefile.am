@@ -32,6 +32,7 @@ OBJECTS = \
     tls_conf.c \
     tls_core.c \
     tls_filter.c \
+    tls_ocsp.c \
     tls_proto.c \
     tls_util.c \
     tls_var.c
@@ -41,8 +42,8 @@ HFILES = \
     tls_cache.h \
     tls_conf.h \
     tls_core.h \
-    tls_defs.h \
     tls_filter.h \
+    tls_ocsp.h \
     tls_proto.h \
     tls_util.h \
     tls_var.h \

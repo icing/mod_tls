@@ -17,7 +17,8 @@
 #include <http_main.h>
 #include <ap_socache.h>
 
-#include "tls_defs.h"
+#include <crustls.h>
+
 #include "tls_proto.h"
 #include "tls_conf.h"
 #include "tls_util.h"
@@ -149,7 +150,6 @@ apr_status_t tls_conf_server_apply_defaults(tls_conf_server_t *sc, apr_pool_t *p
     if (sc->tls_protocol_min == TLS_FLAG_UNSET) sc->tls_protocol_min = 0;
     if (sc->honor_client_order == TLS_FLAG_UNSET) sc->honor_client_order = TLS_FLAG_TRUE;
     if (sc->strict_sni == TLS_FLAG_UNSET) sc->strict_sni = TLS_FLAG_TRUE;
-
     return APR_SUCCESS;
 }
 

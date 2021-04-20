@@ -19,10 +19,12 @@
 #include <http_main.h>
 #include <ap_socache.h>
 
-#include "tls_defs.h"
+#include <crustls.h>
+
 #include "tls_proto.h"
 #include "tls_conf.h"
 #include "tls_core.h"
+#include "tls_ocsp.h"
 #include "tls_util.h"
 #include "tls_cache.h"
 
@@ -49,10 +51,14 @@ int tls_conn_check_ssl(conn_rec *c)
     return DECLINED;
 }
 
-static int we_listen_on(tls_conf_global_t *gc, server_rec *s)
+static int we_listen_on(tls_conf_global_t *gc, server_rec *s, tls_conf_server_t *sc)
 {
     server_addr_rec *sa, *la;
 
+    if (gc->tls_addresses && sc->base_server) {
+        /* The base server listens to every port and may be selected via SNI */
+        return 1;
+    }
     for (la = gc->tls_addresses; la; la = la->next) {
         for (sa = s->addrs; sa; sa = sa->next) {
             if (la->host_port == sa->host_port
@@ -88,73 +94,34 @@ static apr_status_t tls_core_free(void *data)
     return APR_SUCCESS;
 }
 
-typedef struct {
-    apr_pool_t *pool;
-    apr_hash_t *id2certified_key;
-} tls_cert_reg_t;
-
-static apr_status_t cert_reg_get_certified_key(
-    tls_cert_reg_t *cert_reg,
-    server_rec *s, int i,
-    tls_cert_spec_t *spec,
-    const rustls_certified_key **pckey)
+static apr_status_t load_certified_keys(
+    tls_conf_server_t *sc, server_rec *s,
+    apr_array_header_t *cert_specs,
+    tls_cert_reg_t *cert_reg)
 {
-    /* TODO: check if cert is already loaded and return instance or load and add */
-    apr_status_t rv = tls_proto_load_certified_key(cert_reg->pool, s, spec, pckey);
-    if (APR_SUCCESS != rv) {
-        ap_log_error(APLOG_MARK, APLOG_ERR, rv, s, APLOGNO()
+    apr_status_t rv = APR_SUCCESS;
+    const rustls_certified_key *ckey;
+    tls_cert_spec_t *spec;
+    int i;
+
+    if (cert_specs && cert_specs->nelts > 0) {
+        for (i = 0; i < cert_specs->nelts; ++i) {
+            spec = APR_ARRAY_IDX(cert_specs, i, tls_cert_spec_t*);
+            rv = tls_cert_reg_get_certified_key(cert_reg, s, spec, &ckey);
+            if (APR_SUCCESS != rv) {
+                ap_log_error(APLOG_MARK, APLOG_ERR, rv, s, APLOGNO()
                      "Failed to load certificate %d[cert=%s(%d), key=%s(%d)] for %s",
                      i, spec->cert_file, (int)(spec->cert_pem? strlen(spec->cert_pem) : 0),
                      spec->pkey_file, (int)(spec->pkey_pem? strlen(spec->pkey_pem) : 0),
                      s->server_hostname);
-    }
-    return rv;
-}
-
-static apr_status_t use_certificates(
-    rustls_server_config_builder *builder,
-    apr_pool_t *p, server_rec *s,
-    apr_array_header_t *cert_specs,
-    tls_cert_reg_t *cert_reg)
-{
-    rustls_result rr = RUSTLS_RESULT_OK;
-    apr_array_header_t *certified_keys = NULL;
-    const rustls_certified_key *ckey;
-    apr_status_t rv = APR_SUCCESS;
-    int i;
-
-    if (cert_specs && cert_specs->nelts > 0) {
-        certified_keys = apr_array_make(p, cert_specs->nelts, sizeof(rustls_certified_key *));
-
-        for (i = 0; i < cert_specs->nelts; ++i) {
-            tls_cert_spec_t *spec = APR_ARRAY_IDX(cert_specs, i, tls_cert_spec_t*);
-            rv = cert_reg_get_certified_key(cert_reg, s, i, spec, &ckey);
-            if (APR_SUCCESS != rv) goto cleanup;
-            APR_ARRAY_PUSH(certified_keys, const rustls_certified_key*) = ckey;
+                goto cleanup;
+            }
+            assert(ckey);
+            APR_ARRAY_PUSH(sc->certified_keys, const rustls_certified_key*) = ckey;
         }
 
-        rr = rustls_server_config_builder_set_certified_keys(
-            builder, (const rustls_certified_key**)certified_keys->elts,
-            (size_t)certified_keys->nelts, NULL, NULL);
-        if (RUSTLS_RESULT_OK != rr) goto cleanup;
     }
-
 cleanup:
-    if (certified_keys != NULL) {
-        for (i = 0; i < certified_keys->nelts; ++i) {
-            ckey = APR_ARRAY_IDX(certified_keys, i, rustls_certified_key*);
-            rustls_certified_key_free(ckey);
-        }
-        apr_array_clear(certified_keys);
-    }
-    if (RUSTLS_RESULT_OK != rr) {
-        const char *err_descr;
-        rv = tls_util_rustls_error(p, rr, &err_descr);
-        ap_log_error(APLOG_MARK, APLOG_ERR, rv, s, APLOGNO()
-                     "Failed to configure server %s: [%d] %s",
-                     s->server_hostname, (int)rr, err_descr);
-        goto cleanup;
-    }
     return rv;
 }
 
@@ -172,7 +139,7 @@ static apr_status_t use_challenge_certificate(
     memset(&spec, 0, sizeof(spec));
     spec.cert_pem = cert_pem;
     spec.pkey_pem = pkey_pem;
-    rv = tls_proto_load_certified_key(p, s, &spec, &ckey);
+    rv = tls_proto_load_certified_key(p, &spec, NULL, &ckey);
     if (APR_SUCCESS != rv) goto cleanup;
 
     rr = rustls_server_config_builder_set_certified_keys(
@@ -334,7 +301,7 @@ static apr_array_header_t *complete_cert_specs(
                          "are no SSL certificates configured and no other module contributed any.",
                          sc->server->server_hostname);
         }
-        else {
+        else if (!sc->base_server) {
             ap_log_error(APLOG_MARK, APLOG_ERR, 0, sc->server, APLOGNO()
                          "Init: %s has no certificates configured. Use 'TLSCertificate' to "
                          "configure a certificate and key file.",
@@ -353,21 +320,20 @@ static apr_status_t server_conf_setup(
     apr_status_t rv = APR_SUCCESS;
 
     (void)p;
-    if (!sc || sc->enabled != TLS_FLAG_TRUE) goto cleanup;
-
     ap_log_error(APLOG_MARK, APLOG_TRACE1, rv, sc->server,
                  "init server: %s", sc->server->server_hostname);
-    rv = tls_conf_server_apply_defaults(sc, p);
-    if (APR_SUCCESS != rv) goto cleanup;
-
     builder = rustls_server_config_builder_new();
     if (!builder) {
         rv = APR_ENOMEM; goto cleanup;
     }
 
     cert_specs = complete_cert_specs(ptemp, sc);
-    rv = use_certificates(builder, ptemp, sc->server, cert_specs, cert_reg);
+    sc->certified_keys = apr_array_make(p, 3, sizeof(rustls_certified_key *));
+    rv = load_certified_keys(sc, sc->server, cert_specs, cert_reg);
     if (APR_SUCCESS != rv) goto cleanup;
+    ap_log_error(APLOG_MARK, APLOG_TRACE1, rv, sc->server,
+                 "init server: %s with %d certificates loaded",
+                 sc->server->server_hostname, sc->certified_keys->nelts);
 
     if (sc->tls_protocol_min > 0) {
         apr_array_header_t *tls_versions;
@@ -440,7 +406,6 @@ apr_status_t tls_core_init(apr_pool_t *p, apr_pool_t *ptemp, server_rec *base_se
     tls_conf_server_t *sc = tls_conf_server_get(base_server);
     tls_conf_global_t *gc = sc->global;
     server_rec *s;
-    tls_cert_reg_t *cert_reg;
     apr_status_t rv = APR_ENOMEM;
 
     ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, base_server, "tls_core_init");
@@ -452,41 +417,33 @@ apr_status_t tls_core_init(apr_pool_t *p, apr_pool_t *ptemp, server_rec *base_se
 
     for (s = base_server; s; s = s->next) {
         sc = tls_conf_server_get(s);
-        if (!sc) continue;
+        assert(sc);
         ap_assert(sc->global == gc);
 
         /* If 'TLSListen' has been configured, use those addresses to
-         * decide if we are enabled on this server.
-         * If not, auto-enable when 'https' is set as protocol.
-         * This is done via the apache 'Listen <port> https' directive. */
-        if (gc->tls_addresses) {
-            sc->enabled = we_listen_on(gc, s)? TLS_FLAG_TRUE : TLS_FLAG_FALSE;
-        }
-        else if (sc->enabled == TLS_FLAG_UNSET
-            && ap_get_server_protocol(s)
-            && strcmp("https", ap_get_server_protocol(s)) == 0) {
-            sc->enabled = TLS_FLAG_TRUE;
-        }
-        /* otherwise, we always fallback to disabled for virtual hosts */
-        if (sc->enabled == TLS_FLAG_UNSET) {
-            sc->enabled = s->is_virtual? TLS_FLAG_FALSE : TLS_FLAG_TRUE;
-        }
+         * decide if we are enabled on this server. */
+        sc->base_server = (s == base_server);
+        sc->enabled = we_listen_on(gc, s, sc)? TLS_FLAG_TRUE : TLS_FLAG_FALSE;
     }
 
-    cert_reg = apr_pcalloc(ptemp, sizeof(*cert_reg));
-    cert_reg->pool = ptemp;
-    cert_reg->id2certified_key = apr_hash_make(ptemp);
-
-    /* Create server configs for enabled servers */
+    /* Setup server configs and collect all certificates we use. */
+    gc->cert_reg = tls_cert_reg_make(p);
     for (s = base_server; s; s = s->next) {
         sc = tls_conf_server_get(s);
-        rv = server_conf_setup(p, ptemp, sc, cert_reg);
+        rv = tls_conf_server_apply_defaults(sc, p);
+        if (APR_SUCCESS != rv) goto cleanup;
+        if (sc->enabled != TLS_FLAG_TRUE) continue;
+        rv = server_conf_setup(p, ptemp, sc, gc->cert_reg);
         if (APR_SUCCESS != rv) {
             ap_log_error(APLOG_MARK, APLOG_ERR, rv, s, "server setup failed: %s",
                 s->server_hostname);
             goto cleanup;
         }
     }
+
+    /* register all loaded certificates for OCSP stapling */
+    rv = tls_ocsp_prime_certs(gc, p, base_server);
+    if (APR_SUCCESS != rv) goto cleanup;
 
     rv = tls_cache_post_config(p, ptemp, base_server);
 
@@ -734,6 +691,12 @@ apr_status_t tls_core_conn_server_init(conn_rec *c)
 
         /* reinit, we might have a new server selected */
         sc = tls_conf_server_get(cc->server);
+        if (!sc->certified_keys || sc->certified_keys->nelts == 0) {
+            ap_log_error(APLOG_MARK, APLOG_ERR, 0, cc->server, APLOGNO()
+                "vhost_init: server[%s] selected by SNI '%s' has no certificates",
+                c->base_server->server_hostname, cc->sni_hostname);
+            rv = APR_NOTFOUND; goto cleanup;
+        }
         /* on relaxed SNI matches, we do not enforce the 503 of fallback
          * certificates. */
         cc->service_unavailable = sni_match? sc->service_unavailable : 0;
@@ -748,6 +711,14 @@ apr_status_t tls_core_conn_server_init(conn_rec *c)
         if (NULL == builder) {
             rv = APR_ENOMEM; goto cleanup;
         }
+
+        assert(sc->enabled == TLS_FLAG_TRUE);
+        assert(sc->certified_keys);
+        assert(sc->certified_keys->nelts > 0);
+        rr = rustls_server_config_builder_set_certified_keys(
+            builder, (const rustls_certified_key**)sc->certified_keys->elts,
+            (size_t)sc->certified_keys->nelts, tls_ocsp_provide_resp, c);
+        if (RUSTLS_RESULT_OK != rr) goto cleanup;
 
         rv = process_alpn(c, cc->server, builder);
         if (APR_SUCCESS != rv) goto cleanup;

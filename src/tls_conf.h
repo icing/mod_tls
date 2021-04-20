@@ -13,8 +13,10 @@
 #define TLS_FLAG_TRUE   (1)
 
 struct tls_proto_conf_t;
+struct tls_cert_reg_t;
 struct ap_socache_instance_t;
 struct ap_socache_provider_t;
+struct apr_global_mutex_t;
 
 /* The global module configuration, created after post-config
  * and then readonly.
@@ -25,10 +27,12 @@ typedef struct {
     struct tls_proto_conf_t *proto;   /* TLS protocol/rustls specific globals */
     apr_hash_t *var_lookups;          /* variable lookup functions by var name */
 
+    struct tls_cert_reg_t *cert_reg;  /* registry of all static certificates loaded */
+
     const char *session_cache_spec;   /* how the session cache was specified */
     const struct ap_socache_provider_t *session_cache_provider;
     struct ap_socache_instance_t *session_cache;
-    apr_global_mutex_t *session_cache_mutex;
+    struct apr_global_mutex_t *session_cache_mutex;
 
 } tls_conf_global_t;
 
@@ -49,6 +53,8 @@ typedef struct {
     int honor_client_order;           /* honor client cipher ordering */
     int strict_sni;
 
+    apr_array_header_t *certified_keys; /* rustls_certified_key list configured */
+    int base_server;                  /* != 0 iff this is the base server */
     int service_unavailable;          /* TLS not trustworthy configured, return 503s */
     const rustls_server_config *rustls_config; /* config to use for TLS against this very server */
 } tls_conf_server_t;

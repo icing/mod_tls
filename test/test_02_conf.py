@@ -44,6 +44,7 @@ class TestConf:
 
     def test_02_conf_cert_file_exist(self):
         conf = TlsTestConf(env=self.env)
+        conf.add(f"TLSListen {self.env.https_port}")
         conf.add("TLSCertificate test-02-cert.pem test-02-key.pem")
         conf.write()
         for name in ["test-02-cert.pem", "test-02-key.pem"]:

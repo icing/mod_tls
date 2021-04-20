@@ -14,7 +14,8 @@
 #include <http_core.h>
 #include <http_log.h>
 
-#include "tls_defs.h"
+#include <crustls.h>
+
 #include "tls_proto.h"
 #include "tls_util.h"
 
@@ -22,6 +23,37 @@
 extern module AP_MODULE_DECLARE_DATA tls_module;
 APLOG_USE_MODULE(tls);
 
+
+tls_data_t tls_data_from_str(const char *s)
+{
+    tls_data_t d;
+    d.data = (const unsigned char*)s;
+    d.len = s? strlen(s) : 0;
+    return d;
+}
+
+tls_data_t tls_data_assign_copy(apr_pool_t *p, const tls_data_t *d)
+{
+    tls_data_t copy;
+    copy.data = apr_pmemdup(p, d->data, d->len);
+    copy.len = d->len;
+    return copy;
+}
+
+tls_data_t *tls_data_copy(apr_pool_t *p, const tls_data_t *d)
+{
+    tls_data_t *copy;
+    copy = apr_pcalloc(p, sizeof(*copy));
+    *copy = tls_data_assign_copy(p, d);
+    return copy;
+}
+
+const char *tls_data_to_str(apr_pool_t *p, const tls_data_t *d)
+{
+    char *s = apr_pcalloc(p, d->len+1);
+    memcpy(s, d->data, d->len);
+    return s;
+}
 
 apr_status_t tls_util_rustls_error(
     apr_pool_t *p, rustls_result rr, const char **perr_descr)
@@ -45,8 +77,7 @@ int tls_util_is_file(
 }
 
 apr_status_t tls_util_file_load(
-    apr_pool_t *p, const char *fpath, apr_size_t min_len, apr_size_t max_len,
-    unsigned char **pbuffer, apr_size_t *plen)
+    apr_pool_t *p, const char *fpath, apr_size_t min_len, apr_size_t max_len, tls_data_t *data)
 {
     apr_finfo_t finfo;
     apr_status_t rv;
@@ -54,6 +85,7 @@ apr_status_t tls_util_file_load(
     unsigned char *buffer;
     apr_size_t len;
     const char *err = NULL;
+    tls_data_t *d;
 
     rv = apr_stat(&finfo, fpath, APR_FINFO_TYPE|APR_FINFO_SIZE, p);
     if (APR_SUCCESS != rv) {
@@ -72,6 +104,7 @@ apr_status_t tls_util_file_load(
         err = "file size not in allowed range";
         rv = APR_EINVAL; goto cleanup;
     }
+    d = apr_pcalloc(p, sizeof(*d));
     buffer = apr_pcalloc(p, len+1); /* keep it NUL terminated in any case */
     rv = apr_file_open(&f, fpath, APR_FOPEN_READ, 0, p);
     if (APR_SUCCESS != rv) {
@@ -84,12 +117,11 @@ apr_status_t tls_util_file_load(
 cleanup:
     if (f) apr_file_close(f);
     if (APR_SUCCESS == rv) {
-        *pbuffer = buffer;
-        *plen = len;
+        data->data = buffer;
+        data->len = len;
     }
     else {
-        *pbuffer = NULL;
-        *plen = 0;
+        memset(data, 0, sizeof(*data));
         ap_log_perror(APLOG_MARK, APLOG_ERR, rv, p, APLOGNO()
                       "Failed to load file %s: %s", fpath, err? err: "-");
     }
