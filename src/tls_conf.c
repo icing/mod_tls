@@ -69,7 +69,6 @@ void *tls_conf_create_svr(apr_pool_t *pool, server_rec *s)
     tls_conf_server_t *conf;
 
     conf = apr_pcalloc(pool, sizeof(*conf));
-    conf->name = apr_pstrcat(pool, "srv[", CONF_S_NAME(s), "]", NULL);
     conf->global = conf_global_get_or_make(pool, s);
     conf->server = s;
 
@@ -93,8 +92,6 @@ void *tls_conf_merge_svr(apr_pool_t *pool, void *basev, void *addv)
     tls_conf_server_t *nconf;
 
     nconf = apr_pcalloc(pool, sizeof(*nconf));
-    nconf->name = apr_pstrcat(pool, "[", CONF_S_NAME(add->server),
-        ", ", CONF_S_NAME(base->server), "]", NULL);
     nconf->server = add->server;
     nconf->global = add->global? add->global : base->global;
 

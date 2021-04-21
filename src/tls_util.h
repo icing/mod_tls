@@ -10,15 +10,34 @@
 #define TLS_DIM(a)      (sizeof(a)/sizeof(a[0]))
 
 
+/**
+ * Simple struct to hold a range of bytes and its length together.
+ */
 typedef struct tls_data_t tls_data_t;
 struct tls_data_t {
     const unsigned char* data;
     apr_size_t len;
 };
 
+/**
+ * Return a tls_data_t for a string.
+ */
 tls_data_t tls_data_from_str(const char *s);
+
+/**
+ * Create a copy of a tls_data_t using the given pool.
+ */
 tls_data_t *tls_data_copy(apr_pool_t *p, const tls_data_t *d);
+
+/**
+ * Return a copy of a tls_data_t bytes allocated from pool.
+ */
 tls_data_t tls_data_assign_copy(apr_pool_t *p, const tls_data_t *d);
+
+/**
+ * Convert the data bytes in `d` into a NUL-terminated string.
+ * There is no check if the data bytes already contain NUL.
+ */
 const char *tls_data_to_str(apr_pool_t *p, const tls_data_t *d);
 
 /**

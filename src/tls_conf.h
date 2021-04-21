@@ -27,13 +27,12 @@ typedef struct {
     struct tls_proto_conf_t *proto;   /* TLS protocol/rustls specific globals */
     apr_hash_t *var_lookups;          /* variable lookup functions by var name */
 
-    struct tls_cert_reg_t *cert_reg;  /* registry of all static certificates loaded */
+    struct tls_cert_reg_t *cert_reg;  /* all certified keys loaded in post-config */
 
     const char *session_cache_spec;   /* how the session cache was specified */
-    const struct ap_socache_provider_t *session_cache_provider;
-    struct ap_socache_instance_t *session_cache;
-    struct apr_global_mutex_t *session_cache_mutex;
-
+    const struct ap_socache_provider_t *session_cache_provider; /* provider used for session cache */
+    struct ap_socache_instance_t *session_cache; /* session cache instance */
+    struct apr_global_mutex_t *session_cache_mutex; /* global mutex for access to session cache */
 } tls_conf_global_t;
 
 /* The module configuration for a server (vhost).
@@ -41,11 +40,10 @@ typedef struct {
  * in the post config phase. Readonly after that.
  */
 typedef struct {
-    server_rec *server;         /* server this config belongs to */
-    const char *name;
+    server_rec *server;               /* server this config belongs to */
     tls_conf_global_t *global;        /* global module config, singleton */
 
-    int enabled;
+    int enabled;                      /* TLS_FLAG_TRUE if mod_tls is active on this server */
     apr_array_header_t *cert_specs;   /* array of (tls_cert_spec_t*) of configured certificates */
     int tls_protocol_min;             /* the minimum TLS protocol version to use */
     apr_array_header_t *tls_pref_ciphers;  /* List of apr_uint16_t cipher ids to prefer */

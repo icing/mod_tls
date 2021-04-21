@@ -69,10 +69,9 @@ static void ocsp_copy_resp(const unsigned char *der, apr_size_t der_len, void *u
 }
 
 void tls_ocsp_provide_resp(
-    void *userdata, const rustls_certified_key *certified_key,
+    conn_rec *c, const rustls_certified_key *certified_key,
     unsigned char *buf, size_t buf_len, size_t *out_n)
 {
-    conn_rec *c = userdata;
     tls_conf_conn_t *cc = tls_conf_conn_get(c);
     tls_conf_server_t *sc;
     apr_status_t rv = APR_SUCCESS;

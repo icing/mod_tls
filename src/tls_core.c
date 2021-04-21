@@ -644,7 +644,15 @@ cleanup:
     return rv;
 }
 
-apr_status_t tls_core_conn_server_init(conn_rec *c)
+static void ocsp_provide_resp(
+    void *userdata, const rustls_certified_key *certified_key,
+    unsigned char *buf, size_t buf_len, size_t *out_n)
+{
+    conn_rec *c = userdata;
+    tls_ocsp_provide_resp(c, certified_key, buf, buf_len, out_n);
+}
+
+apr_status_t tls_core_conn_init_server(conn_rec *c)
 {
     tls_conf_conn_t *cc = tls_conf_conn_get(c);
     tls_conf_server_t *sc, *initial_sc;
@@ -656,89 +664,88 @@ apr_status_t tls_core_conn_server_init(conn_rec *c)
 
     ap_assert(cc);
     initial_sc = sc = tls_conf_server_get(cc->server);
+    if (!cc->client_hello_seen) goto cleanup;
 
-    if (cc->client_hello_seen) {
-        if (cc->sni_hostname) {
-            if (ap_vhost_iterate_given_conn(c, find_vhost, (void*)cc->sni_hostname)) {
-                ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, c, APLOGNO()
-                    "vhost_init: virtual host found for SNI '%s'", cc->sni_hostname);
-                sni_match = 1;
-            }
-            else if (tls_util_name_matches_server(cc->sni_hostname, ap_server_conf)) {
-                ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, c, APLOGNO()
-                    "vhost_init: virtual host NOT found, but base server[%s] matches SNI '%s'",
-                    ap_server_conf->server_hostname, cc->sni_hostname);
-                cc->server = ap_server_conf;
-                sni_match = 1;
-            }
-            else if (sc->strict_sni == TLS_FLAG_FALSE) {
-                ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, c, APLOGNO()
-                    "vhost_init: no virtual host found, relaxed SNI checking enabled, SNI '%s'",
-                    cc->sni_hostname);
-            }
-            else {
-                ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, c, APLOGNO()
-                    "vhost_init: no virtual host, nor base server[%s] matches SNI '%s'",
-                    c->base_server->server_hostname, cc->sni_hostname);
-                cc->server = sc->global->ap_server;
-                rv = APR_NOTFOUND; goto cleanup;
-            }
+    if (cc->sni_hostname) {
+        if (ap_vhost_iterate_given_conn(c, find_vhost, (void*)cc->sni_hostname)) {
+            ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, c, APLOGNO()
+                "vhost_init: virtual host found for SNI '%s'", cc->sni_hostname);
+            sni_match = 1;
+        }
+        else if (tls_util_name_matches_server(cc->sni_hostname, ap_server_conf)) {
+            ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, c, APLOGNO()
+                "vhost_init: virtual host NOT found, but base server[%s] matches SNI '%s'",
+                ap_server_conf->server_hostname, cc->sni_hostname);
+            cc->server = ap_server_conf;
+            sni_match = 1;
+        }
+        else if (sc->strict_sni == TLS_FLAG_FALSE) {
+            ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, c, APLOGNO()
+                "vhost_init: no virtual host found, relaxed SNI checking enabled, SNI '%s'",
+                cc->sni_hostname);
         }
         else {
-            ap_log_cerror(APLOG_MARK, APLOG_DEBUG, 0, c, APLOGNO()
-                "vhost_init: no SNI hostname provided by client");
-        }
-
-        /* reinit, we might have a new server selected */
-        sc = tls_conf_server_get(cc->server);
-        if (!sc->certified_keys || sc->certified_keys->nelts == 0) {
-            ap_log_error(APLOG_MARK, APLOG_ERR, 0, cc->server, APLOGNO()
-                "vhost_init: server[%s] selected by SNI '%s' has no certificates",
+            ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, c, APLOGNO()
+                "vhost_init: no virtual host, nor base server[%s] matches SNI '%s'",
                 c->base_server->server_hostname, cc->sni_hostname);
+            cc->server = sc->global->ap_server;
             rv = APR_NOTFOUND; goto cleanup;
         }
-        /* on relaxed SNI matches, we do not enforce the 503 of fallback
-         * certificates. */
-        cc->service_unavailable = sni_match? sc->service_unavailable : 0;
-
-        base_config = sc->rustls_config? sc->rustls_config : initial_sc->rustls_config;
-        if (!base_config) {
-            ap_log_cerror(APLOG_MARK, APLOG_DEBUG, 0, c, APLOGNO()
-                "vhost_init: no base rustls config found, denying to serve");
-            rv = APR_NOTFOUND; goto cleanup;
-        }
-        builder = rustls_server_config_builder_from_config(base_config);
-        if (NULL == builder) {
-            rv = APR_ENOMEM; goto cleanup;
-        }
-
-        assert(sc->enabled == TLS_FLAG_TRUE);
-        assert(sc->certified_keys);
-        assert(sc->certified_keys->nelts > 0);
-        rr = rustls_server_config_builder_set_certified_keys(
-            builder, (const rustls_certified_key**)sc->certified_keys->elts,
-            (size_t)sc->certified_keys->nelts, tls_ocsp_provide_resp, c);
-        if (RUSTLS_RESULT_OK != rr) goto cleanup;
-
-        rv = process_alpn(c, cc->server, builder);
-        if (APR_SUCCESS != rv) goto cleanup;
-
-        rv = tls_cache_init_conn(builder, c);
-        if (APR_SUCCESS != rv) goto cleanup;
-
-        /* if found or not, cc->server will be the server we use now to do
-         * the real handshake and, if successful, the traffic after that.
-         * Free the current session and create the real one for the
-         * selected server. */
-        rustls_server_config_free(cc->rustls_config);
-        cc->rustls_config = NULL;
-        rustls_server_session_free(cc->rustls_session);
-        cc->rustls_session = NULL;
-        cc->rustls_config = rustls_server_config_builder_build(builder);
-        builder = NULL;
-        rr = rustls_server_session_new(cc->rustls_config, &cc->rustls_session);
-        if (RUSTLS_RESULT_OK != rr) goto cleanup;
     }
+    else {
+        ap_log_cerror(APLOG_MARK, APLOG_DEBUG, 0, c, APLOGNO()
+            "vhost_init: no SNI hostname provided by client");
+    }
+
+    /* reinit, we might have a new server selected */
+    sc = tls_conf_server_get(cc->server);
+    if (!sc->certified_keys || sc->certified_keys->nelts == 0) {
+        ap_log_error(APLOG_MARK, APLOG_ERR, 0, cc->server, APLOGNO()
+            "vhost_init: server[%s] selected by SNI '%s' has no certificates",
+            c->base_server->server_hostname, cc->sni_hostname);
+        rv = APR_NOTFOUND; goto cleanup;
+    }
+    /* on relaxed SNI matches, we do not enforce the 503 of fallback
+     * certificates. */
+    cc->service_unavailable = sni_match? sc->service_unavailable : 0;
+
+    base_config = sc->rustls_config? sc->rustls_config : initial_sc->rustls_config;
+    if (!base_config) {
+        ap_log_cerror(APLOG_MARK, APLOG_DEBUG, 0, c, APLOGNO()
+            "vhost_init: no base rustls config found, denying to serve");
+        rv = APR_NOTFOUND; goto cleanup;
+    }
+    builder = rustls_server_config_builder_from_config(base_config);
+    if (NULL == builder) {
+        rv = APR_ENOMEM; goto cleanup;
+    }
+
+    assert(sc->enabled == TLS_FLAG_TRUE);
+    assert(sc->certified_keys);
+    assert(sc->certified_keys->nelts > 0);
+    rr = rustls_server_config_builder_set_certified_keys(
+        builder, (const rustls_certified_key**)sc->certified_keys->elts,
+        (size_t)sc->certified_keys->nelts, ocsp_provide_resp, c);
+    if (RUSTLS_RESULT_OK != rr) goto cleanup;
+
+    rv = process_alpn(c, cc->server, builder);
+    if (APR_SUCCESS != rv) goto cleanup;
+
+    rv = tls_cache_init_conn(builder, c);
+    if (APR_SUCCESS != rv) goto cleanup;
+
+    /* if found or not, cc->server will be the server we use now to do
+     * the real handshake and, if successful, the traffic after that.
+     * Free the current session and create the real one for the
+     * selected server. */
+    rustls_server_config_free(cc->rustls_config);
+    cc->rustls_config = NULL;
+    rustls_server_session_free(cc->rustls_session);
+    cc->rustls_session = NULL;
+    cc->rustls_config = rustls_server_config_builder_build(builder);
+    builder = NULL;
+    rr = rustls_server_session_new(cc->rustls_config, &cc->rustls_session);
+    if (RUSTLS_RESULT_OK != rr) goto cleanup;
 
 cleanup:
     if (builder != NULL) {

@@ -49,7 +49,7 @@ int tls_filter_conn_init(conn_rec *c);
  * "For large data transfers, small record sizes can materially affect performance."
  * and
  * "For TLS 1.2 and earlier, that limit is 2^14 octets. TLS 1.3 uses a limit of
- *  2^14+1 octets."
+ * 2^14+1 octets."
  * Maybe future TLS versions will raise that value, but for now these limits stand.
  * Given the choice, we would like rustls to provide with traffic data in those chunks.
  */
@@ -62,11 +62,14 @@ int tls_filter_conn_init(conn_rec *c);
  * messages sizes.
  * That would be TLS_PREF_WRITE_SIZE + TLS Message Overhead, such as
  * MAC and padding. But these vary with protocol and ciphers chosen, so
- * we defined something which should be "large enough", but not overly
- * so.
+ * we define something which should be "large enough", but not overly so.
  */
-#define TLS_PREF_TLS_WRITE_SIZE   (TLS_PREF_WRITE_SIZE + 1024)
+#define TLS_REC_EXTRA             (1024)
+#define TLS_PREF_TLS_WRITE_SIZE   (TLS_PREF_WRITE_SIZE + TLS_REC_EXTRA)
 
+/* The size of TLS outgoing data we are comfortable to collect in
+ * a single heap bucket to pass on to the network.
+ */
 #define TLS_MAX_BUCKET_SIZE       (4 * TLS_PREF_TLS_WRITE_SIZE)
 
 #endif /* tls_filter_h */

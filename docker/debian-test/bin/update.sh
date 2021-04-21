@@ -21,6 +21,9 @@ needs_update() {
   return 1
 }
 
+# remove some stuff that accumulates
+rm -f $DATADIR/apache2/logs/*
+
 cd $DATADIR
 if test ! -f rustup.sh.run; then
   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o rustup.sh ||rm -f rustup.sh
@@ -79,3 +82,4 @@ if needs_update .installed .; then
   touch .installed
 fi
 make test
+python3 test/load_test.py 1k-files
