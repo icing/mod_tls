@@ -67,7 +67,9 @@ static apr_status_t read_tls_to_rustls(
         if (APR_BUCKET_IS_EOS(b)) {
             ap_log_error(APLOG_MARK, APLOG_TRACE2, rv, fctx->cc->server,
                 "read_tls_to_rustls, EOS");
-            apr_brigade_cleanup(fctx->fin_tls_buffer_bb);
+            if (fctx->fin_tls_buffer_bb) {
+                apr_brigade_cleanup(fctx->fin_tls_buffer_bb);
+            }
             rv = APR_EOF; goto cleanup;
         }
 
