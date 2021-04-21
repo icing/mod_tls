@@ -49,6 +49,7 @@ fi
 
 cd $DATADIR
 if test ! -d crustls; then
+  rm -f $DATADIR/apache2/.crustls-installed
   git clone https://github.com/icing/crustls.git crustls
 fi
 cd crustls
