@@ -31,13 +31,10 @@ static int prime_cert(
     const rustls_certified_key *certified_key)
 {
     apr_pool_t *p = userdata;
-    ap_bytes_t id;
     apr_status_t rv;
 
     (void)certified_key;
-    id.data = (unsigned char*)cert_id;
-    id.len = strlen(cert_id);
-    rv = ap_ssl_ocsp_prime(s, p, &id, cert_pem);
+    rv = ap_ssl_ocsp_prime(s, p, cert_id, strlen(cert_id), cert_pem);
     ap_log_error(APLOG_MARK, APLOG_TRACE1, rv, s, "ocsp prime of cert [%s] from %s",
                  cert_id, s->server_hostname);
     return 1;
@@ -50,10 +47,6 @@ apr_status_t tls_ocsp_prime_certs(tls_conf_global_t *gc, apr_pool_t *p, server_r
     tls_cert_reg_do(prime_cert, p, gc->cert_reg);
     return APR_SUCCESS;
 }
-
-AP_DECLARE(apr_status_t) ap_ssl_ocsp_get_resp(server_rec *s, conn_rec *c,
-                                              const ap_bytes_t *id,
-                                              ap_ssl_ocsp_copy_resp *cb, void *userdata);
 
 typedef struct {
     conn_rec *c;
@@ -84,7 +77,6 @@ void tls_ocsp_provide_resp(
     tls_conf_server_t *sc;
     apr_status_t rv = APR_SUCCESS;
     const char *key_id;
-    ap_bytes_t id;
     ocsp_copy_ctx_t ctx;
 
     assert(cc);
@@ -101,9 +93,7 @@ void tls_ocsp_provide_resp(
     ctx.buf = buf;
     ctx.buf_len = buf_len;
     ctx.resp_len = 0;
-    id.data = (unsigned char*)key_id;
-    id.len = strlen(key_id);
-    rv = ap_ssl_ocsp_get_resp(cc->server, c, &id, ocsp_copy_resp, &ctx);
+    rv = ap_ssl_ocsp_get_resp(cc->server, c, key_id, strlen(key_id), ocsp_copy_resp, &ctx);
     if (APR_SUCCESS == rv) {
         ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, c,
             "provided %ld bytes of ocsp response DER data.", (long)ctx.resp_len);

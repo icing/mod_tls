@@ -47,14 +47,13 @@ if needs_update $DATADIR/apache2/.installed .; then
   touch $DATADIR/apache2/.installed
 fi
 
-
 cd $DATADIR
 if test ! -d crustls; then
-  git clone https://github.com/abetterinternet/crustls.git crustls
+  git clone https://github.com/icing/crustls.git crustls
 fi
 cd crustls
-git fetch origin list-ciphersuites
-git checkout list-ciphersuites
+git fetch origin icing/main
+git checkout icing/main
 if needs_update $DATADIR/apache2/.crustls-installed .; then
   rm -f $DATADIR/apache2/.crustls-installed
   touch src/crustls.h ||fail "missing src/crustls.h"
