@@ -18,6 +18,13 @@ struct ap_socache_instance_t;
 struct ap_socache_provider_t;
 struct apr_global_mutex_t;
 
+typedef enum {
+    TLS_CLIENT_AUTH_UNSET,
+    TLS_CLIENT_AUTH_NONE,
+    TLS_CLIENT_AUTH_REQUIRED,
+    TLS_CLIENT_AUTH_OPTIONAL,
+} tls_client_auth_t;
+
 /* The global module configuration, created after post-config
  * and then readonly.
  */
@@ -50,6 +57,9 @@ typedef struct {
     apr_array_header_t *tls_supp_ciphers;  /* List of apr_uint16_t cipher ids to suppress */
     int honor_client_order;           /* honor client cipher ordering */
     int strict_sni;
+
+    const char *client_ca;            /* PEM file with trust anchors for client certs */
+    tls_client_auth_t client_auth;    /* how client authentication with certificates is used */
 
     apr_array_header_t *certified_keys; /* rustls_certified_key list configured */
     int base_server;                  /* != 0 iff this is the base server */

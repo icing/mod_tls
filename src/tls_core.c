@@ -366,6 +366,17 @@ static apr_status_t server_conf_setup(
     rv = set_ciphers(ptemp, sc, builder);
     if (APR_SUCCESS != rv) goto cleanup;
 
+    if (sc->client_auth != TLS_CLIENT_AUTH_NONE) {
+        if (!sc->client_ca) {
+            ap_log_error(APLOG_MARK, APLOG_ERR, 0, sc->server, APLOGNO()
+                         "TLSClientAuthentication is enabled for %s, but no client CA file is set. "
+                          "Use 'TLSClientCA <file>' to specify the trust anchors.",
+                         sc->server->server_hostname);
+            rv = APR_EINVAL; goto cleanup;
+        }
+        /* TODO: load it from a ca registry */
+    }
+
     rr = rustls_server_config_builder_set_ignore_client_order(
         builder, sc->honor_client_order == TLS_FLAG_FALSE);
     if (RUSTLS_RESULT_OK != rr) goto cleanup;

@@ -103,6 +103,9 @@ void *tls_conf_merge_svr(apr_pool_t *pool, void *basev, void *addv)
     nconf->tls_supp_ciphers = add->tls_supp_ciphers->nelts?
         add->tls_supp_ciphers : base->tls_supp_ciphers;
     nconf->honor_client_order = MERGE_INT(base, add, honor_client_order);
+    nconf->client_ca = add->client_ca? add->client_ca : base->client_ca;
+    nconf->client_auth = (add->client_auth != TLS_CLIENT_AUTH_UNSET)?
+        add->client_auth : base->client_auth;
     return nconf;
 }
 
@@ -147,6 +150,7 @@ apr_status_t tls_conf_server_apply_defaults(tls_conf_server_t *sc, apr_pool_t *p
     if (sc->tls_protocol_min == TLS_FLAG_UNSET) sc->tls_protocol_min = 0;
     if (sc->honor_client_order == TLS_FLAG_UNSET) sc->honor_client_order = TLS_FLAG_TRUE;
     if (sc->strict_sni == TLS_FLAG_UNSET) sc->strict_sni = TLS_FLAG_TRUE;
+    if (sc->client_auth == TLS_CLIENT_AUTH_UNSET) sc->client_auth = TLS_CLIENT_AUTH_NONE;
     return APR_SUCCESS;
 }
 
@@ -471,11 +475,56 @@ cleanup:
     return err;
 }
 
+static const char *tls_conf_set_client_ca(
+    cmd_parms *cmd, void *dc, const char *client_ca)
+{
+    tls_conf_server_t *sc = tls_conf_server_get(cmd->server);
+    const char *err = NULL, *fpath;
+
+    (void)dc;
+    if (NULL != (err = cmd_check_file(cmd, client_ca))) goto cleanup;
+    fpath = ap_server_root_relative(cmd->pool, client_ca);
+    if (!tls_util_is_file(cmd->pool, fpath)) {
+        err = apr_pstrcat(cmd->pool, cmd->cmd->name,
+                    ": unable to find client CA file: '", fpath, "'", NULL);
+        goto cleanup;
+    }
+    sc->client_ca = client_ca;
+cleanup:
+    return err;
+}
+
+static const char *tls_conf_set_client_auth(
+    cmd_parms *cmd, void *dc, const char *mode)
+{
+    tls_conf_server_t *sc = tls_conf_server_get(cmd->server);
+    const char *err = NULL;
+    (void)dc;
+    if (!strcasecmp(mode, "required")) {
+        sc->client_auth = TLS_CLIENT_AUTH_REQUIRED;
+    }
+    else if (!strcasecmp(mode, "optional")) {
+        sc->client_auth = TLS_CLIENT_AUTH_OPTIONAL;
+    }
+    else if (!strcasecmp(mode, "none")) {
+        sc->client_auth = TLS_CLIENT_AUTH_NONE;
+    }
+    else {
+        err = apr_pstrcat(cmd->pool, cmd->cmd->name,
+            ": unknown value: '", mode, "', use required/optional/none.", NULL);
+    }
+    return err;
+}
+
 const command_rec tls_conf_cmds[] = {
     AP_INIT_TAKE12("TLSCertificate", tls_conf_add_certificate, NULL, RSRC_CONF,
         "Add a certificate to the server by specifying a file containing the "
         "certificate PEM, followed by its chain PEMs. The PEM of the key must "
         "either also be there or can be given as a separate file."),
+    AP_INIT_TAKE1("TLSClientCA", tls_conf_set_client_ca, NULL, RSRC_CONF,
+        "Set the trust anchors for client certificates from a PEM file."),
+    AP_INIT_TAKE1("TLSClientAuthentication", tls_conf_set_client_auth, NULL, RSRC_CONF,
+        "If TLS client authentication is 'required', 'optional' or 'none'."),
     AP_INIT_TAKE_ARGV("TLSCiphersPrefer", tls_conf_set_preferred_ciphers, NULL, RSRC_CONF,
         "Set the TLS ciphers to prefer when negotiating with a client."),
     AP_INIT_TAKE_ARGV("TLSCiphersSuppress", tls_conf_set_suppressed_ciphers, NULL, RSRC_CONF,
