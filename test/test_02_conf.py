@@ -42,6 +42,7 @@ class TestConf:
         conf.write()
         assert self.env.apache_fail() == 0
 
+    @pytest.mark.skip()  # needs a fix from icing/ocsp branch
     def test_02_conf_cert_file_exist(self):
         conf = TlsTestConf(env=self.env)
         conf.add("TLSCertificate test-02-cert.pem test-02-key.pem")
