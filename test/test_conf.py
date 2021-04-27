@@ -45,9 +45,9 @@ LogLevel tls:trace4
                  """.format(
                     https=self.env.https_port,
                     domain=domain))
-            for cert_file, pkey_file in self.env.cert_files_for(domain):
-                cert_file = os.path.relpath(cert_file, self.env.server_dir)
-                pkey_file = os.path.relpath(pkey_file, self.env.server_dir) if pkey_file else ""
+            for cred in self.env.get_certs_for(domain):
+                cert_file = os.path.relpath(cred.cert_file, self.env.server_dir)
+                pkey_file = os.path.relpath(cred.pkey_file, self.env.server_dir) if cred.pkey_file else ""
                 self.add("  TLSCertificate {cert_file} {pkey_file}".format(
                     cert_file = cert_file,
                     pkey_file = pkey_file,
@@ -56,10 +56,6 @@ LogLevel tls:trace4
       {extras}
     </VirtualHost>
                 """.format(
-                    https=self.env.https_port,
-                    domain=domain,
-                    cert_file=cert_file,
-                    pkey_file=pkey_file,
                     extras=extras[domain] if domain in extras else ""
                 ))
 
@@ -81,9 +77,9 @@ LogLevel ssl:trace4
                  """.format(
                     https=self.env.https_port,
                     domain=domain))
-            for cert_file, pkey_file in self.env.cert_files_for(domain):
-                cert_file = os.path.relpath(cert_file, self.env.server_dir)
-                pkey_file = os.path.relpath(pkey_file, self.env.server_dir) if pkey_file else cert_file
+            for cred in self.env.get_certs_for(domain):
+                cert_file = os.path.relpath(cred.cert_file, self.env.server_dir)
+                pkey_file = os.path.relpath(cred.pkey_file, self.env.server_dir) if cred.pkey_file else cert_file
                 self.add("  SSLCertificateFile {cert_file}".format(
                     cert_file = cert_file,
                 ))
@@ -115,9 +111,9 @@ LogLevel tls:trace8
             self.add(f"""
     <MDomain {domain}>
                 """)
-            for cert_file, pkey_file in self.env.cert_files_for(domain):
-                cert_file = os.path.relpath(cert_file, self.env.server_dir)
-                pkey_file = os.path.relpath(pkey_file, self.env.server_dir) if pkey_file else cert_file
+            for cred in self.env.get_certs_for(domain):
+                cert_file = os.path.relpath(cred.cert_file, self.env.server_dir)
+                pkey_file = os.path.relpath(cred.pkey_file, self.env.server_dir) if cred.pkey_file else cert_file
                 self.add(f"""
       MDCertificateFile {cert_file}
       MDCertificateKeyFile {pkey_file}
@@ -144,9 +140,9 @@ LogLevel tls:trace8
     MDBaseServer on
     <MDomain {domain}>
                 """)
-        for cert_file, pkey_file in self.env.cert_files_for(domain):
-            cert_file = os.path.relpath(cert_file, self.env.server_dir)
-            pkey_file = os.path.relpath(pkey_file, self.env.server_dir) if pkey_file else cert_file
+        for cred in self.env.get_certs_for(domain):
+            cert_file = os.path.relpath(cred.cert_file, self.env.server_dir)
+            pkey_file = os.path.relpath(cred.pkey_file, self.env.server_dir) if cred.pkey_file else cert_file
             self.add(f"""
       MDCertificateFile {cert_file}
       MDCertificateKeyFile {pkey_file}

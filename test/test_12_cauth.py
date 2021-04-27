@@ -14,6 +14,7 @@ class TestMD:
     def setup_class(cls):
         if cls.env.is_live(timeout=timedelta(milliseconds=100)):
             assert cls.env.apache_stop() == 0
+        cls.clientsX = cls.env.CA.get_first("clientsX")
 
     @classmethod
     def teardown_class(cls):
@@ -37,8 +38,8 @@ class TestMD:
     def test_12_set_ca_existing(self):
         conf = TlsTestConf(env=self.env)
         conf.add_md_vhosts(domains=[self.env.domain_a, self.env.domain_b], extras={
-            self.env.domain_a: """
-            TLSClientCA ca/ca.rsa4096.cert.pem
+            self.env.domain_a: f"""
+            TLSClientCA {self.clientsX.cert_file}
             """
         })
         conf.write()
@@ -48,19 +49,41 @@ class TestMD:
         conf = TlsTestConf(env=self.env)
         conf.add_md_vhosts(domains=[self.env.domain_a, self.env.domain_b], extras={
             self.env.domain_a: """
-            TLSClientAuthentication required
+            TLSClientCertificate required
             """
         })
         conf.write()
+        # will fail bc lacking clien CA
         assert self.env.apache_restart() == 1
 
-    def test_12_set_auth_and_ca(self):
+    def test_12_set_auth_required(self):
         conf = TlsTestConf(env=self.env)
         conf.add_md_vhosts(domains=[self.env.domain_a, self.env.domain_b], extras={
-            self.env.domain_a: """
-            TLSClientAuthentication required
-            TLSClientCA ca/ca.rsa4096.cert.pem
+            self.env.domain_a: f"""
+            TLSClientCertificate required
+            TLSClientCA {self.clientsX.cert_file}
             """
         })
         conf.write()
         assert self.env.apache_restart() == 0
+        # should be denied
+        r = self.env.https_get(domain=self.env.domain_a, paths="/index.json")
+        assert r.exit_code != 0, r.stdout
+
+    def test_12_set_auth_optional(self):
+        conf = TlsTestConf(env=self.env)
+        conf.add_md_vhosts(domains=[self.env.domain_a, self.env.domain_b], extras={
+            self.env.domain_a: f"""
+            TLSClientCertificate optional
+            TLSClientCA {self.clientsX.cert_file}
+            """
+        })
+        conf.write()
+        assert self.env.apache_restart() == 0
+        # should work either way
+        data = self.env.https_get_json(self.env.domain_a, "/index.json")
+        assert data == {'domain': self.env.domain_a}
+        data = self.env.https_get_json(self.env.domain_a, "/index.json", extra_args=[
+            "--cert", self.clientsX.get_first("user1").cert_file
+        ])
+        assert data == {'domain': self.env.domain_a}

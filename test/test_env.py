@@ -13,7 +13,7 @@ from http.client import HTTPConnection
 from typing import List, Optional, Dict, Tuple, Union
 from urllib.parse import urlparse
 
-from test_cert import TlsTestCA, CertificateSpec
+from test_cert import TlsTestCA, CertificateSpec, Credentials
 
 log = logging.getLogger(__name__)
 
@@ -88,11 +88,14 @@ class TlsTestEnv:
     DOMAIN_B = "b.mod-tls.test"
 
     CERT_SPECS = [
-        CertificateSpec([DOMAIN_A]),
-        CertificateSpec([DOMAIN_B], key_type='secp256r1', single_file=True),
-        CertificateSpec([DOMAIN_B], key_type='rsa4096'),
+        CertificateSpec(domains=[DOMAIN_A]),
+        CertificateSpec(domains=[DOMAIN_B], key_type='secp256r1', single_file=True),
+        CertificateSpec(domains=[DOMAIN_B], key_type='rsa4096'),
+        CertificateSpec(name="clientsX", sub_specs=[
+            CertificateSpec(dn=[("ou", "clientsX"), ("cn", "user1")], single_file=True),
+            CertificateSpec(dn=[("ou", "clientsX"), ("cn", "user2")], single_file=True),
+        ]),
     ]
-    CERT_FILES = {}
     CA = None
 
     # current rustls supported ciphers in their order of preference
@@ -121,14 +124,9 @@ class TlsTestEnv:
             logging.getLogger('').addHandler(console)
             logging.getLogger('').setLevel(level=level)
 
-            cls.CA = TlsTestCA(ca_dir=os.path.join(base_dir, 'ca'), key_type="rsa4096")
-            cls.CERT_FILES['ca'] = cls.CA.ca_cert_file, None
-            for spec in cls.CERT_SPECS:
-                cert_file, key_file = cls.CA.create_cert(spec)
-                for name in spec.domains:
-                    if name not in cls.CERT_FILES:
-                        cls.CERT_FILES[name] = []
-                    cls.CERT_FILES[name].append((cert_file, key_file))
+            cls.CA = TlsTestCA.create(name="abetterinternet-mod_tls",
+                                      store_dir=os.path.join(base_dir, 'ca'), key_type="rsa4096")
+            cls.CA.issue_certs(cls.CERT_SPECS)
             cls._initialized = True
 
     def __init__(self):
@@ -207,11 +205,11 @@ class TlsTestEnv:
         return self.DOMAIN_B
 
     @property
-    def ca_cert(self) -> str:
-        return self.CERT_FILES['ca'][0]
+    def ca_cert(self) -> Credentials:
+        return self.CA
 
-    def cert_files_for(self, domain: str) -> List[Tuple[str, str]]:
-        return self.CERT_FILES[domain]
+    def get_certs_for(self, domain: str) -> List[Credentials]:
+        return self.CA.get_credentials_for_name(domain)
 
     @staticmethod
     def run(args: List[str]) -> ExecResult:
@@ -349,7 +347,7 @@ class TlsTestEnv:
         args = []
         if extra_args:
             args.extend(extra_args)
-        args.extend(["--cacert", self.ca_cert, "--resolve", "{domain}:{port}:127.0.0.1".format(
+        args.extend(["--cacert", self.ca_cert.cert_file, "--resolve", "{domain}:{port}:127.0.0.1".format(
             domain=domain, port=self.https_port
         )])
         if isinstance(paths, str):
@@ -371,7 +369,7 @@ class TlsTestEnv:
         return self.run([self._openssl] + args)
 
     def openssl_client(self, domain, extra_args: List[str] = None) -> ExecResult:
-        args = ["s_client", "-CAfile", self.ca_cert, "-servername", domain,
+        args = ["s_client", "-CAfile", self.ca_cert.cert_file, "-servername", domain,
                 "-connect", "localhost:{port}".format(
                     port=self.https_port
                 )]

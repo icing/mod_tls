@@ -523,7 +523,7 @@ const command_rec tls_conf_cmds[] = {
         "either also be there or can be given as a separate file."),
     AP_INIT_TAKE1("TLSClientCA", tls_conf_set_client_ca, NULL, RSRC_CONF,
         "Set the trust anchors for client certificates from a PEM file."),
-    AP_INIT_TAKE1("TLSClientAuthentication", tls_conf_set_client_auth, NULL, RSRC_CONF,
+    AP_INIT_TAKE1("TLSClientCertificate", tls_conf_set_client_auth, NULL, RSRC_CONF,
         "If TLS client authentication is 'required', 'optional' or 'none'."),
     AP_INIT_TAKE_ARGV("TLSCiphersPrefer", tls_conf_set_preferred_ciphers, NULL, RSRC_CONF,
         "Set the TLS ciphers to prefer when negotiating with a client."),

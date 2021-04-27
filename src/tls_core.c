@@ -808,6 +808,12 @@ apr_status_t tls_core_conn_post_handshake(conn_rec *c)
     ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, c, "post_handshake %s: %s [%s]",
         cc->server->server_hostname, cc->tls_protocol_name, cc->tls_cipher_name);
 
+    cc->client_cert = rustls_server_session_get_peer_certificate(cc->rustls_session, 0);
+    if (!cc->client_cert && sc->client_auth == TLS_CLIENT_AUTH_REQUIRED) {
+        ap_log_cerror(APLOG_MARK, APLOG_INFO, 0, c, APLOGNO()
+              "A client certificate is required, but no acceptable certificate was presented.");
+        rv = APR_ECONNABORTED;
+    }
 cleanup:
     return rv;
 }
