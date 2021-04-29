@@ -31,8 +31,8 @@ apr_status_t tls_ocsp_prime_certs(tls_conf_global_t *gc, apr_pool_t *p, server_r
  * @param buf_len the length of `buf`
  * @param out_n the number of OCSP response DER bytes copied or 0.
  */
-void tls_ocsp_provide_resp(
+apr_status_t tls_ocsp_update_key(
     conn_rec *c, const rustls_certified_key *certified_key,
-    unsigned char *buf, size_t buf_len, size_t *out_n);
+    const rustls_certified_key **key_out);
 
 #endif /* tls_ocsp_h */

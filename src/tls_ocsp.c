@@ -50,56 +50,62 @@ apr_status_t tls_ocsp_prime_certs(tls_conf_global_t *gc, apr_pool_t *p, server_r
 
 typedef struct {
     conn_rec *c;
-    unsigned char *buf;
-    size_t buf_len;
-    size_t resp_len;
+    const rustls_certified_key *key_in;
+    const rustls_certified_key *key_out;
 } ocsp_copy_ctx_t;
 
-static void ocsp_copy_resp(const unsigned char *der, apr_size_t der_len, void *userdata)
+static void ocsp_clone_key(const unsigned char *der, apr_size_t der_len, void *userdata)
 {
     ocsp_copy_ctx_t *ctx = userdata;
-    if (der_len > ctx->buf_len) {
-        ap_log_cerror(APLOG_MARK, APLOG_DEBUG, 0, ctx->c, APLOGNO()
-            "ocsp response %ld bytes, longer than rustls buffer of %ld, not copying.",
-            (long)der_len, (long)ctx->buf_len);
-        return;
+    rustls_slice_bytes rslice;
+    rustls_result rr;
+
+    rslice.data = der;
+    rslice.len = der_len;
+
+    rr = rustls_certified_key_clone_with_ocsp(ctx->key_in, der_len? &rslice : NULL, &ctx->key_out);
+    if (RUSTLS_RESULT_OK != rr) {
+        const char *err_descr = NULL;
+        apr_status_t rv = tls_util_rustls_error(ctx->c->pool, rr, &err_descr);
+        ap_log_cerror(APLOG_MARK, APLOG_ERR, rv, ctx->c, APLOGNO()
+                     "Failed add OCSP data to certificate: [%d] %s", (int)rr, err_descr);
     }
-    memcpy(ctx->buf, der, der_len);
-    ctx->resp_len = der_len;
+    else {
+        ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, ctx->c,
+            "provided %ld bytes of ocsp response DER data to key.", (long)der_len);
+    }
 }
 
-void tls_ocsp_provide_resp(
+apr_status_t tls_ocsp_update_key(
     conn_rec *c, const rustls_certified_key *certified_key,
-    unsigned char *buf, size_t buf_len, size_t *out_n)
+    const rustls_certified_key **pkey_out)
 {
     tls_conf_conn_t *cc = tls_conf_conn_get(c);
     tls_conf_server_t *sc;
-    apr_status_t rv = APR_SUCCESS;
     const char *key_id;
+    apr_status_t rv = APR_SUCCESS;
     ocsp_copy_ctx_t ctx;
 
     assert(cc);
     assert(cc->server);
     sc = tls_conf_server_get(cc->server);
-    *out_n = 0;
     key_id = tls_cert_reg_get_id(sc->global->cert_reg, certified_key);
     if (!key_id) {
+        rv = APR_ENOENT;
         ap_log_cerror(APLOG_MARK, APLOG_TRACE1, rv, c, "certified key not registered");
-        return;
+        goto cleanup;
     }
 
     ctx.c = c;
-    ctx.buf = buf;
-    ctx.buf_len = buf_len;
-    ctx.resp_len = 0;
-    rv = ap_ssl_ocsp_get_resp(cc->server, c, key_id, strlen(key_id), ocsp_copy_resp, &ctx);
-    if (APR_SUCCESS == rv) {
-        ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, c,
-            "provided %ld bytes of ocsp response DER data.", (long)ctx.resp_len);
-        *out_n = ctx.resp_len;
-    }
-    else {
+    ctx.key_in = certified_key;
+    ctx.key_out = NULL;
+    rv = ap_ssl_ocsp_get_resp(cc->server, c, key_id, strlen(key_id), ocsp_clone_key, &ctx);
+    if (APR_SUCCESS != rv) {
         ap_log_cerror(APLOG_MARK, APLOG_TRACE1, rv, c,
             "ocsp response not available for cert %s", key_id);
     }
+
+cleanup:
+    *pkey_out = (APR_SUCCESS == rv)? ctx.key_out : NULL;
+    return rv;
 }
