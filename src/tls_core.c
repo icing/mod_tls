@@ -143,7 +143,7 @@ static apr_status_t use_challenge_certificate(
     if (APR_SUCCESS != rv) goto cleanup;
 
     rr = rustls_server_config_builder_set_certified_keys(
-        builder, (const rustls_certified_key**)&ckey, 1, NULL, NULL);
+        builder, (const rustls_certified_key**)&ckey, 1);
     if (RUSTLS_RESULT_OK != rr) goto cleanup;
 
 cleanup:
@@ -556,7 +556,7 @@ int tls_core_conn_base_init(conn_rec *c)
         if (!builder) {
             rr = RUSTLS_RESULT_PANIC; goto cleanup;
         }
-        rustls_server_config_builder_set_hello_callback(builder, tls_conn_hello_cb, c, NULL, NULL);
+        rustls_server_config_builder_set_hello_callback(builder, tls_conn_hello_cb, c);
         cc->rustls_config = rustls_server_config_builder_build(builder);
         if (!cc->rustls_config) {
             rr = RUSTLS_RESULT_PANIC; goto cleanup;
@@ -655,12 +655,52 @@ cleanup:
     return rv;
 }
 
-static void ocsp_provide_resp(
-    void *userdata, const rustls_certified_key *certified_key,
-    unsigned char *buf, size_t buf_len, size_t *out_n)
+static apr_status_t set_session_keys(
+    conn_rec *c, tls_conf_server_t *sc, rustls_server_config_builder *builder)
 {
-    conn_rec *c = userdata;
-    tls_ocsp_provide_resp(c, certified_key, buf, buf_len, out_n);
+    apr_array_header_t *cloned_keys = NULL, *session_keys;
+    const rustls_certified_key *key, *clone;
+    rustls_result rr = RUSTLS_RESULT_OK;
+    apr_status_t rv = APR_SUCCESS;
+    int i;
+
+    assert(sc->enabled == TLS_FLAG_TRUE);
+    assert(sc->certified_keys);
+    assert(sc->certified_keys->nelts > 0);
+    /* Currently, we have to clone all keys to provide them with OCSP
+     * data, since we are not in the loop which one will be selected,
+     * for the time being.
+     * See also <https://github.com/abetterinternet/crustls/pull/85>.
+     */
+    cloned_keys = apr_array_make(c->pool, sc->certified_keys->nelts, sizeof(const rustls_certified_key*));
+    session_keys = apr_array_make(c->pool, sc->certified_keys->nelts, sizeof(const rustls_certified_key*));
+    for (i = 0; i < sc->certified_keys->nelts; ++i) {
+        key = APR_ARRAY_IDX(sc->certified_keys, i, const rustls_certified_key*);
+        if (APR_SUCCESS == tls_ocsp_update_key(c, key, &clone)) {
+            APR_ARRAY_PUSH(cloned_keys, const rustls_certified_key*) = clone;
+            key = clone;
+        }
+        APR_ARRAY_PUSH(session_keys, const rustls_certified_key*) = key;
+    }
+
+    rr = rustls_server_config_builder_set_certified_keys(
+        builder, (const rustls_certified_key**)session_keys->elts,
+        (size_t)session_keys->nelts);
+
+    if (cloned_keys) {
+        for (i = 0; i < cloned_keys->nelts; ++i) {
+            key = APR_ARRAY_IDX(cloned_keys, i, const rustls_certified_key*);
+            rustls_certified_key_free(key);
+        }
+    }
+    if (rr != RUSTLS_RESULT_OK) {
+        const char *err_descr = NULL;
+        rv = tls_util_rustls_error(c->pool, rr, &err_descr);
+        ap_log_error(APLOG_MARK, APLOG_ERR, rv, sc->server, APLOGNO()
+                     "Failed to init session for server %s: [%d] %s",
+                     sc->server->server_hostname, (int)rr, err_descr);
+    }
+    return rv;
 }
 
 apr_status_t tls_core_conn_init_server(conn_rec *c)
@@ -731,13 +771,8 @@ apr_status_t tls_core_conn_init_server(conn_rec *c)
         rv = APR_ENOMEM; goto cleanup;
     }
 
-    assert(sc->enabled == TLS_FLAG_TRUE);
-    assert(sc->certified_keys);
-    assert(sc->certified_keys->nelts > 0);
-    rr = rustls_server_config_builder_set_certified_keys(
-        builder, (const rustls_certified_key**)sc->certified_keys->elts,
-        (size_t)sc->certified_keys->nelts, ocsp_provide_resp, c);
-    if (RUSTLS_RESULT_OK != rr) goto cleanup;
+    rv = set_session_keys(c, sc, builder);
+    if (APR_SUCCESS != rv) goto cleanup;
 
     rv = process_alpn(c, cc->server, builder);
     if (APR_SUCCESS != rv) goto cleanup;
