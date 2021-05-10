@@ -15,9 +15,7 @@ class TestMD:
         conf.add_md_vhosts(domains=[cls.env.domain_a, cls.env.domain_b], extras={
             'base': """
             LogLevel tls:trace4 md:trace4
-            """.format(
-                prefix = cls.env.prefix
-            )
+            """
         })
         conf.write()
         assert cls.env.apache_restart() == 0
@@ -37,3 +35,11 @@ class TestMD:
         data = self.env.https_get_json(self.env.domain_b, "/index.json")
         assert data == {'domain': self.env.domain_b}
 
+    def test_11_get_base(self):
+        # give the base server domain_a and lookup its index.json
+        conf = TlsTestConf(env=self.env)
+        conf.add_md_base(domain=self.env.domain_a)
+        conf.write()
+        assert self.env.apache_restart() == 0
+        data = self.env.https_get_json(self.env.domain_a, "/index.json")
+        assert data == {'domain': 'localhost'}

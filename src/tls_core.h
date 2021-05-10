@@ -26,21 +26,23 @@ struct tls_filter_ctx_t;
  */
 typedef struct {
     server_rec *server;               /* the server_rec selected for this connection,
-                                       * initially c->base_server, to be negotiated. */
+                                       * initially c->base_server, to be negotiated via SNI. */
     tls_conn_state_t state;
-    const rustls_server_config *rustls_config;
-    rustls_server_session *rustls_session;
+    int service_unavailable;          /* we 503 all requests on this connection */
     int client_hello_seen;            /* the client hello has been inspected */
-    const char *sni_hostname;         /* the SNI value from the client hello, if present */
+
+    const rustls_server_config *rustls_config; /* the config specially made for this connection or NULL */
+    rustls_server_session *rustls_session; /* the session used on this connection or NULL */
+    struct tls_filter_ctx_t *filter_ctx; /* the context used by this connection's tls filters */
+
+    const char *sni_hostname;         /* the SNI value from the client hello, or NULL */
     const apr_array_header_t *alpn;   /* the protocols proposed via ALPN by the client */
-    const char *protocol_selected;    /* the ALPN selected a protocol or NULL if not done yet */
+    const char *protocol_selected;    /* the ALPN selected protocol or NULL */
     apr_uint16_t tls_protocol_id;      /* the TLS version negotiated */
     const char *tls_protocol_name;     /* the name of the TLS version negotiated */
     apr_uint16_t tls_cipher_id;       /* the TLS cipher suite negotiated */
     const char *tls_cipher_name;      /* the name of TLS cipher suite negotiated */
-    int service_unavailable;          /* we 503 all requests on this connection */
 
-    struct tls_filter_ctx_t *filter_ctx;
 } tls_conf_conn_t;
 
 /* Get the connection specific module configuration. */
@@ -71,14 +73,25 @@ apr_status_t tls_core_init(apr_pool_t *p, apr_pool_t *ptemp, server_rec *base_se
 int tls_core_conn_base_init(conn_rec *c);
 
 /**
- * Decide upon the real server_rec (vhost) to use on this connection,
- * initialize the module's connection settings, instantiated the real
- * rustls session, etc.
+ * Called when the ClientHello has been received and values from it
+ * have been extracted into the `tls_conf_conn_t` of the connection.
+ *
+ * Decides:
+ * - which `server_rec` this connection is for (SNI)
+ * - which application protocol to use (ALPN)
+ * This may be unsuccessful for several reasons. The SNI
+ * from the client may not be known or the selected server
+ * has not certificates available. etc.
+ * On success, a proper `rustls_server_session` will have been
+ * created and set in the `tls_conf_conn_t` of the connection.
  */
-apr_status_t tls_core_conn_server_init(conn_rec *c);
+apr_status_t tls_core_conn_init_server(conn_rec *c);
 
 /**
- * Called when the TLS handshake has completed.
+ * The TLS handshake for the connection has been successfully performed.
+ * This means that TLS related properties, such as TLS version and cipher,
+ * are known and the props in `tls_conf_conn_t` of the connection
+ * can be set.
  */
 apr_status_t tls_core_conn_post_handshake(conn_rec *c);
 

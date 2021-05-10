@@ -21,7 +21,6 @@
 #include <crustls.h>
 
 #include "mod_tls.h"
-#include "tls_defs.h"
 #include "tls_conf.h"
 #include "tls_core.h"
 #include "tls_cache.h"

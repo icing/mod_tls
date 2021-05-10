@@ -16,9 +16,11 @@
 #include <http_log.h>
 #include <ap_socache.h>
 
-#include "tls_defs.h"
+#include <crustls.h>
+
 #include "tls_conf.h"
 #include "tls_core.h"
+#include "tls_util.h"
 #include "tls_var.h"
 
 

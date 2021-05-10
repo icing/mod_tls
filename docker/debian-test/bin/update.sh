@@ -21,6 +21,9 @@ needs_update() {
   return 1
 }
 
+# remove some stuff that accumulates
+rm -f $DATADIR/apache2/logs/*
+
 cd $DATADIR
 if test ! -f rustup.sh.run; then
   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o rustup.sh ||rm -f rustup.sh
@@ -47,14 +50,14 @@ if needs_update $DATADIR/apache2/.installed .; then
   touch $DATADIR/apache2/.installed
 fi
 
-
 cd $DATADIR
 if test ! -d crustls; then
-  git clone https://github.com/abetterinternet/crustls.git crustls
+  rm -f $DATADIR/apache2/.crustls-installed
+  git clone https://github.com/icing/crustls.git crustls
 fi
 cd crustls
-git fetch origin list-ciphersuites
-git checkout list-ciphersuites
+git fetch origin icing/main
+git checkout icing/main
 if needs_update $DATADIR/apache2/.crustls-installed .; then
   rm -f $DATADIR/apache2/.crustls-installed
   touch src/crustls.h ||fail "missing src/crustls.h"
@@ -79,3 +82,4 @@ if needs_update .installed .; then
   touch .installed
 fi
 make test
+python3 test/load_test.py 1k-files

@@ -8,6 +8,7 @@
 #include <assert.h>
 #include <apr_lib.h>
 #include <apr_strings.h>
+#include <apr_hash.h>
 
 #include <httpd.h>
 #include <http_connection.h>
@@ -15,7 +16,8 @@
 #include <ap_socache.h>
 #include <util_mutex.h>
 
-#include "tls_defs.h"
+#include <crustls.h>
+
 #include "tls_conf.h"
 #include "tls_core.h"
 #include "tls_cache.h"

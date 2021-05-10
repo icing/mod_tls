@@ -103,40 +103,54 @@ LogLevel ssl:trace4
 
     def add_md_vhosts(self, domains: List[str], extras: Dict[str, str] = None):
         extras = extras if extras is not None else {}
-        self.add("""
-LoadModule md_module       {prefix}/modules/mod_md.so
+        self.add(f"""
+LoadModule md_module       {self.env.prefix}/modules/mod_md.so
 
-TLSListen {https}
+TLSListen {self.env.https_port}
 LogLevel md:debug
 LogLevel tls:trace8
-{extras}
-        """.format(
-            https=self.env.https_port,
-            extras=extras['base'] if 'base' in extras else "",
-            prefix=self.env.prefix,
-        ))
+{extras['base'] if 'base' in extras else ""}
+        """)
         for domain in domains:
-            self.add("    <MDomain {domain}>".format(domain=domain))
+            self.add(f"""
+    <MDomain {domain}>
+                """)
             for cert_file, pkey_file in self.env.cert_files_for(domain):
                 cert_file = os.path.relpath(cert_file, self.env.server_dir)
                 pkey_file = os.path.relpath(pkey_file, self.env.server_dir) if pkey_file else cert_file
-                self.add("""
-    MDCertificateFile {cert_file}
-    MDCertificateKeyFile {pkey_file}
-    """.format(
-                    cert_file = cert_file,
-                    pkey_file=pkey_file,
-                ))
-            self.add("  </MDomain>")
+                self.add(f"""
+      MDCertificateFile {cert_file}
+      MDCertificateKeyFile {pkey_file}
+      """)
+            self.add(f"""
+    </MDomain>
 
-            self.add("""
-        <VirtualHost *:{https}>
-          ServerName {domain}
-          DocumentRoot htdocs/{domain}
-          {extras}
-        </VirtualHost>
-                    """.format(
-                        https=self.env.https_port,
-                        domain=domain,
-                        extras=extras[domain] if domain in extras else ""
-                    ))
+    <VirtualHost *:{self.env.https_port}>
+      ServerName {domain}
+      DocumentRoot htdocs/{domain}
+      {extras[domain] if domain in extras else ""}
+    </VirtualHost>
+                """)
+
+    def add_md_base(self, domain: str):
+        self.add(f"""
+    LoadModule md_module       {self.env.prefix}/modules/mod_md.so
+
+    TLSListen {self.env.https_port}
+    LogLevel md:debug
+    LogLevel tls:trace8
+    
+    ServerName {domain}
+    MDBaseServer on
+    <MDomain {domain}>
+                """)
+        for cert_file, pkey_file in self.env.cert_files_for(domain):
+            cert_file = os.path.relpath(cert_file, self.env.server_dir)
+            pkey_file = os.path.relpath(pkey_file, self.env.server_dir) if pkey_file else cert_file
+            self.add(f"""
+      MDCertificateFile {cert_file}
+      MDCertificateKeyFile {pkey_file}
+          """)
+        self.add(f"""
+    </MDomain>
+        """)
