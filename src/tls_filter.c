@@ -15,7 +15,8 @@
 #include <http_log.h>
 #include <ap_socache.h>
 
-#include "tls_defs.h"
+#include <crustls.h>
+
 #include "tls_proto.h"
 #include "tls_conf.h"
 #include "tls_core.h"
@@ -66,7 +67,9 @@ static apr_status_t read_tls_to_rustls(
         if (APR_BUCKET_IS_EOS(b)) {
             ap_log_error(APLOG_MARK, APLOG_TRACE2, rv, fctx->cc->server,
                 "read_tls_to_rustls, EOS");
-            apr_brigade_cleanup(fctx->fin_tls_buffer_bb);
+            if (fctx->fin_tls_buffer_bb) {
+                apr_brigade_cleanup(fctx->fin_tls_buffer_bb);
+            }
             rv = APR_EOF; goto cleanup;
         }
 
@@ -150,13 +153,21 @@ static apr_status_t brigade_tls_from_rustls(
 
     if (rustls_server_session_wants_write(fctx->cc->rustls_session)) {
         do {
+            /* We need to offer rustls a buffer to place outgoing TLS data in.
+             * But how large should that be? Since we allocate it, we do
+             * not want this overly large. But it needs to be large enough, so
+             * that we can achieve maximum TLS record sizes whenever possible.
+             */
             blen = TLS_PREF_TLS_WRITE_SIZE;
             if (fctx->fout_bytes_in_rustls < (apr_off_t)(blen/2)) {
-                blen = (apr_size_t)fctx->fout_bytes_in_rustls + 1024L;
+                blen = (apr_size_t)fctx->fout_bytes_in_rustls + TLS_REC_EXTRA;
             }
-            else if (fctx->fout_bytes_in_rustls < TLS_MAX_BUCKET_SIZE) {
+            else if (fctx->fout_bytes_in_rustls <= TLS_MAX_BUCKET_SIZE) {
                 apr_size_t chunks = ((apr_size_t)fctx->fout_bytes_in_rustls / TLS_PREF_WRITE_SIZE);
                 blen = (chunks? chunks : 1) * TLS_PREF_TLS_WRITE_SIZE;
+            }
+            else {
+                blen = TLS_MAX_BUCKET_SIZE;
             }
 
             buffer = ap_calloc(blen, sizeof(char));
@@ -274,7 +285,7 @@ static apr_status_t filter_do_pre_handshake(
         /* We have seen the client hello and selected the server (vhost) to use
          * on this connection. Set up the 'real' rustls_session based on the
          * servers 'real' rustls_config. */
-        rv = tls_core_conn_server_init(fctx->c);
+        rv = tls_core_conn_init_server(fctx->c);
         if (APR_SUCCESS != rv) goto cleanup;
 
         bb_tmp = fctx->fin_tls_bb; /* data we have yet to feed to rustls */

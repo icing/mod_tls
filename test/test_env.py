@@ -215,7 +215,7 @@ class TlsTestEnv:
 
     @staticmethod
     def run(args: List[str]) -> ExecResult:
-        print("run: {0}".format(" ".join(args)))
+        log.debug("run: {0}", " ".join(args))
         start = datetime.now()
         p = subprocess.run(args, capture_output=True, text=True)
         # noinspection PyBroadException

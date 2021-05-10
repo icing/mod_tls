@@ -13,8 +13,10 @@
 #define TLS_FLAG_TRUE   (1)
 
 struct tls_proto_conf_t;
+struct tls_cert_reg_t;
 struct ap_socache_instance_t;
 struct ap_socache_provider_t;
+struct apr_global_mutex_t;
 
 /* The global module configuration, created after post-config
  * and then readonly.
@@ -25,11 +27,12 @@ typedef struct {
     struct tls_proto_conf_t *proto;   /* TLS protocol/rustls specific globals */
     apr_hash_t *var_lookups;          /* variable lookup functions by var name */
 
-    const char *session_cache_spec;   /* how the session cache was specified */
-    const struct ap_socache_provider_t *session_cache_provider;
-    struct ap_socache_instance_t *session_cache;
-    apr_global_mutex_t *session_cache_mutex;
+    struct tls_cert_reg_t *cert_reg;  /* all certified keys loaded in post-config */
 
+    const char *session_cache_spec;   /* how the session cache was specified */
+    const struct ap_socache_provider_t *session_cache_provider; /* provider used for session cache */
+    struct ap_socache_instance_t *session_cache; /* session cache instance */
+    struct apr_global_mutex_t *session_cache_mutex; /* global mutex for access to session cache */
 } tls_conf_global_t;
 
 /* The module configuration for a server (vhost).
@@ -37,18 +40,19 @@ typedef struct {
  * in the post config phase. Readonly after that.
  */
 typedef struct {
-    server_rec *server;         /* server this config belongs to */
-    const char *name;
+    server_rec *server;               /* server this config belongs to */
     tls_conf_global_t *global;        /* global module config, singleton */
 
-    int enabled;
-    apr_array_header_t *certificates; /* array of (tls_certificate_t*) available for server_rec */
+    int enabled;                      /* TLS_FLAG_TRUE if mod_tls is active on this server */
+    apr_array_header_t *cert_specs;   /* array of (tls_cert_spec_t*) of configured certificates */
     int tls_protocol_min;             /* the minimum TLS protocol version to use */
     apr_array_header_t *tls_pref_ciphers;  /* List of apr_uint16_t cipher ids to prefer */
     apr_array_header_t *tls_supp_ciphers;  /* List of apr_uint16_t cipher ids to suppress */
     int honor_client_order;           /* honor client cipher ordering */
     int strict_sni;
 
+    apr_array_header_t *certified_keys; /* rustls_certified_key list configured */
+    int base_server;                  /* != 0 iff this is the base server */
     int service_unavailable;          /* TLS not trustworthy configured, return 503s */
     const rustls_server_config *rustls_config; /* config to use for TLS against this very server */
 } tls_conf_server_t;

@@ -17,7 +17,8 @@
 #include <http_main.h>
 #include <ap_socache.h>
 
-#include "tls_defs.h"
+#include <crustls.h>
+
 #include "tls_proto.h"
 #include "tls_conf.h"
 #include "tls_util.h"
@@ -68,12 +69,11 @@ void *tls_conf_create_svr(apr_pool_t *pool, server_rec *s)
     tls_conf_server_t *conf;
 
     conf = apr_pcalloc(pool, sizeof(*conf));
-    conf->name = apr_pstrcat(pool, "srv[", CONF_S_NAME(s), "]", NULL);
     conf->global = conf_global_get_or_make(pool, s);
     conf->server = s;
 
     conf->enabled = TLS_FLAG_UNSET;
-    conf->certificates = apr_array_make(pool, 3, sizeof(tls_certificate_t*));
+    conf->cert_specs = apr_array_make(pool, 3, sizeof(tls_cert_spec_t*));
     conf->honor_client_order = TLS_FLAG_UNSET;
     conf->strict_sni = TLS_FLAG_UNSET;
     conf->tls_protocol_min = TLS_FLAG_UNSET;
@@ -92,13 +92,11 @@ void *tls_conf_merge_svr(apr_pool_t *pool, void *basev, void *addv)
     tls_conf_server_t *nconf;
 
     nconf = apr_pcalloc(pool, sizeof(*nconf));
-    nconf->name = apr_pstrcat(pool, "[", CONF_S_NAME(add->server),
-        ", ", CONF_S_NAME(base->server), "]", NULL);
     nconf->server = add->server;
     nconf->global = add->global? add->global : base->global;
 
     nconf->enabled = MERGE_INT(base, add, enabled);
-    nconf->certificates = apr_array_append(pool, base->certificates, add->certificates);
+    nconf->cert_specs = apr_array_append(pool, base->cert_specs, add->cert_specs);
     nconf->tls_protocol_min = MERGE_INT(base, add, tls_protocol_min);
     nconf->tls_pref_ciphers = add->tls_pref_ciphers->nelts?
         add->tls_pref_ciphers : base->tls_pref_ciphers;
@@ -149,7 +147,6 @@ apr_status_t tls_conf_server_apply_defaults(tls_conf_server_t *sc, apr_pool_t *p
     if (sc->tls_protocol_min == TLS_FLAG_UNSET) sc->tls_protocol_min = 0;
     if (sc->honor_client_order == TLS_FLAG_UNSET) sc->honor_client_order = TLS_FLAG_TRUE;
     if (sc->strict_sni == TLS_FLAG_UNSET) sc->strict_sni = TLS_FLAG_TRUE;
-
     return APR_SUCCESS;
 }
 
@@ -257,7 +254,7 @@ static const char *tls_conf_add_certificate(
 {
     tls_conf_server_t *sc = tls_conf_server_get(cmd->server);
     const char *err = NULL, *fpath;
-    tls_certificate_t *cert;
+    tls_cert_spec_t *cert;
 
     (void)dc;
     if (NULL != (err = cmd_check_file(cmd, cert_file))) goto cleanup;
@@ -279,7 +276,7 @@ static const char *tls_conf_add_certificate(
         }
     }
     cert->pkey_file = pkey_file;
-    *(const tls_certificate_t **)apr_array_push(sc->certificates) = cert;
+    *(const tls_cert_spec_t **)apr_array_push(sc->cert_specs) = cert;
 
 cleanup:
     return err;

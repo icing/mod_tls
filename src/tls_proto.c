@@ -14,7 +14,8 @@
 #include <http_core.h>
 #include <http_log.h>
 
-#include "tls_defs.h"
+#include <crustls.h>
+
 #include "tls_proto.h"
 #include "tls_conf.h"
 #include "tls_util.h"
@@ -24,11 +25,11 @@ APLOG_USE_MODULE(tls);
 
 
 apr_status_t tls_proto_load_pem(
-    apr_pool_t *p, tls_certificate_t *cert, tls_util_cert_pem_t **ppem)
+    apr_pool_t *p, const tls_cert_spec_t *cert, tls_cert_pem_t **ppem)
 {
     apr_status_t rv;
     const char *fpath;
-    tls_util_cert_pem_t *cpem;
+    tls_cert_pem_t *cpem;
 
     ap_assert(cert->cert_file);
     cpem = apr_pcalloc(p, sizeof(*cpem));
@@ -36,8 +37,7 @@ apr_status_t tls_proto_load_pem(
     if (NULL == fpath) {
         rv = APR_ENOENT; goto cleanup;
     }
-    rv = tls_util_file_load(p, fpath, 0, 100*1024,
-        (unsigned char**)&cpem->cert_pem_bytes, &cpem->cert_pem_len);
+    rv = tls_util_file_load(p, fpath, 0, 100*1024, &cpem->cert_pem);
     if (APR_SUCCESS != rv) goto cleanup;
 
     if (cert->pkey_file) {
@@ -45,34 +45,27 @@ apr_status_t tls_proto_load_pem(
         if (NULL == fpath) {
             rv = APR_ENOENT; goto cleanup;
         }
-        rv = tls_util_file_load(p, fpath, 0, 100*1024,
-            (unsigned char**)&cpem->pkey_pem_bytes, &cpem->pkey_pem_len);
+        rv = tls_util_file_load(p, fpath, 0, 100*1024, &cpem->pkey_pem);
         if (APR_SUCCESS != rv) goto cleanup;
     }
     else {
-        cpem->pkey_pem_bytes = cpem->cert_pem_bytes;
-        cpem->pkey_pem_len = cpem->cert_pem_len;
+        cpem->pkey_pem = cpem->cert_pem;
     }
 cleanup:
     *ppem = (APR_SUCCESS == rv)? cpem : NULL;
     return rv;
 }
 
-static void nullify_pems(tls_util_cert_pem_t *pems)
+static void nullify_key_pem(tls_cert_pem_t *pems)
 {
-    if (pems->cert_pem_bytes && pems->cert_pem_len) {
-        memset(pems->cert_pem_bytes, 0, pems->cert_pem_len);
-    }
-    if (pems->pkey_pem_bytes && pems->pkey_pem_len
-        && pems->pkey_pem_bytes != pems->cert_pem_bytes) {
-        memset(pems->pkey_pem_bytes, 0, pems->pkey_pem_len);
+    if (pems->pkey_pem.len) {
+        memset((void*)pems->pkey_pem.data, 0, pems->pkey_pem.len);
     }
 }
 
 static apr_status_t make_certified_key(
-    apr_pool_t *p, server_rec *s, const char *name,
-    const char *cert_pem, apr_size_t cert_len,
-    const char *pkey_pem, apr_size_t pkey_len,
+    apr_pool_t *p, const char *name,
+    const tls_data_t *cert_pem, const tls_data_t *pkey_pem,
     const rustls_certified_key **pckey)
 {
     const rustls_certified_key *ckey = NULL;
@@ -80,14 +73,14 @@ static apr_status_t make_certified_key(
     apr_status_t rv = APR_SUCCESS;
 
     rr = rustls_certified_key_build(
-        (const unsigned char*)cert_pem, cert_len,
-        (const unsigned char*)pkey_pem, pkey_len,
+        cert_pem->data, cert_pem->len,
+        pkey_pem->data, pkey_pem->len,
         &ckey);
 
     if (RUSTLS_RESULT_OK != rr) {
         const char *err_descr;
         rv = tls_util_rustls_error(p, rr, &err_descr);
-        ap_log_error(APLOG_MARK, APLOG_ERR, rv, s, APLOGNO()
+        ap_log_perror(APLOG_MARK, APLOG_ERR, rv, p, APLOGNO()
                      "Failed to load certified key %s: [%d] %s",
                      name, (int)rr, err_descr);
     }
@@ -101,29 +94,32 @@ static apr_status_t make_certified_key(
 }
 
 apr_status_t tls_proto_load_certified_key(
-    apr_pool_t *p, server_rec *s,
-    tls_certificate_t *spec, const rustls_certified_key **pckey)
+    apr_pool_t *p, const tls_cert_spec_t *spec,
+    const char **pcert_pem, const rustls_certified_key **pckey)
 {
     apr_status_t rv = APR_SUCCESS;
 
     if (spec->cert_file) {
-        tls_util_cert_pem_t *pems;
+        tls_cert_pem_t *pems;
 
         rv = tls_proto_load_pem(p, spec, &pems);
         if (APR_SUCCESS != rv) goto cleanup;
-        rv = make_certified_key(p, s, spec->cert_file,
-            pems->cert_pem_bytes, pems->cert_pem_len,
-            pems->pkey_pem_bytes, pems->pkey_pem_len,
-            pckey);
+        if (pcert_pem) *pcert_pem = tls_data_to_str(p, &pems->cert_pem);
+        rv = make_certified_key(p, spec->cert_file, &pems->cert_pem, &pems->pkey_pem, pckey);
         /* dont want them hanging around in memory unnecessarily. */
-        nullify_pems(pems);
+        nullify_key_pem(pems);
     }
     else if (spec->cert_pem) {
-        const char *pkey_pem = spec->pkey_pem? spec->pkey_pem : spec->cert_pem;
-        rv = make_certified_key(p, s, "memory",
-            spec->cert_pem, strlen(spec->cert_pem),
-            pkey_pem, strlen(pkey_pem),
-            pckey);
+        tls_data_t pkey_pem, pem;
+        pem = tls_data_from_str(spec->cert_pem);
+        if (spec->pkey_pem) {
+            pkey_pem = tls_data_from_str(spec->pkey_pem);
+        }
+        else {
+            pkey_pem = pem;
+        }
+        if (pcert_pem) *pcert_pem = spec->cert_pem;
+        rv = make_certified_key(p, "memory", &pem, &pkey_pem, pckey);
         /* pems provided from outside are responsibility of the caller */
     }
     else {
@@ -131,6 +127,126 @@ apr_status_t tls_proto_load_certified_key(
     }
 cleanup:
     return rv;
+}
+
+typedef struct {
+    const char *id;
+    const char *cert_pem;
+    server_rec *server;
+    const rustls_certified_key *certified_key;
+} tls_cert_reg_entry_t;
+
+static int reg_entry_cleanup(void *ctx, const void *key, apr_ssize_t klen, const void *val)
+{
+    tls_cert_reg_entry_t *entry = (tls_cert_reg_entry_t*)val;
+    (void)ctx; (void)key; (void)klen;
+    if (entry->certified_key) {
+        rustls_certified_key_free(entry->certified_key);
+        entry->certified_key = NULL;
+    }
+    return 1;
+}
+
+static apr_status_t reg_cleanup(void *data)
+{
+    tls_cert_reg_t *reg = data;
+    if (reg->id2entry) {
+        apr_hash_do(reg_entry_cleanup, reg, reg->id2entry);
+        apr_hash_clear(reg->id2entry);
+        if (reg->key2entry) apr_hash_clear(reg->key2entry);
+    }
+    return APR_SUCCESS;
+}
+
+tls_cert_reg_t *tls_cert_reg_make(apr_pool_t *p)
+{
+    tls_cert_reg_t *reg;
+
+    reg = apr_pcalloc(p, sizeof(*reg));
+    reg->pool = p;
+    reg->id2entry = apr_hash_make(p);
+    reg->key2entry = apr_hash_make(p);
+    apr_pool_cleanup_register(p, reg, reg_cleanup, apr_pool_cleanup_null);
+    return reg;
+}
+
+apr_size_t tls_cert_reg_count(tls_cert_reg_t *reg)
+{
+    return apr_hash_count(reg->id2entry);
+}
+
+static const char *cert_spec_to_id(const tls_cert_spec_t *spec)
+{
+    if (spec->cert_file) return spec->cert_file;
+    if (spec->cert_pem) return spec->cert_pem;
+    return NULL;
+}
+
+apr_status_t tls_cert_reg_get_certified_key(
+    tls_cert_reg_t *reg, server_rec *s, const tls_cert_spec_t *spec,
+    const rustls_certified_key **pckey)
+{
+    apr_status_t rv = APR_SUCCESS;
+    const char *id;
+    tls_cert_reg_entry_t *entry;
+
+    id = cert_spec_to_id(spec);
+    assert(id);
+    entry = apr_hash_get(reg->id2entry, id, APR_HASH_KEY_STRING);
+    if (!entry) {
+        const rustls_certified_key *certified_key;
+        const char *cert_pem;
+        rv = tls_proto_load_certified_key(reg->pool, spec, &cert_pem, &certified_key);
+        if (APR_SUCCESS != rv) goto cleanup;
+        entry = apr_pcalloc(reg->pool, sizeof(*entry));
+        entry->id = apr_pstrdup(reg->pool, id);
+        entry->cert_pem = cert_pem;
+        entry->server = s;
+        entry->certified_key = certified_key;
+        apr_hash_set(reg->id2entry, entry->id, APR_HASH_KEY_STRING, entry);
+        /* associates the pointer value */
+        apr_hash_set(reg->key2entry, &entry->certified_key, sizeof(entry->certified_key), entry);
+    }
+
+cleanup:
+    if (APR_SUCCESS == rv) {
+        *pckey = entry->certified_key;
+    }
+    else {
+        *pckey = NULL;
+    }
+    return rv;
+}
+
+typedef struct {
+    void *userdata;
+    tls_cert_reg_visitor *visitor;
+} reg_visit_ctx_t;
+
+static int reg_visit(void *vctx, const void *key, apr_ssize_t klen, const void *val)
+{
+    reg_visit_ctx_t *ctx = vctx;
+    tls_cert_reg_entry_t *entry = (tls_cert_reg_entry_t*)val;
+
+    (void)key; (void)klen;
+    return ctx->visitor(ctx->userdata, entry->server, entry->id, entry->cert_pem, entry->certified_key);
+}
+
+void tls_cert_reg_do(
+    tls_cert_reg_visitor *visitor, void *userdata, tls_cert_reg_t *reg)
+{
+    reg_visit_ctx_t ctx;
+    ctx.visitor = visitor;
+    ctx.userdata = userdata;
+    apr_hash_do(reg_visit, &ctx, reg->id2entry);
+}
+
+const char *tls_cert_reg_get_id(tls_cert_reg_t *reg, const rustls_certified_key *certified_key)
+{
+    tls_cert_reg_entry_t *entry;
+
+    entry = apr_hash_get(reg->key2entry, &certified_key, sizeof(certified_key));
+    return entry? entry->id : NULL;
 }
 
 /**

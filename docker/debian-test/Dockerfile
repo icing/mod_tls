@@ -4,15 +4,10 @@ RUN apt-get update; apt-get upgrade -y
 RUN apt-get install -y apt-listchanges \
       make openssl libssl-dev libcurl4 libcurl4-openssl-dev \
       gcc subversion git cargo python3 \
-      libapr1-dev libaprutil1-dev libnghttp2-dev pip
+      libapr1-dev libaprutil1-dev libnghttp2-dev pip \
+      autoconf libtool libtool-bin libpcre3-dev libjansson-dev curl rsync nghttp2-client
 
-RUN pip install pytest tqdm pycurl
-
-RUN apt-get install -y autoconf libtool libtool-bin
-RUN apt-get install -y libpcre3-dev libjansson-dev
-RUN apt-get install -y curl rsync
-
-RUN pip install cryptography
+RUN pip install pytest tqdm pycurl cryptography
 
 COPY docker/debian-test/bin/* /abetterinternet/bin/
 COPY configure.ac Makefile.am NEWS README* AUTHORS ChangeLog COPYING LICENSE /abetterinternet/mod_tls/
