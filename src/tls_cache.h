@@ -46,13 +46,9 @@ void tls_cache_init_child(apr_pool_t *p, server_rec *s);
 void tls_cache_free(server_rec *s);
 
 /**
- * Initialize the session store for the connections's config builder.
-
- * This needs to be done on the connection, and not globally or for a server,
- * since Apache's cache providers may make use of a pool which cannot be
- * global (leakage) nor would it be safe (pools are not thread safe).
+ * Initialize the session store for the server's config builder.
  */
-apr_status_t tls_cache_init_conn(
-    rustls_server_config_builder *builder, conn_rec *c);
+apr_status_t tls_cache_init_server(
+    rustls_server_config_builder *builder, server_rec *s);
 
 #endif /* tls_cache_h */
