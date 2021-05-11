@@ -33,6 +33,10 @@ typedef struct {
 
     const rustls_server_config *rustls_config; /* the config specially made for this connection or NULL */
     rustls_server_session *rustls_session; /* the session used on this connection or NULL */
+
+    apr_array_header_t *local_keys;   /* rustls_certified_key* array of connection specific keys */
+    const rustls_certified_key *key;  /* the key selected for the session */
+    int key_cloned;                   /* != 0 iff the key is a unique clone, to be freed */
     struct tls_filter_ctx_t *filter_ctx; /* the context used by this connection's tls filters */
 
     const char *sni_hostname;         /* the SNI value from the client hello, or NULL */

@@ -288,16 +288,15 @@ not_stored:
     return RUSTLS_RESULT_NOT_FOUND;
 }
 
-apr_status_t tls_cache_init_conn(
-    rustls_server_config_builder *builder, conn_rec *c)
+apr_status_t tls_cache_init_server(
+    rustls_server_config_builder *builder, server_rec *s)
 {
-    tls_conf_conn_t *cc = tls_conf_conn_get(c);
-    tls_conf_server_t *sc = cc? tls_conf_server_get(cc->server) : NULL;
+    tls_conf_server_t *sc = tls_conf_server_get(s);
 
     if (sc && sc->global->session_cache) {
-        ap_log_cerror(APLOG_MARK, APLOG_TRACE3, 0, c, "adding session persistance to rustls");
+        ap_log_error(APLOG_MARK, APLOG_TRACE3, 0, s, "adding session persistance to rustls");
         rustls_server_config_builder_set_persistence(
-            builder, c, tls_cache_get, tls_cache_put);
+            builder, tls_cache_get, tls_cache_put);
     }
     return APR_SUCCESS;
 }

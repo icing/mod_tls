@@ -35,6 +35,7 @@ typedef struct {
     apr_hash_t *var_lookups;          /* variable lookup functions by var name */
 
     struct tls_cert_reg_t *cert_reg;  /* all certified keys loaded in post-config */
+    const rustls_server_config *rustls_hello_config; /* config to use for initial client hello */
 
     const char *session_cache_spec;   /* how the session cache was specified */
     const struct ap_socache_provider_t *session_cache_provider; /* provider used for session cache */
