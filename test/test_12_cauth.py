@@ -58,17 +58,33 @@ class TestMD:
 
     def test_12_set_auth_required(self):
         conf = TlsTestConf(env=self.env)
-        conf.add_md_vhosts(domains=[self.env.domain_a, self.env.domain_b], extras={
-            self.env.domain_a: f"""
+        conf.add_md_vhosts(domains=[self.env.domain_b], extras={
+            self.env.domain_b: f"""
             TLSClientCertificate required
             TLSClientCA {self.clientsX.cert_file}
+            TLSOptions StdEnvVars
             """
         })
         conf.write()
         assert self.env.apache_restart() == 0
         # should be denied
-        r = self.env.https_get(domain=self.env.domain_a, paths="/index.json")
+        r = self.env.https_get(domain=self.env.domain_b, paths="/index.json")
         assert r.exit_code != 0, r.stdout
+        # should work
+        data = self.env.https_get_json(self.env.domain_b, "/index.json", extra_args=[
+            "--cert", self.clientsX.get_first("user1").cert_file
+        ])
+        assert data == {'domain': self.env.domain_b}
+        r = self.env.https_get(self.env.domain_b, "/vars.py?name=REMOTE_USER")
+        assert r.exit_code != 0, "should have been prevented"
+        r = self.env.https_get(self.env.domain_b, "/vars.py?name=SSL_CLIENT_S_DN_CN", extra_args=[
+            "--cert", self.clientsX.get_first("user1").cert_file
+        ])
+        assert r.exit_code == 0, r.stderr
+        assert r.json == {
+            'SSL_CLIENT_S_DN_CN': 'Not Implemented',
+        }, r.stdout
+
 
     def test_12_set_auth_optional(self):
         conf = TlsTestConf(env=self.env)

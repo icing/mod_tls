@@ -53,6 +53,12 @@ static const char *var_get_sni_hostname(const tls_var_lookup_ctx_t *ctx)
     return ctx->cc->sni_hostname;
 }
 
+static const char *var_get_client_s_dn_cn(const tls_var_lookup_ctx_t *ctx)
+{
+    /* TODO: we need rust code to disect a certificate DER data */
+    return ctx->cc->client_cert? "Not Implemented" : NULL;
+}
+
 #define VAR_ONLY_SSL    0x1
 
 typedef struct {
@@ -65,6 +71,7 @@ static const var_def_t VAR_DEFS[] = {
     { "SSL_PROTOCOL", var_get_ssl_protocol, VAR_ONLY_SSL },
     { "SSL_CIPHER", var_get_ssl_cipher, VAR_ONLY_SSL },
     { "SSL_TLS_SNI", var_get_sni_hostname, VAR_ONLY_SSL },
+    { "SSL_CLIENT_S_DN_CN", var_get_client_s_dn_cn, VAR_ONLY_SSL },
 };
 
 static const char *const TlsAlwaysVars[] = {
@@ -74,6 +81,7 @@ static const char *const TlsAlwaysVars[] = {
 static const char *const StdEnvVars[] = {
     "SSL_PROTOCOL",
     "SSL_CIPHER",
+    "SSL_CLIENT_S_DN_CN",
 };
 
 void tls_var_init_lookup_hash(apr_pool_t *pool, apr_hash_t *map)

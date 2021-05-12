@@ -67,3 +67,10 @@ class TestVars:
             'ssl_cipher': '',
         }, r.stdout
 
+    def test_08_vars_single(self):
+        r = self.env.https_get(self.env.domain_b, "/vars.py?name=SERVER_NAME")
+        assert r.exit_code == 0, r.stderr
+        assert r.json == {
+            'SERVER_NAME': 'b.mod-tls.test',
+        }, r.stdout
+

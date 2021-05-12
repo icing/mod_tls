@@ -360,6 +360,7 @@ static apr_status_t server_conf_setup(
     apr_pool_t *p, apr_pool_t *ptemp, tls_conf_server_t *sc, tls_cert_reg_t *cert_reg)
 {
     rustls_server_config_builder *builder = NULL;
+    const rustls_root_cert_store *ca_store = NULL;
     apr_array_header_t *cert_specs;
     rustls_result rr = RUSTLS_RESULT_OK;
     apr_status_t rv = APR_SUCCESS;
@@ -367,7 +368,26 @@ static apr_status_t server_conf_setup(
     (void)p;
     ap_log_error(APLOG_MARK, APLOG_TRACE1, rv, sc->server,
                  "init server: %s", sc->server->server_hostname);
-    builder = rustls_server_config_builder_new();
+    if (sc->client_auth != TLS_CLIENT_AUTH_NONE) {
+        if (!sc->client_ca) {
+            ap_log_error(APLOG_MARK, APLOG_ERR, 0, sc->server, APLOGNO()
+                         "TLSClientAuthentication is enabled for %s, but no client CA file is set. "
+                          "Use 'TLSClientCA <file>' to specify the trust anchors.",
+                         sc->server->server_hostname);
+            rv = APR_EINVAL; goto cleanup;
+        }
+        /* TODO: load it from a ca registry */
+        rv = tls_proto_load_root_cert_store(p, sc->client_ca, &ca_store);
+        if (APR_SUCCESS != rv) goto cleanup;
+
+        rr = rustls_server_config_builder_for_client_auth(
+            ca_store, sc->client_auth == TLS_CLIENT_AUTH_REQUIRED, &builder);
+        if (RUSTLS_RESULT_OK != rr) goto cleanup;
+    }
+    else {
+        builder = rustls_server_config_builder_new();
+    }
+
     if (!builder) {
         rv = APR_ENOMEM; goto cleanup;
     }
@@ -413,17 +433,6 @@ static apr_status_t server_conf_setup(
     rv = set_ciphers(ptemp, sc, builder);
     if (APR_SUCCESS != rv) goto cleanup;
 
-    if (sc->client_auth != TLS_CLIENT_AUTH_NONE) {
-        if (!sc->client_ca) {
-            ap_log_error(APLOG_MARK, APLOG_ERR, 0, sc->server, APLOGNO()
-                         "TLSClientAuthentication is enabled for %s, but no client CA file is set. "
-                          "Use 'TLSClientCA <file>' to specify the trust anchors.",
-                         sc->server->server_hostname);
-            rv = APR_EINVAL; goto cleanup;
-        }
-        /* TODO: load it from a ca registry */
-    }
-
     rr = rustls_server_config_builder_set_ignore_client_order(
         builder, sc->honor_client_order == TLS_FLAG_FALSE);
     if (RUSTLS_RESULT_OK != rr) goto cleanup;
@@ -448,9 +457,8 @@ static apr_status_t server_conf_setup(
     }
 
 cleanup:
-    if (builder != NULL) {
-        rustls_server_config_builder_free(builder);
-    }
+    if (builder) rustls_server_config_builder_free(builder);
+    if (ca_store) rustls_root_cert_store_free(ca_store);
     if (RUSTLS_RESULT_OK != rr) {
         const char *err_descr;
         rv = tls_util_rustls_error(ptemp, rr, &err_descr);

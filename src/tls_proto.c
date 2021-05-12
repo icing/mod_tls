@@ -249,6 +249,57 @@ const char *tls_cert_reg_get_id(tls_cert_reg_t *reg, const rustls_certified_key 
     return entry? entry->id : NULL;
 }
 
+apr_status_t tls_proto_load_root_cert_store(
+    apr_pool_t *p, const char *store_file, const rustls_root_cert_store **pstore)
+{
+    const char *fpath;
+    tls_data_t pem;
+    rustls_root_cert_store_builder *builder = NULL;
+    const rustls_root_cert_store *store = NULL;
+    rustls_result rr = RUSTLS_RESULT_OK;
+    apr_pool_t *ptemp = NULL;
+    apr_status_t rv;
+
+    ap_assert(store_file);
+
+    rv = apr_pool_create(&ptemp, p);
+    if (APR_SUCCESS != rv) goto cleanup;
+    apr_pool_tag(ptemp, "tls_load_root_cert_store");
+    fpath = ap_server_root_relative(ptemp, store_file);
+    if (NULL == fpath) {
+        rv = APR_ENOENT; goto cleanup;
+    }
+    /* we use this for client auth CAs. 1MB seems large enough. */
+    rv = tls_util_file_load(ptemp, fpath, 0, 1024*1024, &pem);
+    if (APR_SUCCESS != rv) goto cleanup;
+
+    builder = rustls_root_cert_store_builder_new();
+    rr = rustls_root_cert_store_builder_add_pem(builder, pem.data, pem.len, 1);
+    if (RUSTLS_RESULT_OK != rr) goto cleanup;
+
+    store = rustls_root_cert_store_builder_build(builder);
+    builder = NULL;
+
+cleanup:
+    if (RUSTLS_RESULT_OK != rr) {
+        const char *err_descr;
+        rv = tls_util_rustls_error(p, rr, &err_descr);
+        ap_log_perror(APLOG_MARK, APLOG_ERR, rv, p, APLOGNO()
+                     "Failed to load root store %s: [%d] %s",
+                     store_file, (int)rr, err_descr);
+    }
+    if (APR_SUCCESS == rv) {
+        *pstore = store;
+    }
+    else {
+        *pstore = NULL;
+        if (builder) rustls_root_cert_store_builder_free(builder);
+        if (store) rustls_root_cert_store_free(store);
+    }
+    if (ptemp) apr_pool_destroy(ptemp);
+    return rv;
+}
+
 /**
  * Known cipher as registered in
  * <https://www.iana.org/assignments/tls-parameters/tls-parameters.xhtml#tls-parameters-4>

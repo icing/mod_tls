@@ -115,6 +115,15 @@ void tls_cert_reg_do(
 const char *tls_cert_reg_get_id(tls_cert_reg_t *reg, const rustls_certified_key *certified_key);
 
 /**
+ * Load all root certificates from a PEM file into a rustls_root_cert_store.
+ * @param p the memory pool to use
+ * @param store_file the (server relative) path of the PEM file
+ * @param pstore the loaded root store on success
+ */
+apr_status_t tls_proto_load_root_cert_store(
+    apr_pool_t *p, const char *store_file, const rustls_root_cert_store **pstore);
+
+/**
  * Specification of a TLS cipher by name, possible alias and its 16 bit value
  * as assigned by IANA.
  */
