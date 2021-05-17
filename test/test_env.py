@@ -94,6 +94,16 @@ class TlsTestEnv:
         CertificateSpec(name="clientsX", sub_specs=[
             CertificateSpec(dn=[("ou", "clientsX"), ("cn", "user1")], single_file=True),
             CertificateSpec(dn=[("ou", "clientsX"), ("cn", "user2")], single_file=True),
+            CertificateSpec(dn=[("ou", "clientsX"), ("cn", "user_expired")],
+                            single_file=True, valid_from=timedelta(days=-91),
+                            valid_to=timedelta(days=-1)),
+        ]),
+        CertificateSpec(name="clientsY", sub_specs=[
+            CertificateSpec(dn=[("ou", "clientsY"), ("cn", "user1")], single_file=True),
+            CertificateSpec(dn=[("ou", "clientsY"), ("cn", "user2")], single_file=True),
+            CertificateSpec(dn=[("ou", "clientsY"), ("cn", "user_expired")],
+                            single_file=True, valid_from=timedelta(days=-91),
+                            valid_to=timedelta(days=-1)),
         ]),
     ]
     CA = None

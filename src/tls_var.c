@@ -59,29 +59,26 @@ static const char *var_get_client_s_dn_cn(const tls_var_lookup_ctx_t *ctx)
     return ctx->cc->client_cert? "Not Implemented" : NULL;
 }
 
-#define VAR_ONLY_SSL    0x1
-
 typedef struct {
     const char *name;
     var_lookup* fn;
-    int flags;
 } var_def_t;
 
 static const var_def_t VAR_DEFS[] = {
-    { "SSL_PROTOCOL", var_get_ssl_protocol, VAR_ONLY_SSL },
-    { "SSL_CIPHER", var_get_ssl_cipher, VAR_ONLY_SSL },
-    { "SSL_TLS_SNI", var_get_sni_hostname, VAR_ONLY_SSL },
-    { "SSL_CLIENT_S_DN_CN", var_get_client_s_dn_cn, VAR_ONLY_SSL },
+    { "SSL_PROTOCOL", var_get_ssl_protocol },
+    { "SSL_CIPHER", var_get_ssl_cipher },
+    { "SSL_TLS_SNI", var_get_sni_hostname },
+    { "SSL_CLIENT_S_DN_CN", var_get_client_s_dn_cn },
 };
 
 static const char *const TlsAlwaysVars[] = {
     "SSL_TLS_SNI",
-};
-
-static const char *const StdEnvVars[] = {
     "SSL_PROTOCOL",
     "SSL_CIPHER",
     "SSL_CLIENT_S_DN_CN",
+};
+
+static const char *const StdEnvVars[] = {
 };
 
 void tls_var_init_lookup_hash(apr_pool_t *pool, apr_hash_t *map)
@@ -98,10 +95,12 @@ void tls_var_init_lookup_hash(apr_pool_t *pool, apr_hash_t *map)
 
 static const char *invoke(var_def_t* def, const tls_var_lookup_ctx_t *ctx)
 {
-    if ((def->flags&VAR_ONLY_SSL) && (!ctx->cc || (ctx->cc->state == TLS_CONN_ST_IGNORED))) {
-        return NULL;
+    if (ctx->cc && (ctx->cc->state != TLS_CONN_ST_IGNORED)) {
+        const char *val = ctx->cc->subprocess_env?
+            apr_table_get(ctx->cc->subprocess_env, def->name) : NULL;
+        return (val && *val)? val : def->fn(ctx);
     }
-    return def->fn(ctx);
+    return NULL;
 }
 
 static void set_var(
@@ -145,6 +144,37 @@ const char *tls_var_lookup(
     return val;
 }
 
+apr_status_t tls_var_handshake_done(conn_rec *c)
+{
+    tls_conf_conn_t *cc;
+    apr_status_t rv = APR_SUCCESS;
+    apr_table_t *env = NULL;
+    tls_conf_server_t *sc;
+    tls_var_lookup_ctx_t ctx;
+    apr_size_t i;
+
+    cc = tls_conf_conn_get(c);
+    if (!cc || (TLS_CONN_ST_IGNORED == cc->state)) goto cleanup;
+
+    sc = tls_conf_server_get(cc->server);
+    env = apr_table_make(c->pool, 5);
+    ctx.p = c->pool;
+    ctx.s = cc->server;
+    ctx.c = c;
+    ctx.r = NULL;
+    ctx.cc = cc;
+
+    apr_table_setn(env, "HTTPS", "on");
+    for (i = 0; i < TLS_DIM(TlsAlwaysVars); ++i) {
+        ctx.name = TlsAlwaysVars[i];
+        set_var(&ctx, sc->global->var_lookups, env);
+    }
+
+cleanup:
+    cc->subprocess_env = (APR_SUCCESS == rv)? env : NULL;
+    return rv;
+}
+
 int tls_var_request_fixup(request_rec *r)
 {
     conn_rec *c = r->connection;
@@ -157,21 +187,18 @@ int tls_var_request_fixup(request_rec *r)
     cc = tls_conf_conn_get(c->master? c->master : c);
     if (!cc || (TLS_CONN_ST_IGNORED == cc->state)) goto cleanup;
 
-    apr_table_setn(r->subprocess_env, "HTTPS", "on");
-
-    sc = tls_conf_server_get(cc->server);
-    ctx.p = r->pool;
-    ctx.s = cc->server;
-    ctx.c = c;
-    ctx.r = r;
-    ctx.cc = cc;
-
-    for (i = 0; i < TLS_DIM(TlsAlwaysVars); ++i) {
-        ctx.name = TlsAlwaysVars[i];
-        set_var(&ctx, sc->global->var_lookups, r->subprocess_env);
+    if (cc->subprocess_env) {
+        apr_table_overlap(r->subprocess_env, cc->subprocess_env, APR_OVERLAP_TABLES_SET);
     }
 
     if (dc->std_env_vars == TLS_FLAG_TRUE) {
+        sc = tls_conf_server_get(cc->server);
+        ctx.p = r->pool;
+        ctx.s = cc->server;
+        ctx.c = c;
+        ctx.r = r;
+        ctx.cc = cc;
+
         for (i = 0; i < TLS_DIM(StdEnvVars); ++i) {
             ctx.name = StdEnvVars[i];
             set_var(&ctx, sc->global->var_lookups, r->subprocess_env);

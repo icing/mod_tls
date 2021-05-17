@@ -17,7 +17,13 @@ const char *tls_var_lookup(
     apr_pool_t *p, server_rec *s, conn_rec *c, request_rec *r, const char *name);
 
 /**
- * A request is ready for processing, add some TLS flavours (if this is on a TLS connection)
+ * A connection has been handshaked. Prepare commond TLS variables on this connection.
+ */
+apr_status_t tls_var_handshake_done(conn_rec *c);
+
+/**
+ * A request is ready for processing, add TLS variables r->subprocess_env if applicable.
+ * This is a hook function returning OK/DECLINED.
  */
 int tls_var_request_fixup(request_rec *r);
 

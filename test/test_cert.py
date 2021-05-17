@@ -49,6 +49,8 @@ class CertificateSpec:
     def __init__(self, name: str = None, domains: List[str] = None,
                  dn: List[Tuple[str, str]] = None, email: str = None,
                  key_type: str = None, single_file: bool = False,
+                 valid_from: timedelta = timedelta(days=-1),
+                 valid_to: timedelta = timedelta(days=89),
                  sub_specs: List['CertificateSpec'] = None):
         self.name = name
         self.dn = dn
@@ -56,6 +58,8 @@ class CertificateSpec:
         self.email = email
         self.key_type = key_type
         self.single_file = single_file
+        self.valid_from = valid_from
+        self.valid_to = valid_to
         self.sub_specs = sub_specs
 
 
@@ -126,7 +130,9 @@ class Credentials:
 
     def issue_cert(self, spec: CertificateSpec) -> 'Credentials':
         cert = TlsTestCA.create_credentials(spec=spec, issuer=self,
-                                            key_type=spec.key_type if spec.key_type else self.key_type)
+                                            key_type=spec.key_type if spec.key_type else self.key_type,
+                                            valid_from=spec.valid_from, valid_to=spec.valid_to
+                                            )
         if self._store:
             self._store.save(cert, single_file=spec.single_file)
         if spec.sub_specs:
@@ -189,22 +195,31 @@ class TlsTestCA:
         return cert
 
     @staticmethod
-    def create_credentials(spec: CertificateSpec, issuer: Credentials, key_type: Any) -> Credentials:
+    def create_credentials(spec: CertificateSpec, issuer: Credentials, key_type: Any,
+                           valid_from: timedelta = timedelta(days=-1),
+                           valid_to: timedelta = timedelta(days=89),
+                           ) -> Credentials:
         """Create a certificate signed by this CA for the given domains.
         :returns: the certificate and private key PEM file paths
         """
         if spec.domains and len(spec.domains):
             creds = TlsTestCA._make_server_credentials(domains=spec.domains,
                                                        issuer=issuer,
+                                                       valid_from=valid_from,
+                                                       valid_to=valid_to,
                                                        key_type=key_type)
         elif spec.dn and len(spec.dn):
             creds = TlsTestCA._make_client_credentials(dn=spec.dn,
                                                        issuer=issuer,
                                                        email=spec.email,
+                                                       valid_from=valid_from,
+                                                       valid_to=valid_to,
                                                        key_type=key_type)
         elif spec.name:
             creds = TlsTestCA._make_ca_credentials(name=spec.name,
                                                    issuer=issuer,
+                                                   valid_from=valid_from,
+                                                   valid_to=valid_to,
                                                    key_type=key_type)
         else:
             raise Exception(f"unrecognized certificate specification: {spec}")
@@ -329,7 +344,10 @@ class TlsTestCA:
 
     @staticmethod
     def _make_ca_credentials(name, key_type: Any,
-                             issuer: Credentials = None) -> Credentials:
+                             issuer: Credentials = None,
+                             valid_from: timedelta = timedelta(days=-1),
+                             valid_to: timedelta = timedelta(days=89),
+                             ) -> Credentials:
         pkey = _private_key(key_type=key_type)
         if issuer is not None:
             issuer_subject = issuer.certificate.subject
@@ -338,10 +356,8 @@ class TlsTestCA:
             issuer_subject = None
             issuer_key = pkey
         csr = TlsTestCA._make_csr(name=name,
-                             issuer_subject=issuer_subject,
-                             pkey=pkey,
-                             valid_from_delta=timedelta(days=-1),
-                             valid_until_delta=timedelta(days=89))
+                                  issuer_subject=issuer_subject, pkey=pkey,
+                                  valid_from_delta=valid_from, valid_until_delta=valid_to)
         csr = TlsTestCA._add_ca_usages(csr)
         cert = csr.sign(private_key=issuer_key,
                         algorithm=hashes.SHA256(),
@@ -350,14 +366,15 @@ class TlsTestCA:
 
     @staticmethod
     def _make_server_credentials(domains: List[str], issuer: Credentials,
-                                 key_type: Any) -> Credentials:
+                                 key_type: Any,
+                                 valid_from: timedelta = timedelta(days=-1),
+                                 valid_to: timedelta = timedelta(days=89),
+                                 ) -> Credentials:
         name = domains[0]
         pkey = _private_key(key_type=key_type)
         csr = TlsTestCA._make_csr(name,
-                             issuer_subject=issuer.certificate.subject,
-                             pkey=pkey,
-                             valid_from_delta=timedelta(days=-1),
-                             valid_until_delta=timedelta(days=89))
+                                  issuer_subject=issuer.certificate.subject, pkey=pkey,
+                                  valid_from_delta=valid_from, valid_until_delta=valid_to)
         csr = TlsTestCA._add_leaf_usages(csr, domains=domains, issuer=issuer)
         cert = csr.sign(private_key=issuer.private_key,
                         algorithm=hashes.SHA256(),
@@ -367,14 +384,15 @@ class TlsTestCA:
     @staticmethod
     def _make_client_credentials(dn: List[Tuple[str, str]],
                                  issuer: Credentials, email: Optional[str],
-                                 key_type: Any) -> Credentials:
+                                 key_type: Any,
+                                 valid_from: timedelta = timedelta(days=-1),
+                                 valid_to: timedelta = timedelta(days=89),
+                                 ) -> Credentials:
         pkey = _private_key(key_type=key_type)
         name = dn[-1][1].replace(' ', '_')
         csr = TlsTestCA._make_csr(", ".join([f"{n[0]}={n[1]}" for n in dn]),
-                             issuer_subject=issuer.certificate.subject,
-                             pkey=pkey,
-                             valid_from_delta=timedelta(days=-1),
-                             valid_until_delta=timedelta(days=89))
+                                  issuer_subject=issuer.certificate.subject, pkey=pkey,
+                                  valid_from_delta=valid_from, valid_until_delta=valid_to)
         csr = TlsTestCA._add_client_usages(csr, issuer=issuer, rfc82name=email)
         cert = csr.sign(private_key=issuer.private_key,
                         algorithm=hashes.SHA256(),

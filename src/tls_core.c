@@ -27,6 +27,7 @@
 #include "tls_ocsp.h"
 #include "tls_util.h"
 #include "tls_cache.h"
+#include "tls_var.h"
 
 
 extern module AP_MODULE_DECLARE_DATA tls_module;
@@ -885,6 +886,8 @@ apr_status_t tls_core_conn_post_handshake(conn_rec *c)
               "A client certificate is required, but no acceptable certificate was presented.");
         rv = APR_ECONNABORTED;
     }
+
+    rv = tls_var_handshake_done(c);
 cleanup:
     return rv;
 }
@@ -945,5 +948,18 @@ int tls_core_request_check(request_rec *r)
         goto cleanup;
     }
 cleanup:
+    return rv;
+}
+
+apr_status_t tls_core_error(conn_rec *c, rustls_result rr, const char **perrstr)
+{
+    tls_conf_conn_t *cc = tls_conf_conn_get(c);
+    apr_status_t rv;
+
+    rv = tls_util_rustls_error(c->pool, rr, perrstr);
+    if (cc) {
+        cc->last_error = rr;
+        cc->last_error_descr = *perrstr;
+    }
     return rv;
 }

@@ -51,7 +51,7 @@ int tls_filter_conn_init(conn_rec *c);
  * "For TLS 1.2 and earlier, that limit is 2^14 octets. TLS 1.3 uses a limit of
  * 2^14+1 octets."
  * Maybe future TLS versions will raise that value, but for now these limits stand.
- * Given the choice, we would like rustls to provide with traffic data in those chunks.
+ * Given the choice, we would like rustls to provide traffic data in those chunks.
  */
 #define TLS_PREF_WRITE_SIZE       (16384)
 
