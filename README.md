@@ -111,7 +111,7 @@ The following configuration directives are available once `mod_tls` is loaded in
 
  * `TLSHonorClientOrder on|off` to pay attention to the order of ciphers supported by the client. This is `on` by default.
 
- * `TLSOptions [+|-]StdEnvVars` this is analog to `SSLOptions` in `mod_ssl` and only relevant if you want to have certain TLS connection properties visible to request processing. This can be set per directory/location.
+ * `TLSOptions [+|-]StdEnvVars` this is analog to `SSLOptions` in `mod_ssl` and only relevant if you want to have certain TLS connection variables visible to request processing (see [Variables](#variables) below). This can be set per directory/location.
 
  * `TLSStrictSNI on|off` to enforce exact matches of client server indicators (SNI) against host names. Client connections will be unsuccessful if no match is found. This is `on` by default.
 
@@ -180,8 +180,30 @@ If you suppress all ciphers supported for a TLS protocol version, that version i
 The versions of `crustls` binding and the `rustls` library are logged by `mod_tls` at level `INFO` at server startup. Configure `LogLevel tls:info` and you will see something like:
 
 ```
-[date time] [tls:info] [pid] mod_tls (v0.1.0, crustls=crustls/0.3.0/rustls/0.19.0), initializing...
+[date time] [tls:info] [pid] mod_tls/0.5.0 (crustls=crustls/0.5.0/rustls/0.19.0), initializing...
 ```
 
 in your server log.
+
+### Variables
+
+Like `mod_ssl` the module supports variables in the request environment (e.g. forwarded to CGI processing). There is a small set of variables that will always be set and a larger one that is only added when `TLSOptions StdEnvVars` is configured.
+
+*Variable*       | Always | *Description*
+-----------------|:------:|--------------
+SSL\_TLS_SNI     |  x     | the server name indicator (SNI) send by the client
+SSL\_PROTOCOL     |  x    | the TLS protocol negotiated (TLSv1.2, TLSv1.3)
+SSL\_CIPHER       |  x    | the name of the TLS cipher negotiated
+SSL\_VERSION_INTERFACE |  | the module version as `mod_tls/n.n.n`
+SSL\_VERSION_LIBRARY |    | the rustls version as `crustls/n.n.n/rustls/n.n.n` 
+SSL\_SECURE_RENEG |       | always `false` since rustls does not support that feature
+SSL\_COMPRESS_METHOD|     | always `NULL` since rustls does not support that feature
+SSL\_CIPHER_EXPORT |      | always `false` as rustls does not support such ciphers
+SSL\_CLIENT_VERIFY |      | either `SUCCESS` when a valid client certificate was presented or `NONE`
+SSL\_SESSION_RESUMED |    | either `Resumed` if a known TLS session id was presented by the client or `Initial` otherwise
+
+The variables exposing several fields in the client and server certiticate, such as `SSL_CLIENT_S_DN_CN` are not
+supported at the moment, as crustls is missing code to parse x.509 certificates.
+
+The variable `SSL_SESSION_ID` is intentionally not supported as it contains sensitive information.
 
