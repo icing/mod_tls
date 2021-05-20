@@ -1,3 +1,4 @@
+ * Supporting more variables as defined in mod_ssl. Adding test cases for those.
  * Adapted the the recent additions in crustls for client verifiers.
    Keeping central registry of cert stores and verifiers, released when
    configuration of servers is done.

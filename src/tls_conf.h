@@ -32,6 +32,8 @@ typedef enum {
  */
 typedef struct {
     server_rec *ap_server;            /* the gobal server we initialized on */
+    const char *module_version;
+    const char *crustls_version;
     server_addr_rec *tls_addresses;   /* the addresses/port we are active on */
     struct tls_proto_conf_t *proto;   /* TLS protocol/rustls specific globals */
     apr_hash_t *var_lookups;          /* variable lookup functions by var name */

@@ -63,10 +63,16 @@ static apr_status_t tls_post_config(apr_pool_t *p, apr_pool_t *plog,
                                     apr_pool_t *ptemp, server_rec *s)
 {
     const char *tls_init_key = "mod_tls_init_counter";
+    tls_conf_server_t *sc;
     void *data = NULL;
 
     (void)p;
     (void)plog;
+    sc = tls_conf_server_get(s);
+    assert(sc);
+    assert(sc->global);
+    sc->global->module_version = "mod_tls/" MOD_TLS_VERSION;
+    sc->global->crustls_version = crustls_version(p);
 
     apr_pool_userdata_get(&data, tls_init_key, s->process->pool);
     if (data == NULL) {
@@ -79,8 +85,9 @@ static apr_status_t tls_post_config(apr_pool_t *p, apr_pool_t *plog,
     }
     else {
         ap_log_error(APLOG_MARK, APLOG_INFO, 0, s, APLOGNO()
-                     "mod_tls (v%s, crustls=%s), initializing...",
-                     MOD_TLS_VERSION, crustls_version(ptemp));
+                     "%s (%s), initializing...",
+                     sc->global->module_version,
+                     sc->global->crustls_version);
     }
 
     return tls_core_init(p, ptemp, s);

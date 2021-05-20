@@ -47,6 +47,7 @@ typedef struct {
     apr_uint16_t tls_cipher_id;       /* the TLS cipher suite negotiated */
     const char *tls_cipher_name;      /* the name of TLS cipher suite negotiated */
     const rustls_certificate *client_cert; /* handshaked client ceritificate or NULL */
+    int session_id_cache_hit;         /* if a submitted session id was found in our cache */
 
     apr_table_t *subprocess_env;      /* common TLS variables for this connection */
 

@@ -447,7 +447,7 @@ class MultiFileLoadTest(LoadTestCase):
 
     def format_result(self, summary: H2LoadLogSummary) -> str:
         return "{0:.1f}".format(
-            summary.response_count / summary.duration.total_seconds() / self._clients
+            summary.response_count / summary.duration.total_seconds()
         ), summary.get_footnote()
 
 
@@ -727,7 +727,7 @@ class LoadTest:
                     ],
                 }),
                 "1k-files": cls.scenario_with(scenario_mf, {
-                    "title": "1k files, 1k-10MB, *conn, 10k req, (req/s/conn)",
+                    "title": "1k files, 1k-10MB, *conn, 10k req, (req/s)",
                     "clients": 1,
                     "columns": [
                         {"clients": 1},
@@ -740,7 +740,7 @@ class LoadTest:
                     ],
                 }),
                 "1m-reqs": cls.scenario_with(scenario_mf, {
-                    "title": "1m requests, 1k files, 1k-10MB, (req/s/conn)",
+                    "title": "1m requests, 1k files, 1k-10MB, (req/s)",
                     "clients": 1,
                     "requests": 1000000,
                     "columns": [

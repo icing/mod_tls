@@ -10,13 +10,12 @@ This project is sponsored by the [ISRG](https://www.abetterinternet.org).
 
 ## Status
 
-In development. The module currently only works with an patched [crustls](https://github.com/abetterinternet/crustls),
+In development. The module's `master` branch follows the `main` branch of [crustls](https://github.com/abetterinternet/crustls),
 the `C` binding for the `rustls` crate and the `trunk` version of the Apache httpd server.
 
 Apache `trunk` has received patches that allow two (or more) SSL providing modules
 to be loaded and active on the same server. This required an extension of the core
-API which is currently in trunk after review by the team. The goal is to propose
-these changes for backport into a 2.4.x version when this becomes stabilized.
+API which has become part of the 2.4.48 release..
 
 `mod_tls` supports:
  
@@ -27,16 +26,16 @@ these changes for backport into a 2.4.x version when this becomes stabilized.
  * cipher suppression. You may specify ciphers that are never used. All unmentioned ciphers remain active.
  * cipher client order disregard. By default, the order of client supplied ciphers is honored.
  * option to forward certain variables, such as `SSL_CIPHER` and `SSL_PROTOCOL` to request processing.
+ * interworking with Apache's module `mod_md` for Let's Encrypt (ACME) certificates and OCSP stapling.
 
 `mod_tls` currently does **not** support:
  
   * client certificates
   * backend connections (via `mod_proxy`)
-  * OCSP Stapling 
 
 ## Platforms
 
- * Apache trunk (2.4.x is the intended target later)
+ * Apache trunk and 2.4.48 or later
  * OS: wherever apache and (c)rustls are available
  * build system: autoconf/automake
 
@@ -59,7 +58,6 @@ Run the usual autoconf/automake magic incantations.
 There is now support for building a Docker image based on `debian sid` to run the test suite in.
 
 ```
-> cd mod_tls
 > docker-compose build debian-test
 > docker-compose run debian-test
 ```

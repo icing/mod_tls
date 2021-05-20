@@ -244,6 +244,7 @@ static rustls_result tls_cache_get(
 
     tls_cache_unlock(sc->global);
     if (APR_SUCCESS != rv) goto not_found;
+    cc->session_id_cache_hit = 1;
     *out_n = count;
     return RUSTLS_RESULT_OK;
 
@@ -276,9 +277,8 @@ static rustls_result tls_cache_put(
                                                    kdata, klen, expires_at,
                                                    (unsigned char*)val->data, vlen, c->pool);
     if (APLOGctrace4(c)) {
-        apr_ssize_t n = klen;
-        ap_log_cerror(APLOG_MARK, APLOG_TRACE4, rv, c, "stored key %d[%8x], with %d val",
-            klen, apr_hashfunc_default((const char*)kdata, &n), vlen);
+        ap_log_cerror(APLOG_MARK, APLOG_TRACE4, rv, c,
+            "stored %d key bytes, with %d val bytes", klen, vlen);
     }
     tls_cache_unlock(sc->global);
     if (APR_SUCCESS != rv) goto not_stored;

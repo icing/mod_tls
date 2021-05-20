@@ -1,7 +1,7 @@
-import json
-import sys
-import time
+import re
 from datetime import timedelta
+
+import pytest
 
 from test_env import TlsTestEnv
 from test_conf import TlsTestConf
@@ -20,6 +20,7 @@ class TestVars:
             'base': """
             LogLevel tls:trace4
             TLSHonorClientOrder off
+            TLSOptions +StdEnvVars
             """,
         })
         conf.write()
@@ -49,10 +50,25 @@ class TestVars:
             'ssl_cipher': exp_cipher,
         }, r.stdout
 
-    def test_08_vars_single(self):
-        r = self.env.https_get(self.env.domain_b, "/vars.py?name=SERVER_NAME")
+    @pytest.mark.parametrize("name, value", [
+        ("SERVER_NAME", "b.mod-tls.test"),
+        ("SSL_SESSION_RESUMED", "Initial"),
+        ("SSL_SECURE_RENEG", "false"),
+        ("SSL_COMPRESS_METHOD", "NULL"),
+        ("SSL_CIPHER_EXPORT", "false"),
+        ("SSL_CLIENT_VERIFY", "NONE"),
+    ])
+    def test_08_vars_const(self, name: str, value: str):
+        r = self.env.https_get(self.env.domain_b, f"/vars.py?name={name}")
         assert r.exit_code == 0, r.stderr
-        assert r.json == {
-            'SERVER_NAME': 'b.mod-tls.test',
-        }, r.stdout
+        assert r.json == { name: value }, r.stdout
 
+    @pytest.mark.parametrize("name, pattern", [
+        ("SSL_VERSION_INTERFACE", r'mod_tls/\d+\.\d+\.\d+'),
+        ("SSL_VERSION_LIBRARY", r'crustls/\d+\.\d+\.\d+/rustls/\d+\.\d+\.\d+'),
+    ])
+    def test_08_vars_match(self, name: str, pattern: str):
+        r = self.env.https_get(self.env.domain_b, f"/vars.py?name={name}")
+        assert r.exit_code == 0, r.stderr
+        assert name in r.json
+        assert re.match(pattern, r.json[name]), r.json

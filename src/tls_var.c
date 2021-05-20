@@ -22,6 +22,7 @@
 #include "tls_core.h"
 #include "tls_util.h"
 #include "tls_var.h"
+#include "tls_version.h"
 
 
 extern module AP_MODULE_DECLARE_DATA tls_module;
@@ -53,10 +54,44 @@ static const char *var_get_sni_hostname(const tls_var_lookup_ctx_t *ctx)
     return ctx->cc->sni_hostname;
 }
 
+static const char *var_get_version_interface(const tls_var_lookup_ctx_t *ctx)
+{
+    tls_conf_server_t *sc = tls_conf_server_get(ctx->s);
+    return sc->global->module_version;
+}
+
+static const char *var_get_version_library(const tls_var_lookup_ctx_t *ctx)
+{
+    tls_conf_server_t *sc = tls_conf_server_get(ctx->s);
+    return sc->global->crustls_version;
+}
+
+static const char *var_get_false(const tls_var_lookup_ctx_t *ctx)
+{
+    (void)ctx;
+    return "false";
+}
+
+static const char *var_get_null(const tls_var_lookup_ctx_t *ctx)
+{
+    (void)ctx;
+    return "NULL";
+}
+
 static const char *var_get_client_s_dn_cn(const tls_var_lookup_ctx_t *ctx)
 {
     /* TODO: we need rust code to disect a certificate DER data */
     return ctx->cc->client_cert? "Not Implemented" : NULL;
+}
+
+static const char *var_get_client_verify(const tls_var_lookup_ctx_t *ctx)
+{
+    return ctx->cc->client_cert? "SUCCESS" : "NONE";
+}
+
+static const char *var_get_session_resumed(const tls_var_lookup_ctx_t *ctx)
+{
+    return ctx->cc->session_id_cache_hit? "Resumed" : "Initial";
 }
 
 typedef struct {
@@ -69,6 +104,13 @@ static const var_def_t VAR_DEFS[] = {
     { "SSL_CIPHER", var_get_ssl_cipher },
     { "SSL_TLS_SNI", var_get_sni_hostname },
     { "SSL_CLIENT_S_DN_CN", var_get_client_s_dn_cn },
+    { "SSL_VERSION_INTERFACE", var_get_version_interface },
+    { "SSL_VERSION_LIBRARY", var_get_version_library },
+    { "SSL_SECURE_RENEG", var_get_false },
+    { "SSL_COMPRESS_METHOD", var_get_null },
+    { "SSL_CIPHER_EXPORT", var_get_false },
+    { "SSL_CLIENT_VERIFY", var_get_client_verify },
+    { "SSL_SESSION_RESUMED", var_get_session_resumed },
 };
 
 static const char *const TlsAlwaysVars[] = {
@@ -78,7 +120,36 @@ static const char *const TlsAlwaysVars[] = {
     "SSL_CLIENT_S_DN_CN",
 };
 
+/* what mod_ssl defines, plus server cert and client cert DN and SAN entries */
 static const char *const StdEnvVars[] = {
+    "SSL_VERSION_INTERFACE", /* implemented: module version string */
+    "SSL_VERSION_LIBRARY",   /* implemented: crustls/rustls version string */
+    "SSL_SECURE_RENEG",      /* implemented: always "false" */
+    "SSL_COMPRESS_METHOD",   /* implemented: always "NULL" */
+    "SSL_CIPHER_EXPORT",     /* implemented: always "false" */
+    "SSL_CIPHER_USEKEYSIZE",
+    "SSL_CIPHER_ALGKEYSIZE",
+    "SSL_CLIENT_VERIFY",     /* implemented: always "SUCCESS" or "NONE" */
+    "SSL_CLIENT_M_VERSION",
+    "SSL_CLIENT_M_SERIAL",
+    "SSL_CLIENT_V_START",
+    "SSL_CLIENT_V_END",
+    "SSL_CLIENT_V_REMAIN",
+    "SSL_CLIENT_S_DN",
+    "SSL_CLIENT_I_DN",
+    "SSL_CLIENT_A_KEY",
+    "SSL_CLIENT_A_SIG",
+    "SSL_CLIENT_CERT_RFC4523_CEA",
+    "SSL_SERVER_M_VERSION",
+    "SSL_SERVER_M_SERIAL",
+    "SSL_SERVER_V_START",
+    "SSL_SERVER_V_END",
+    "SSL_SERVER_S_DN",
+    "SSL_SERVER_I_DN",
+    "SSL_SERVER_A_KEY",
+    "SSL_SERVER_A_SIG",
+    "SSL_SESSION_ID",        /* not implemented: highly sensitive data we do not expose */
+    "SSL_SESSION_RESUMED",   /* implemented: if our cache was hit successfully */
 };
 
 void tls_var_init_lookup_hash(apr_pool_t *pool, apr_hash_t *map)
