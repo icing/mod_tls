@@ -22,11 +22,13 @@
 #include <crustls.h>
 
 #include "tls_proto.h"
+#include "tls_cert.h"
 #include "tls_conf.h"
 #include "tls_core.h"
 #include "tls_ocsp.h"
 #include "tls_util.h"
 #include "tls_cache.h"
+#include "tls_var.h"
 
 
 extern module AP_MODULE_DECLARE_DATA tls_module;
@@ -140,7 +142,7 @@ static apr_status_t use_local_key(
     memset(&spec, 0, sizeof(spec));
     spec.cert_pem = cert_pem;
     spec.pkey_pem = pkey_pem;
-    rv = tls_proto_load_certified_key(c->pool, &spec, NULL, &ckey);
+    rv = tls_cert_load_cert_key(c->pool, &spec, NULL, &ckey);
     if (APR_SUCCESS != rv) goto cleanup;
 
     cc->local_keys = apr_array_make(c->pool, 2, sizeof(const rustls_certified_key*));
@@ -360,6 +362,7 @@ static apr_status_t server_conf_setup(
     apr_pool_t *p, apr_pool_t *ptemp, tls_conf_server_t *sc, tls_cert_reg_t *cert_reg)
 {
     rustls_server_config_builder *builder = NULL;
+    rustls_root_cert_store *ca_store = NULL;
     apr_array_header_t *cert_specs;
     rustls_result rr = RUSTLS_RESULT_OK;
     apr_status_t rv = APR_SUCCESS;
@@ -367,7 +370,32 @@ static apr_status_t server_conf_setup(
     (void)p;
     ap_log_error(APLOG_MARK, APLOG_TRACE1, rv, sc->server,
                  "init server: %s", sc->server->server_hostname);
-    builder = rustls_server_config_builder_new();
+    if (sc->client_auth != TLS_CLIENT_AUTH_NONE) {
+        if (!sc->client_ca) {
+            ap_log_error(APLOG_MARK, APLOG_ERR, 0, sc->server, APLOGNO()
+                         "TLSClientAuthentication is enabled for %s, but no client CA file is set. "
+                          "Use 'TLSClientCA <file>' to specify the trust anchors.",
+                         sc->server->server_hostname);
+            rv = APR_EINVAL; goto cleanup;
+        }
+
+        if (sc->client_auth == TLS_CLIENT_AUTH_REQUIRED) {
+            const rustls_client_cert_verifier *verifier;
+            rv = tls_cert_client_verifiers_get(sc->global->verifiers, sc->client_ca, &verifier);
+            if (APR_SUCCESS != rv) goto cleanup;
+            builder = rustls_server_config_builder_with_client_verifier(verifier);
+        }
+        else {
+            const rustls_client_cert_verifier_optional *verifier;
+            rv = tls_cert_client_verifiers_get_optional(sc->global->verifiers, sc->client_ca, &verifier);
+            if (APR_SUCCESS != rv) goto cleanup;
+            builder = rustls_server_config_builder_with_client_verifier_optional(verifier);
+        }
+    }
+    else {
+        builder = rustls_server_config_builder_new();
+    }
+
     if (!builder) {
         rv = APR_ENOMEM; goto cleanup;
     }
@@ -437,9 +465,8 @@ static apr_status_t server_conf_setup(
     }
 
 cleanup:
-    if (builder != NULL) {
-        rustls_server_config_builder_free(builder);
-    }
+    if (builder) rustls_server_config_builder_free(builder);
+    if (ca_store) rustls_root_cert_store_free(ca_store);
     if (RUSTLS_RESULT_OK != rr) {
         const char *err_descr;
         rv = tls_util_rustls_error(ptemp, rr, &err_descr);
@@ -554,6 +581,8 @@ apr_status_t tls_core_init(apr_pool_t *p, apr_pool_t *ptemp, server_rec *base_se
 
     /* Setup server configs and collect all certificates we use. */
     gc->cert_reg = tls_cert_reg_make(p);
+    gc->stores = tls_cert_root_stores_make(p);
+    gc->verifiers = tls_cert_verifiers_make(p, gc->stores);
     for (s = base_server; s; s = s->next) {
         sc = tls_conf_server_get(s);
         rv = tls_conf_server_apply_defaults(sc, p);
@@ -572,6 +601,8 @@ apr_status_t tls_core_init(apr_pool_t *p, apr_pool_t *ptemp, server_rec *base_se
     if (APR_SUCCESS != rv) goto cleanup;
 
 cleanup:
+    if (gc->verifiers) tls_cert_verifiers_clear(gc->verifiers);
+    if (gc->stores) tls_cert_root_stores_clear(gc->stores);
     if (APR_SUCCESS != rv) {
         ap_log_error(APLOG_MARK, APLOG_ERR, rv, base_server, "error during post_config");
     }
@@ -860,6 +891,14 @@ apr_status_t tls_core_conn_post_handshake(conn_rec *c)
     ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, c, "post_handshake %s: %s [%s]",
         cc->server->server_hostname, cc->tls_protocol_name, cc->tls_cipher_name);
 
+    cc->client_cert = rustls_server_session_get_peer_certificate(cc->rustls_session, 0);
+    if (!cc->client_cert && sc->client_auth == TLS_CLIENT_AUTH_REQUIRED) {
+        ap_log_cerror(APLOG_MARK, APLOG_INFO, 0, c, APLOGNO()
+              "A client certificate is required, but no acceptable certificate was presented.");
+        rv = APR_ECONNABORTED;
+    }
+
+    rv = tls_var_handshake_done(c);
 cleanup:
     return rv;
 }
@@ -920,5 +959,18 @@ int tls_core_request_check(request_rec *r)
         goto cleanup;
     }
 cleanup:
+    return rv;
+}
+
+apr_status_t tls_core_error(conn_rec *c, rustls_result rr, const char **perrstr)
+{
+    tls_conf_conn_t *cc = tls_conf_conn_get(c);
+    apr_status_t rv;
+
+    rv = tls_util_rustls_error(c->pool, rr, perrstr);
+    if (cc) {
+        cc->last_error = rr;
+        cc->last_error_descr = *perrstr;
+    }
     return rv;
 }

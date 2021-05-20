@@ -46,6 +46,12 @@ typedef struct {
     const char *tls_protocol_name;     /* the name of the TLS version negotiated */
     apr_uint16_t tls_cipher_id;       /* the TLS cipher suite negotiated */
     const char *tls_cipher_name;      /* the name of TLS cipher suite negotiated */
+    const rustls_certificate *client_cert; /* handshaked client ceritificate or NULL */
+
+    apr_table_t *subprocess_env;      /* common TLS variables for this connection */
+
+    rustls_result last_error;
+    const char *last_error_descr;
 
 } tls_conf_conn_t;
 
@@ -112,5 +118,12 @@ apr_status_t tls_core_conn_post_handshake(conn_rec *c);
  *   generate an error page for.
  */
 int tls_core_request_check(request_rec *r);
+
+/**
+ * A Rustls error happened while processing the connection. Look up an
+ * error description, determine the apr_status_t to use for it and remember
+ * this as the last error at tls_conf_conn_t.
+ */
+apr_status_t tls_core_error(conn_rec *c, rustls_result rr, const char **perrstr);
 
 #endif /* tls_core_h */

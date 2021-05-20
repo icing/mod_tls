@@ -42,7 +42,7 @@ APLOG_USE_MODULE(tls);
  * function to handle the added data before leaving.
  */
 static apr_status_t read_tls_to_rustls(
-    tls_filter_ctx_t *fctx, apr_off_t len)
+    tls_filter_ctx_t *fctx, apr_off_t len, int errors_expected)
 {
     const char *data;
     apr_size_t dlen, rlen;
@@ -115,12 +115,13 @@ static apr_status_t read_tls_to_rustls(
 
 cleanup:
     if (rr != RUSTLS_RESULT_OK) {
-        const char *err_descr = "";
-
-        rv = tls_util_rustls_error(fctx->c->pool, rr, &err_descr);
         rv = APR_ECONNRESET;
-        ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, fctx->c, APLOGNO()
-                     "read_tls_to_rustls: [%d] %s", (int)rr, err_descr);
+        if (!errors_expected) {
+            const char *err_descr = "";
+            rv = tls_core_error(fctx->c, rr, &err_descr);
+            ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, fctx->c, APLOGNO()
+                         "read_tls_to_rustls: [%d] %s", (int)rr, err_descr);
+        }
     }
     else if (APR_STATUS_IS_EOF(rv) && passed > 0) {
         /* encountering EOF while actually having read sth is a success. */
@@ -187,7 +188,7 @@ cleanup:
     if (NULL != buffer) free(buffer);
     if (rr != RUSTLS_RESULT_OK) {
         const char *err_descr = "";
-        rv = tls_util_rustls_error(fctx->c->pool, rr, &err_descr);
+        rv = tls_core_error(fctx->c, rr, &err_descr);
         ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, fctx->c, APLOGNO()
                      "brigade_tls_from_rustls: [%d] %s", (int)rr, err_descr);
     }
@@ -267,7 +268,7 @@ static apr_status_t filter_do_pre_handshake(
         fctx->fin_tls_buffer_bb = apr_brigade_create(fctx->c->pool, fctx->c->bucket_alloc);
         do {
             if (rustls_server_session_wants_read(fctx->cc->rustls_session)) {
-                rv = read_tls_to_rustls(fctx, fctx->fin_max_in_rustls);
+                rv = read_tls_to_rustls(fctx, fctx->fin_max_in_rustls, 1);
                 if (APR_SUCCESS != rv) {
                     if (fctx->cc->client_hello_seen) {
                         rv = APR_EAGAIN;  /* we got what we needed */
@@ -318,7 +319,7 @@ static apr_status_t filter_do_handshake(
     if (rustls_server_session_is_handshaking(fctx->cc->rustls_session)) {
         do {
             if (rustls_server_session_wants_read(fctx->cc->rustls_session)) {
-                rv = read_tls_to_rustls(fctx, fctx->fin_max_in_rustls);
+                rv = read_tls_to_rustls(fctx, fctx->fin_max_in_rustls, 0);
                 if (APR_SUCCESS != rv) goto cleanup;
             }
             if (rustls_server_session_wants_write(fctx->cc->rustls_session)) {
@@ -333,6 +334,10 @@ static apr_status_t filter_do_handshake(
     }
 cleanup:
     if (APR_SUCCESS != rv && !APR_STATUS_IS_EAGAIN(rv)) {
+        if (fctx->cc->last_error_descr) {
+            ap_log_cerror(APLOG_MARK, APLOG_INFO, APR_ECONNABORTED, fctx->c, APLOGNO()
+                "handshake failed: %s", fctx->cc->last_error_descr);
+        }
         rv = filter_abort(fctx);
     }
     return rv;
@@ -439,7 +444,7 @@ static apr_status_t filter_conn_input(
             /* that did not produce anything either. try getting more
              * TLS data from the network into the rustls session. */
             fctx->fin_bytes_in_rustls = 0;
-            rv = read_tls_to_rustls(fctx, fctx->fin_max_in_rustls);
+            rv = read_tls_to_rustls(fctx, fctx->fin_max_in_rustls, 0);
             if (APR_SUCCESS != rv) goto cleanup; /* this also leave on APR_EAGAIN */
         }
     }
@@ -483,7 +488,7 @@ cleanup:
     if (rr != RUSTLS_RESULT_OK) {
         const char *err_descr = "";
 
-        rv = tls_util_rustls_error(fctx->c->pool, rr, &err_descr);
+        rv = tls_core_error(fctx->c, rr, &err_descr);
         ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, fctx->c, APLOGNO()
                      "tls_filter_conn_input: [%d] %s", (int)rr, err_descr);
     }
@@ -536,7 +541,7 @@ static apr_status_t fout_plain_buf_to_rustls(
 cleanup:
     if (rr != RUSTLS_RESULT_OK) {
         const char *err_descr = "";
-        rv = tls_util_rustls_error(fctx->c->pool, rr, &err_descr);
+        rv = tls_core_error(fctx->c, rr, &err_descr);
         ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, fctx->c, APLOGNO()
                      "fout_plain_buf_to_rustls to rustls: [%d] %s", (int)rr, err_descr);
     }
@@ -636,7 +641,7 @@ cleanup:
     *plen = wlen;
     if (rr != RUSTLS_RESULT_OK) {
         const char *err_descr = "";
-        rv = tls_util_rustls_error(fctx->c->pool, rr, &err_descr);
+        rv = tls_core_error(fctx->c, rr, &err_descr);
         ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, fctx->c, APLOGNO()
                      "write_bucket_to_rustls: [%d] %s", (int)rr, err_descr);
     }
@@ -747,7 +752,7 @@ static apr_status_t filter_conn_output(
 cleanup:
     if (rr != RUSTLS_RESULT_OK) {
         const char *err_descr = "";
-        rv = tls_util_rustls_error(fctx->c->pool, rr, &err_descr);
+        rv = tls_core_error(fctx->c, rr, &err_descr);
         ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, fctx->c, APLOGNO()
                      "tls_filter_conn_output: [%d] %s", (int)rr, err_descr);
     }

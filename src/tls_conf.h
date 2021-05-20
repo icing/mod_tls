@@ -14,9 +14,18 @@
 
 struct tls_proto_conf_t;
 struct tls_cert_reg_t;
+struct tls_cert_root_stores_t;
+struct tls_cert_verifiers_t;
 struct ap_socache_instance_t;
 struct ap_socache_provider_t;
 struct apr_global_mutex_t;
+
+typedef enum {
+    TLS_CLIENT_AUTH_UNSET,
+    TLS_CLIENT_AUTH_NONE,
+    TLS_CLIENT_AUTH_REQUIRED,
+    TLS_CLIENT_AUTH_OPTIONAL,
+} tls_client_auth_t;
 
 /* The global module configuration, created after post-config
  * and then readonly.
@@ -26,14 +35,16 @@ typedef struct {
     server_addr_rec *tls_addresses;   /* the addresses/port we are active on */
     struct tls_proto_conf_t *proto;   /* TLS protocol/rustls specific globals */
     apr_hash_t *var_lookups;          /* variable lookup functions by var name */
-
-    struct tls_cert_reg_t *cert_reg;  /* all certified keys loaded in post-config */
-    const rustls_server_config *rustls_hello_config; /* config to use for initial client hello */
+    struct tls_cert_reg_t *cert_reg;  /* all certified keys loaded */
+    struct tls_cert_root_stores_t *stores; /* loaded certificate stores */
+    struct tls_cert_verifiers_t *verifiers; /* registry of certificate verifiers */
 
     const char *session_cache_spec;   /* how the session cache was specified */
     const struct ap_socache_provider_t *session_cache_provider; /* provider used for session cache */
     struct ap_socache_instance_t *session_cache; /* session cache instance */
     struct apr_global_mutex_t *session_cache_mutex; /* global mutex for access to session cache */
+
+    const rustls_server_config *rustls_hello_config; /* used for initial client hello parsing */
 } tls_conf_global_t;
 
 /* The module configuration for a server (vhost).
@@ -51,6 +62,9 @@ typedef struct {
     apr_array_header_t *tls_supp_ciphers;  /* List of apr_uint16_t cipher ids to suppress */
     int honor_client_order;           /* honor client cipher ordering */
     int strict_sni;
+
+    const char *client_ca;            /* PEM file with trust anchors for client certs */
+    tls_client_auth_t client_auth;    /* how client authentication with certificates is used */
 
     apr_array_header_t *certified_keys; /* rustls_certified_key list configured */
     int base_server;                  /* != 0 iff this is the base server */

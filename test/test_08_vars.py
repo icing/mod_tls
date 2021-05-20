@@ -21,12 +21,6 @@ class TestVars:
             LogLevel tls:trace4
             TLSHonorClientOrder off
             """,
-            cls.env.domain_b: """
-            TLSOptions StdEnvVars
-            <Location /dir1>
-                TLSOptions -StdEnvVars
-            </Location>
-            """
         })
         conf.write()
         assert cls.env.apache_restart() == 0
@@ -55,15 +49,10 @@ class TestVars:
             'ssl_cipher': exp_cipher,
         }, r.stdout
 
-    def test_08_vars_dir1(self):
-        # in dir1, the StdEnvVars is switch off
-        r = self.env.https_get(self.env.domain_b, "/dir1/vars.py")
+    def test_08_vars_single(self):
+        r = self.env.https_get(self.env.domain_b, "/vars.py?name=SERVER_NAME")
         assert r.exit_code == 0, r.stderr
         assert r.json == {
-            'https': 'on',
-            'host': 'b.mod-tls.test',
-            'protocol': 'HTTP/1.1',
-            'ssl_protocol': '',
-            'ssl_cipher': '',
+            'SERVER_NAME': 'b.mod-tls.test',
         }, r.stdout
 
