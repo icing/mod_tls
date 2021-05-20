@@ -16,6 +16,10 @@ class TestMD:
             assert cls.env.apache_stop() == 0
         cls.clientsX = cls.env.CA.get_first("clientsX")
         cls.clientsY = cls.env.CA.get_first("clientsY")
+        cls.ca_file = os.path.join(os.path.dirname(cls.clientsX.cert_file), "clientX-ca.pem")
+        with open(cls.ca_file, 'w') as fd:
+            fd.write("".join(open(cls.clientsX.cert_file).readlines()))
+            fd.write("".join(open(cls.env.CA.cert_file).readlines()))
 
     @classmethod
     def teardown_class(cls):
@@ -40,7 +44,7 @@ class TestMD:
         conf = TlsTestConf(env=self.env)
         conf.add_md_vhosts(domains=[self.env.domain_a, self.env.domain_b], extras={
             self.env.domain_a: f"""
-            TLSClientCA {self.clientsX.cert_file}
+            TLSClientCA {self.ca_file}
             """
         })
         conf.write()
@@ -62,7 +66,7 @@ class TestMD:
         conf.add_md_vhosts(domains=[self.env.domain_b], extras={
             self.env.domain_b: f"""
             TLSClientCertificate required
-            TLSClientCA {self.clientsX.cert_file}
+            TLSClientCA {self.ca_file}
             """
         })
         conf.write()
@@ -86,30 +90,81 @@ class TestMD:
         }, r.stdout
 
 
-    def test_12_auth_optional(self):
+    def test_12_auth_ssl_optional(self):
         conf = TlsTestConf(env=self.env)
-        conf.add_md_vhosts(domains=[self.env.domain_a, self.env.domain_b], extras={
-            self.env.domain_a: f"""
-            TLSClientCertificate optional
-            TLSClientCA {self.clientsX.cert_file}
+        domain = self.env.domain_b
+        conf.add_ssl_vhosts(domains=[domain], extras={
+            domain: f"""
+            SSLVerifyClient optional
+            SSLVerifyDepth 2
+            SSLOptions +StdEnvVars
+            SSLCACertificateFile {self.ca_file}
             """
         })
         conf.write()
         assert self.env.apache_restart() == 0
         # should work either way
-        data = self.env.https_get_json(self.env.domain_a, "/index.json")
-        assert data == {'domain': self.env.domain_a}
-        data = self.env.https_get_json(self.env.domain_a, "/index.json", extra_args=[
+        data = self.env.https_get_json(domain, "/index.json")
+        assert data == {'domain': domain}
+        # no client cert given, we expect the server variable to be empty
+        r = self.env.https_get(domain, "/vars.py?name=SSL_CLIENT_S_DN_CN")
+        assert r.exit_code == 0, r.stderr
+        assert r.json == {
+            'SSL_CLIENT_S_DN_CN': '',
+        }, r.stdout
+        client_cert = self.clientsX.get_first("user1")
+        data = self.env.https_get_json(domain, "/index.json", extra_args=[
+            "--cert", client_cert.cert_file
+        ])
+        assert data == {'domain': domain}
+        r = self.env.https_get(domain, "/vars.py?name=SSL_CLIENT_S_DN_CN", extra_args=[
+            "--cert", client_cert.cert_file
+        ])
+        # with client cert, we expect the server variable to show? Do we?
+        assert r.exit_code == 0, r.stderr
+        assert r.json == {
+            'SSL_CLIENT_S_DN_CN': 'user1',
+        }, r.stdout
+
+    def test_12_auth_optional(self):
+        conf = TlsTestConf(env=self.env)
+        domain = self.env.domain_b
+        conf.add_md_vhosts(domains=[domain], extras={
+            domain: f"""
+            TLSClientCertificate optional
+            TLSClientCA {self.ca_file}
+            """
+        })
+        conf.write()
+        assert self.env.apache_restart() == 0
+        # should work either way
+        data = self.env.https_get_json(domain, "/index.json")
+        assert data == {'domain': domain}
+        # no client cert given, we expect the server variable to be empty
+        r = self.env.https_get(domain, "/vars.py?name=SSL_CLIENT_S_DN_CN")
+        assert r.exit_code == 0, r.stderr
+        assert r.json == {
+            'SSL_CLIENT_S_DN_CN': '',
+        }, r.stdout
+        data = self.env.https_get_json(domain, "/index.json", extra_args=[
             "--cert", self.clientsX.get_first("user1").cert_file
         ])
-        assert data == {'domain': self.env.domain_a}
+        assert data == {'domain': domain}
+        r = self.env.https_get(domain, "/vars.py?name=SSL_CLIENT_S_DN_CN", extra_args=[
+            "--cert", self.clientsX.get_first("user1").cert_file
+        ])
+        # with client cert, we expect the server variable to show? Do we?
+        assert r.exit_code == 0, r.stderr
+        assert r.json == {
+            'SSL_CLIENT_S_DN_CN': 'Not Implemented',
+        }, r.stdout
 
     def test_12_auth_expired(self):
         conf = TlsTestConf(env=self.env)
         conf.add_md_vhosts(domains=[self.env.domain_b], extras={
             self.env.domain_b: f"""
             TLSClientCertificate required
-            TLSClientCA {self.clientsX.cert_file}
+            TLSClientCA {self.ca_file}
             """
         })
         conf.write()
@@ -125,7 +180,7 @@ class TestMD:
         conf.add_md_vhosts(domains=[self.env.domain_b], extras={
             self.env.domain_b: f"""
             TLSClientCertificate required
-            TLSClientCA {self.clientsX.cert_file}
+            TLSClientCA {self.ca_file}
             """
         })
         conf.write()
@@ -135,3 +190,8 @@ class TestMD:
             "--cert", self.clientsY.get_first("user1").cert_file
         ])
         assert r.exit_code != 0
+        # This will work, as the CA root is present in the CA file
+        r = self.env.https_get(domain=self.env.domain_b, paths="/index.json", extra_args=[
+            "--cert", self.env.CA.get_first("user1").cert_file
+        ])
+        assert r.exit_code == 0

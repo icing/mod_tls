@@ -1,7 +1,7 @@
 import os
 import re
 from datetime import timedelta, datetime
-from typing import List, Tuple, Any, Optional
+from typing import List, Any, Optional
 
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
@@ -47,14 +47,15 @@ def _private_key(key_type):
 class CertificateSpec:
 
     def __init__(self, name: str = None, domains: List[str] = None,
-                 dn: List[Tuple[str, str]] = None, email: str = None,
+                 email: str = None,
                  key_type: str = None, single_file: bool = False,
                  valid_from: timedelta = timedelta(days=-1),
                  valid_to: timedelta = timedelta(days=89),
+                 client: bool = False,
                  sub_specs: List['CertificateSpec'] = None):
         self.name = name
-        self.dn = dn
         self.domains = domains
+        self.client = client
         self.email = email
         self.key_type = key_type
         self.single_file = single_file
@@ -65,9 +66,10 @@ class CertificateSpec:
 
 class Credentials:
 
-    def __init__(self, name: str, cert: Any, pkey: Any, key_type: str,
+    def __init__(self, name: str, subject: x509.Name, cert: Any, pkey: Any, key_type: str,
                  issuer: 'Credentials' = None):
         self._name = name
+        self._subject = subject
         self._cert = cert
         self._pkey = pkey
         self._key_type = key_type
@@ -79,6 +81,10 @@ class Credentials:
     @property
     def name(self) -> str:
         return self._name
+
+    @property
+    def subject(self) -> x509.Name:
+        return self._subject
 
     @property
     def key_type(self):
@@ -125,13 +131,14 @@ class Credentials:
     def get_credentials_for_name(self, name) -> List['Credentials']:
         return self._store.get_credentials_for_name(name) if self._store else []
 
-    def issue_certs(self, specs: List[CertificateSpec]) -> List['Credentials']:
-        return [self.issue_cert(spec=spec) for spec in specs]
+    def issue_certs(self, specs: List[CertificateSpec],
+                    chain: List['Credentials'] = None) -> List['Credentials']:
+        return [self.issue_cert(spec=spec, chain=chain) for spec in specs]
 
-    def issue_cert(self, spec: CertificateSpec) -> 'Credentials':
+    def issue_cert(self, spec: CertificateSpec, chain: List['Credentials'] = None) -> 'Credentials':
         cert = TlsTestCA.create_credentials(spec=spec, issuer=self,
                                             key_type=spec.key_type if spec.key_type else self.key_type,
-                                            valid_from=spec.valid_from, valid_to=spec.valid_to
+                                            valid_from=spec.valid_from, valid_to=spec.valid_to,
                                             )
         if self._store:
             self._store.save(cert, single_file=spec.single_file)
@@ -139,7 +146,9 @@ class Credentials:
             if self._store:
                 sub_store = CertStore(fpath=os.path.join(self._store.path, cert.name))
                 cert.set_store(sub_store)
-            cert.issue_certs(spec.sub_specs)
+            subchain = chain.copy() if chain else []
+            subchain.append(self)
+            cert.issue_certs(spec.sub_specs, chain=subchain)
         return cert
 
 
@@ -156,6 +165,7 @@ class CertStore:
         return self._store_dir
 
     def save(self, creds: Credentials, name: str = None,
+             chain: List[Credentials] = None,
              single_file: bool = False) -> None:
         name = name if name is not None else creds.name
         cert_file, pkey_file = self._fpaths_for(name, creds)
@@ -163,6 +173,9 @@ class CertStore:
             pkey_file = None
         with open(cert_file, "wb") as fd:
             fd.write(creds.cert_pem)
+            if chain:
+                for c in chain:
+                    fd.write(c.cert_pem)
             if pkey_file is None:
                 fd.write(creds.pkey_pem)
         if pkey_file is not None:
@@ -208,8 +221,8 @@ class TlsTestCA:
                                                        valid_from=valid_from,
                                                        valid_to=valid_to,
                                                        key_type=key_type)
-        elif spec.dn and len(spec.dn):
-            creds = TlsTestCA._make_client_credentials(dn=spec.dn,
+        elif spec.client:
+            creds = TlsTestCA._make_client_credentials(name=spec.name,
                                                        issuer=issuer,
                                                        email=spec.email,
                                                        valid_from=valid_from,
@@ -226,28 +239,25 @@ class TlsTestCA:
         return creds
 
     @staticmethod
-    def _make_x509_name(name: str, org_name: str, common_name: str = None) -> x509.Name:
-        name_pieces = [
-            x509.NameAttribute(
-                NameOID.ORGANIZATION_NAME, org_name
-            ),
-            x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, name),
-        ]
-        if common_name is not None:
-            name_pieces.append(
-                x509.NameAttribute(NameOID.COMMON_NAME, common_name)
-            )
+    def _make_x509_name(org_name: str = None, common_name: str = None, parent: x509.Name = None) -> x509.Name:
+        name_pieces = []
+        if org_name:
+            oid = NameOID.ORGANIZATIONAL_UNIT_NAME if parent else NameOID.ORGANIZATION_NAME
+            name_pieces.append(x509.NameAttribute(oid, org_name))
+        elif common_name:
+            name_pieces.append(x509.NameAttribute(NameOID.COMMON_NAME, common_name))
+        if parent:
+            name_pieces.extend([rdn for rdn in parent])
         return x509.Name(name_pieces)
 
     @staticmethod
     def _make_csr(
-            name: str,
+            subject: x509.Name,
             pkey: Any,
             issuer_subject: Optional[Credentials],
             valid_from_delta: timedelta = None,
             valid_until_delta: timedelta = None
     ):
-        subject = TlsTestCA._make_x509_name(name=name, org_name="test", common_name=name)
         pubkey = pkey.public_key()
         issuer_subject = issuer_subject if issuer_subject is not None else subject
 
@@ -355,14 +365,15 @@ class TlsTestCA:
         else:
             issuer_subject = None
             issuer_key = pkey
-        csr = TlsTestCA._make_csr(name=name,
+        subject = TlsTestCA._make_x509_name(org_name=name, parent=issuer.subject if issuer else None)
+        csr = TlsTestCA._make_csr(subject=subject,
                                   issuer_subject=issuer_subject, pkey=pkey,
                                   valid_from_delta=valid_from, valid_until_delta=valid_to)
         csr = TlsTestCA._add_ca_usages(csr)
         cert = csr.sign(private_key=issuer_key,
                         algorithm=hashes.SHA256(),
                         backend=default_backend())
-        return Credentials(name=name, cert=cert, pkey=pkey, key_type=key_type, issuer=issuer)
+        return Credentials(name=name, subject=subject, cert=cert, pkey=pkey, key_type=key_type, issuer=issuer)
 
     @staticmethod
     def _make_server_credentials(domains: List[str], issuer: Credentials,
@@ -372,29 +383,30 @@ class TlsTestCA:
                                  ) -> Credentials:
         name = domains[0]
         pkey = _private_key(key_type=key_type)
-        csr = TlsTestCA._make_csr(name,
+        subject = TlsTestCA._make_x509_name(common_name=name, parent=issuer.subject)
+        csr = TlsTestCA._make_csr(subject=subject,
                                   issuer_subject=issuer.certificate.subject, pkey=pkey,
                                   valid_from_delta=valid_from, valid_until_delta=valid_to)
         csr = TlsTestCA._add_leaf_usages(csr, domains=domains, issuer=issuer)
         cert = csr.sign(private_key=issuer.private_key,
                         algorithm=hashes.SHA256(),
                         backend=default_backend())
-        return Credentials(name=name, cert=cert, pkey=pkey, key_type=key_type, issuer=issuer)
+        return Credentials(name=name, subject=subject, cert=cert, pkey=pkey, key_type=key_type, issuer=issuer)
 
     @staticmethod
-    def _make_client_credentials(dn: List[Tuple[str, str]],
+    def _make_client_credentials(name: str,
                                  issuer: Credentials, email: Optional[str],
                                  key_type: Any,
                                  valid_from: timedelta = timedelta(days=-1),
                                  valid_to: timedelta = timedelta(days=89),
                                  ) -> Credentials:
         pkey = _private_key(key_type=key_type)
-        name = dn[-1][1].replace(' ', '_')
-        csr = TlsTestCA._make_csr(", ".join([f"{n[0]}={n[1]}" for n in dn]),
+        subject = TlsTestCA._make_x509_name(common_name=name, parent=issuer.subject)
+        csr = TlsTestCA._make_csr(subject=subject,
                                   issuer_subject=issuer.certificate.subject, pkey=pkey,
                                   valid_from_delta=valid_from, valid_until_delta=valid_to)
         csr = TlsTestCA._add_client_usages(csr, issuer=issuer, rfc82name=email)
         cert = csr.sign(private_key=issuer.private_key,
                         algorithm=hashes.SHA256(),
                         backend=default_backend())
-        return Credentials(name=name, cert=cert, pkey=pkey, key_type=key_type, issuer=issuer)
+        return Credentials(name=name, subject=subject, cert=cert, pkey=pkey, key_type=key_type, issuer=issuer)

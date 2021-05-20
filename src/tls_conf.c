@@ -19,6 +19,7 @@
 
 #include <crustls.h>
 
+#include "tls_cert.h"
 #include "tls_proto.h"
 #include "tls_conf.h"
 #include "tls_util.h"

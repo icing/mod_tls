@@ -22,6 +22,7 @@
 #include <crustls.h>
 
 #include "tls_proto.h"
+#include "tls_cert.h"
 #include "tls_conf.h"
 #include "tls_core.h"
 #include "tls_ocsp.h"
@@ -141,7 +142,7 @@ static apr_status_t use_local_key(
     memset(&spec, 0, sizeof(spec));
     spec.cert_pem = cert_pem;
     spec.pkey_pem = pkey_pem;
-    rv = tls_proto_load_certified_key(c->pool, &spec, NULL, &ckey);
+    rv = tls_cert_load_cert_key(c->pool, &spec, NULL, &ckey);
     if (APR_SUCCESS != rv) goto cleanup;
 
     cc->local_keys = apr_array_make(c->pool, 2, sizeof(const rustls_certified_key*));
@@ -361,7 +362,7 @@ static apr_status_t server_conf_setup(
     apr_pool_t *p, apr_pool_t *ptemp, tls_conf_server_t *sc, tls_cert_reg_t *cert_reg)
 {
     rustls_server_config_builder *builder = NULL;
-    const rustls_root_cert_store *ca_store = NULL;
+    rustls_root_cert_store *ca_store = NULL;
     apr_array_header_t *cert_specs;
     rustls_result rr = RUSTLS_RESULT_OK;
     apr_status_t rv = APR_SUCCESS;
@@ -377,13 +378,19 @@ static apr_status_t server_conf_setup(
                          sc->server->server_hostname);
             rv = APR_EINVAL; goto cleanup;
         }
-        /* TODO: load it from a ca registry */
-        rv = tls_proto_load_root_cert_store(p, sc->client_ca, &ca_store);
-        if (APR_SUCCESS != rv) goto cleanup;
 
-        rr = rustls_server_config_builder_for_client_auth(
-            ca_store, sc->client_auth == TLS_CLIENT_AUTH_REQUIRED, &builder);
-        if (RUSTLS_RESULT_OK != rr) goto cleanup;
+        if (sc->client_auth == TLS_CLIENT_AUTH_REQUIRED) {
+            const rustls_client_cert_verifier *verifier;
+            rv = tls_cert_client_verifiers_get(sc->global->verifiers, sc->client_ca, &verifier);
+            if (APR_SUCCESS != rv) goto cleanup;
+            builder = rustls_server_config_builder_with_client_verifier(verifier);
+        }
+        else {
+            const rustls_client_cert_verifier_optional *verifier;
+            rv = tls_cert_client_verifiers_get_optional(sc->global->verifiers, sc->client_ca, &verifier);
+            if (APR_SUCCESS != rv) goto cleanup;
+            builder = rustls_server_config_builder_with_client_verifier_optional(verifier);
+        }
     }
     else {
         builder = rustls_server_config_builder_new();
@@ -574,6 +581,8 @@ apr_status_t tls_core_init(apr_pool_t *p, apr_pool_t *ptemp, server_rec *base_se
 
     /* Setup server configs and collect all certificates we use. */
     gc->cert_reg = tls_cert_reg_make(p);
+    gc->stores = tls_cert_root_stores_make(p);
+    gc->verifiers = tls_cert_verifiers_make(p, gc->stores);
     for (s = base_server; s; s = s->next) {
         sc = tls_conf_server_get(s);
         rv = tls_conf_server_apply_defaults(sc, p);
@@ -592,6 +601,8 @@ apr_status_t tls_core_init(apr_pool_t *p, apr_pool_t *ptemp, server_rec *base_se
     if (APR_SUCCESS != rv) goto cleanup;
 
 cleanup:
+    if (gc->verifiers) tls_cert_verifiers_clear(gc->verifiers);
+    if (gc->stores) tls_cert_root_stores_clear(gc->stores);
     if (APR_SUCCESS != rv) {
         ap_log_error(APLOG_MARK, APLOG_ERR, rv, base_server, "error during post_config");
     }

@@ -92,19 +92,16 @@ class TlsTestEnv:
         CertificateSpec(domains=[DOMAIN_B], key_type='secp256r1', single_file=True),
         CertificateSpec(domains=[DOMAIN_B], key_type='rsa4096'),
         CertificateSpec(name="clientsX", sub_specs=[
-            CertificateSpec(dn=[("ou", "clientsX"), ("cn", "user1")], single_file=True),
-            CertificateSpec(dn=[("ou", "clientsX"), ("cn", "user2")], single_file=True),
-            CertificateSpec(dn=[("ou", "clientsX"), ("cn", "user_expired")],
+            CertificateSpec(name="user1", client=True, single_file=True),
+            CertificateSpec(name="user2", client=True, single_file=True),
+            CertificateSpec(name="user_expired", client=True,
                             single_file=True, valid_from=timedelta(days=-91),
                             valid_to=timedelta(days=-1)),
         ]),
         CertificateSpec(name="clientsY", sub_specs=[
-            CertificateSpec(dn=[("ou", "clientsY"), ("cn", "user1")], single_file=True),
-            CertificateSpec(dn=[("ou", "clientsY"), ("cn", "user2")], single_file=True),
-            CertificateSpec(dn=[("ou", "clientsY"), ("cn", "user_expired")],
-                            single_file=True, valid_from=timedelta(days=-91),
-                            valid_to=timedelta(days=-1)),
+            CertificateSpec(name="user1", client=True, single_file=True),
         ]),
+        CertificateSpec(name="user1", client=True, single_file=True),
     ]
     CA = None
 
