@@ -32,7 +32,7 @@ typedef struct {
     int client_hello_seen;            /* the client hello has been inspected */
 
     const rustls_server_config *rustls_config; /* the config specially made for this connection or NULL */
-    rustls_server_session *rustls_session; /* the session used on this connection or NULL */
+    rustls_connection *rustls_session; /* the session used on this connection or NULL */
 
     apr_array_header_t *local_keys;   /* rustls_certified_key* array of connection specific keys */
     const rustls_certified_key *key;  /* the key selected for the session */
@@ -93,7 +93,7 @@ int tls_core_conn_base_init(conn_rec *c);
  * This may be unsuccessful for several reasons. The SNI
  * from the client may not be known or the selected server
  * has not certificates available. etc.
- * On success, a proper `rustls_server_session` will have been
+ * On success, a proper `rustls_connection` will have been
  * created and set in the `tls_conf_conn_t` of the connection.
  */
 apr_status_t tls_core_conn_init_server(conn_rec *c);

@@ -332,7 +332,7 @@ static const rustls_certified_key *select_certified_key(
     }
     if (!keys || keys->nelts <= 0) goto cleanup;
 
-    rr = rustls_server_session_select_certified_key(hello,
+    rr = rustls_client_hello_select_certified_key(hello,
         (const rustls_certified_key**)keys->elts, (size_t)keys->nelts, &cc->key);
     if (RUSTLS_RESULT_OK != rr) goto cleanup;
 
@@ -616,7 +616,7 @@ static apr_status_t tls_core_conn_free(void *data)
 
     /* free all rustls things we are owning. */
     if (cc->rustls_session) {
-        rustls_server_session_free(cc->rustls_session);
+        rustls_connection_free(cc->rustls_session);
         cc->rustls_session = NULL;
     }
     if (cc->rustls_config) {
@@ -665,10 +665,10 @@ int tls_core_conn_base_init(conn_rec *c)
          * our callback where we can inspect the (possibly) supplied SNI and
          * select another server.
          */
-        rr = rustls_server_session_new(sc->global->rustls_hello_config, &cc->rustls_session);
+        rr = rustls_server_connection_new(sc->global->rustls_hello_config, &cc->rustls_session);
         if (RUSTLS_RESULT_OK != rr) goto cleanup;
 
-        rustls_server_session_set_userdata(cc->rustls_session, c);
+        rustls_connection_set_userdata(cc->rustls_session, c);
         /* copy over mutable connection properties inherited from server setting */
         cc->service_unavailable = sc->service_unavailable;
     }
@@ -833,13 +833,13 @@ apr_status_t tls_core_conn_init_server(conn_rec *c)
      * the real handshake and, if successful, the traffic after that.
      * Free the current session and create the real one for the
      * selected server. */
-    rustls_server_session_free(cc->rustls_session);
+    rustls_connection_free(cc->rustls_session);
     cc->rustls_session = NULL;
     cc->rustls_config = rustls_server_config_builder_build(builder);
     builder = NULL;
-    rr = rustls_server_session_new(cc->rustls_config, &cc->rustls_session);
+    rr = rustls_server_connection_new(cc->rustls_config, &cc->rustls_session);
     if (RUSTLS_RESULT_OK != rr) goto cleanup;
-    rustls_server_session_set_userdata(cc->rustls_session, c);
+    rustls_connection_set_userdata(cc->rustls_session, c);
 
 cleanup:
     if (builder != NULL) {
@@ -866,7 +866,7 @@ apr_status_t tls_core_conn_post_handshake(conn_rec *c)
     const rustls_supported_ciphersuite *rsuite;
     apr_status_t rv = APR_SUCCESS;
 
-    if (rustls_server_session_is_handshaking(cc->rustls_session)) {
+    if (rustls_connection_is_handshaking(cc->rustls_session)) {
         rv = APR_EGENERAL;
         ap_log_error(APLOG_MARK, APLOG_ERR, rv, cc->server, APLOGNO()
                      "post handshake, but rustls claims to still be handshaking: %s",
@@ -874,10 +874,10 @@ apr_status_t tls_core_conn_post_handshake(conn_rec *c)
         goto cleanup;
     }
 
-    cc->tls_protocol_id = rustls_server_session_get_protocol_version(cc->rustls_session);
+    cc->tls_protocol_id = rustls_connection_get_protocol_version(cc->rustls_session);
     cc->tls_protocol_name = tls_proto_get_version_name(sc->global->proto,
         cc->tls_protocol_id, c->pool);
-    rsuite = rustls_server_session_get_negotiated_ciphersuite(cc->rustls_session);
+    rsuite = rustls_connection_get_negotiated_ciphersuite(cc->rustls_session);
     if (!rsuite) {
         rv = APR_EGENERAL;
         ap_log_error(APLOG_MARK, APLOG_ERR, rv, cc->server, APLOGNO()
@@ -891,7 +891,7 @@ apr_status_t tls_core_conn_post_handshake(conn_rec *c)
     ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, c, "post_handshake %s: %s [%s]",
         cc->server->server_hostname, cc->tls_protocol_name, cc->tls_cipher_name);
 
-    cc->client_cert = rustls_server_session_get_peer_certificate(cc->rustls_session, 0);
+    cc->client_cert = rustls_connection_get_peer_certificate(cc->rustls_session, 0);
     if (!cc->client_cert && sc->client_auth == TLS_CLIENT_AUTH_REQUIRED) {
         ap_log_cerror(APLOG_MARK, APLOG_INFO, 0, c, APLOGNO()
               "A client certificate is required, but no acceptable certificate was presented.");
