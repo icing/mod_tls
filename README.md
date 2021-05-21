@@ -1,4 +1,4 @@
-# mod_tls - memory safety for TLS in Apache
+# `mod_tls` - memory safety for TLS in Apache
 
 This repository contains `mod_tls`, a module for Apache httpd that uses
 [rustls](https://github.com/ctz/rustls) to provide a memory safe TLS
@@ -35,13 +35,13 @@ API which has become part of the 2.4.48 release..
 
 ## Platforms
 
- * Apache trunk and 2.4.48 or later
+ * Apache 2.4.48 or later
  * OS: wherever apache and (c)rustls are available
  * build system: autoconf/automake
 
 ### Installation from source
 
-Run the usual autoconf/automake magic incantations. You need a built Apache trunk and specify the `--with-apxe=<path>/bin/apxs` on configuration if that is not in your `$PATH`. Also, you need a modified [crustls](https://github.com/icing/crustls/tree/icing/main) (that is my fork branch with the changes) installed.
+Run the usual autoconf/automake magic incantations. You need a built Apache trunk and specify the `--with-apxe=<path>/bin/apxs` on configuration if that is not in your `$PATH`. Also, you need [crustls](https://github.com/abtterinternet/crustls/) installed.
 
 Run the usual autoconf/automake magic incantations.
 
@@ -97,31 +97,144 @@ This runs one test. There are several defined in `test/load_test.py` which you c
 
 ## Configuration
 
-The following configuration directives are available once `mod_tls` is loaded into Apache:
+`mod_tls` has, like all other Apache httpd modules, a number of configuration directives that
+you need to use for the module to become active in your server. The whole list is described
+below in the [directives section](#directives).
 
- * `TLSListen [address:]port` to define on which port the module shall handle incoming connections. This is similar to the [Listen](https://httpd.apache.org/docs/2.4/en/bind.html) binding directive of Apache. You can use `TLSListen` several times to use more than one binding address.
- 
- * `TLSCertificate cert_file [key_file]` to add a certificate file (PEM encoded) to the server/virtual host. If you do not specify a separate key file, the key is assumed to also be found in the first file. You may add more than one certificate to a server/virtual host. The first certificate suitable for a client is then chosen.
+### Loading
 
- * `TLSProtocol version+` to specify the minimum version of the TLS protocol to use. The default is `v1.2+`. Settings this to `v1.3+` would disable TLSv1.2.
+For the module to become available in your server, it needs to be loaded. The directive for that
+looks like:
 
- * `TLSCipherPrefer cipher(-list)` to define ciphers that are preferred. This will not disable any ciphers supported by `rustls`. If you specify a cipher that is completely unknown, the configuration will fail. If you specify a cipher that is known but not supported by `rustls`, a warning will be logged but the server will continue.
+```
+LoadModule tls_module           "<modules-path>/mod_tls.so"
+```
 
- * `TLSCipherSuppress cipher(-list)` to define ciphers that are not used. This will not disable any unmentioned ciphers supported by `rustls`. If you specify a cipher that is completely unknown, the configuration will fail. If you specify a cipher that is known but not supported by `rustls`, a warning will be logged but the server will continue.
+On several linux distributions there are mechanisms to do that from the command line, e.g. debian has
+the nice `a2enmod` command.
 
- * `TLSHonorClientOrder on|off` to pay attention to the order of ciphers supported by the client. This is `on` by default.
+When you restart the server afterwards, the module will log in `INFO` entry. This lists versions of `crustls` binding and the `rustls` library are logged by `mod_tls`, like this:
 
- * `TLSOptions [+|-]StdEnvVars` this is analog to `SSLOptions` in `mod_ssl` and only relevant if you want to have certain TLS connection variables visible to request processing (see [Variables](#variables) below). This can be set per directory/location.
+```
+[date time] [tls:info] [pid] mod_tls/0.6.0 (crustls=crustls/0.6.0/rustls/0.19.0), initializing...
+```
 
- * `TLSStrictSNI on|off` to enforce exact matches of client server indicators (SNI) against host names. Client connections will be unsuccessful if no match is found. This is `on` by default.
+If you do not see this, make sure that the log level does not suppress this message. You may add `LogLevel tls:info` to your configuration for this.
 
- * `TLSSessionCache cache-spec` to specify the cache for TLS session resumption. This uses a cache on the server side to allow clients to resume connections. You can set this to `none` or define a cache as in the [`SSLSessionCache`](https://httpd.apache.org/docs/current/mod/mod_ssl.html#sslsessioncache) directive. If not configured, `mod_tls` will try to create a shared memory cache on its own, using `shmcb:tls/session-cache` as specification. Should that fail, a warning is logged, but the server continues.
+#### Peace and Harmony
 
-The gist of all this to give the server administrator enough control to ensure the safety of the system without it necessarily becoming *ossified*. Many installations have copy+paste TLS specifications from years ago and those can hinder deployment of improved implementations. On the other hand, should a specific setting turn out to be non-secure, an admin needs to be able to disable it right away (until the proper fix comes down the release lines). That is why one may suppress ciphers (and if one suppresses all ciphers in a protocol version, that version is effectively disabled as well).
+You can load `mod_tls` and other SSL modules like `mod_ssl` at the same time. If you have a running `mod_ssl` setup, you can load `mod_tls` in addition and it will by itself not change anything. You need to add configuration directives to tell the module where it should handle connections.
 
-### What to configure?
+### Handling connections
 
-#### for security
+Clients connect to your server using an IP address and a port number. You apache may listen for new connections
+on several of those. Most setups use 2 ports, 80 and 443, on all addresses that the server has. This is easy, because
+should the address of your server change, the apache config will continue to work. For this, somewhere in your server, there are directives like this:
+
+```
+Listen 80
+Listen 443
+
+<VirtualHost *:80>
+  ServerName a.net
+  ...
+</VirtualHost>
+<VirtalHost *:443>
+  ServerName b.net
+  ...
+</VirtualHost>
+
+```
+This means clients can reach `a.net` on port 80 and `b.net` on port 443. Both of these do `http:` so far.
+
+#### `https:` with `mod_ssl`
+
+To have `b.net` use encrypted `https:` traffic, you need to add SSL directives:
+
+```
+...
+<VirtalHost *:443>
+  ServerName b.net
+  SSLEngine on
+  SSLCertificateFile file_with_certificate.pem
+  SSLCertificateKeyFile file_with_key.pem
+  ...
+</VirtualHost>
+```
+
+If you have several `VirtualHost *:443`, you need to add the `SSLEngine on` in each of them, especially the first one.
+
+#### `https:` with `mod_tls`
+
+With `mod_tls`, the configuration is slightly different:
+
+```
+...
+TLSListen 443
+
+<VirtalHost *:443>
+  ServerName b.net
+  TLSCertificate file_with_certificate.pem file_with_key.pem
+  ...
+</VirtualHost>
+```
+
+You instruct `mod_tls` to encrypt all incoming connections on port 443. You add the certificate+key to the `VirtualHost`s like with `mod_ssl`. If you have certificate and key in the same file (no real reason not to), you can just add the file once.
+
+The certificate and key file formats are the same.
+
+#### `https:` with both?
+
+First: you cannot mix both modules on the same address and port. You may use the modules on different ports and, with some care, on the same port for different addresses. Maybe you do that for evaluation, if `mod_tls` fits your setup well. But for production setups, this is most likely not a good idea. Every module offers an attack surface and having two for the same task does only make you more vulnerable.
+
+That being said, it makes sense to use one module for connection from outside and the other for proxy connections to backend servers. Especially when legacy backend with older SSL protocols need to be proxied.
+
+
+### Handling certificates
+
+Certificates and keys are commonly stored in `PEM` file, which is a standardized format. This means you can use the same files for `mod_ssl` and `mod_tls`. The only exception is that `mod_tls` does not support encrypted keys.
+
+A certificate file needs to contain the certificate, followed by the certificates that make up the "trust chain" up to, but excluding, the `root` certificate. All these are sent to the client on a new connection, as the client is the one who needs to verify trust. The server never verifies itself.
+
+Like in `mod_ssl`, you may configure more than one certificate for a `VirtualHost`. As in:
+
+```
+<VirtalHost *:443>
+  ServerName b.net
+  TLSCertificate cert_A.pem key_A.pem
+  TLSCertificate cert_B.pem key_B.pem
+  ...
+</VirtualHost>
+```
+Both certificates need to be valid for host `b.net`. But why would one do that?
+
+The latest in SSL security are algorithms that use mathemagical named "Elliptic Curves" (EC). The seem to be pretty strong and are a lot smaller than the `RSA` ones used so far. Not all clients might support them, though.
+
+If `cert_A` is an EC certificate and `cert_B` is RSA, all capable clients will get the first and all legacy clients the second. `mod_tls` will use the first one that is compatible.
+
+#### ACME (Let's Encrypt) certificates
+
+Certificates obtained by ACME clients, such as `certbot` can be used with `mod_tls` as well. However their automatic rewriting of Apache httpd configurations does commonly assume a `mod_ssl`. So, you have to check their documentation on how to best integrate them.
+
+The ACME support in Apache itself, the module `mod_md`, does work with `mod_tls` just like with `mod_ssl`. For example:
+
+```
+Listen 443
+TLSListen 443
+MDomain b.net
+
+<VirtalHost *:443>
+  ServerName b.net
+  ...
+</VirtualHost>
+```
+
+would be the minimal configuration to get a Let's Encrypt certificate for `b.net` and serve that via `mod_tls`.
+
+
+### What else to configure for?
+
+#### security
 
 The `rustls` library supports only TLS versions and ciphers that are nowadays (2021) considered secure for the internet. That means, unless a new weakness is discovered, the default configuration is safe to use. Most people will not have to configure anything besides the port(s) to listen on. And certificates if they do not use `mod_md` for that.
 
@@ -131,7 +244,7 @@ The general gist of these configuration options is to give admins control, but a
 
 If a cipher is deemed unsuitable by you, use `TLSCiphersSuppress` to disable it.
 
-#### for performance
+#### performance
 
 There are performance differences between ciphers, depending on the hardware used/available. In most web server scenarios, the limitations seem to be mostly on the client side (battery life!). Since the set of supported ciphers in `rustls` is carefully selected, the module will honor preferences as announced by a client by default.
 
@@ -175,16 +288,6 @@ You may suppress any known cipher without any warning or error. Either `rustls` 
 
 If you suppress all ciphers supported for a TLS protocol version, that version is de-facto disabled. The only way this currently *could* make sense is if you wanted a server that *only* speaks TLSv1.2. This is not really recommended, but the world is a large place. So now, you know what happens if you do it. (Btw: if you want a server no longer supporting v1.2, you should configure `TLSProtocols TLSv1.3+` and not mess with 1.2 ciphers at all). 
 
-### Module/Library Versions
-
-The versions of `crustls` binding and the `rustls` library are logged by `mod_tls` at level `INFO` at server startup. Configure `LogLevel tls:info` and you will see something like:
-
-```
-[date time] [tls:info] [pid] mod_tls/0.5.0 (crustls=crustls/0.5.0/rustls/0.19.0), initializing...
-```
-
-in your server log.
-
 ### Variables
 
 Like `mod_ssl` the module supports variables in the request environment (e.g. forwarded to CGI processing). There is a small set of variables that will always be set and a larger one that is only added when `TLSOptions StdEnvVars` is configured.
@@ -202,8 +305,99 @@ SSL\_CIPHER_EXPORT |      | always `false` as rustls does not support such ciphe
 SSL\_CLIENT_VERIFY |      | either `SUCCESS` when a valid client certificate was presented or `NONE`
 SSL\_SESSION_RESUMED |    | either `Resumed` if a known TLS session id was presented by the client or `Initial` otherwise
 
-The variables exposing several fields in the client and server certiticate, such as `SSL_CLIENT_S_DN_CN` are not
+The variables exposing several fields in the client and server certificate, such as `SSL_CLIENT_S_DN_CN` are not
 supported at the moment, as crustls is missing code to parse x.509 certificates.
 
 The variable `SSL_SESSION_ID` is intentionally not supported as it contains sensitive information.
 
+### Client Certificates
+
+NOTE: the current implementation is incomplete. Certificates are checked and validated, however the necessary field names are not extracted and hosted applications do not see a user name.
+
+You may use client certificates in a server/virtual host. They might be optional or required. Validation is performed against a set of root certificates which you need to provide in a PEM file. An example would be:
+
+```
+<VirtalHost *:443>
+  ServerName b.net
+  TLSClientCertificate required
+  TLSClientCA my_client_roots.pem
+  ...
+</VirtualHost>
+```
+
+Contrary to `mod_ssl` this can not be specified at directory level, only on a host or the complete server. 
+The reason behind this is that `rustls` does not allow renegotiation in an ongoing TLS connection.
+
+## Directives
+
+The following configuration directives are available once `mod_tls` is loaded into Apache:
+
+### `TLSListen`
+ 
+`TLSListen [address:]port` defines on which address+port the module shall handle incoming connections. 
+
+This is similar to the [Listen](https://httpd.apache.org/docs/2.4/en/bind.html) binding directive of Apache. You can use `TLSListen` several times to use more than one binding address.
+ 
+### `TLSCertificate`
+
+`TLSCertificate cert_file [key_file]` adds a certificate file (PEM encoded) to a server/virtual host. 
+
+If you do not specify a separate key file, the key is assumed to also be found in the first file. You may add more than one certificate to a server/virtual host. The first certificate suitable for a client is then chosen.
+
+The path can be specified relative to the server root.
+
+### `TLSProtocol`
+
+`TLSProtocol version+` specifies the minimum version of the TLS protocol to use. 
+
+The default is `v1.2+`. Settings this to `v1.3+` would disable TLSv1.2.
+
+### `TLSCipherPrefer`
+
+`TLSCipherPrefer cipher(-list)` defines ciphers that are preferred. 
+
+This will not disable any ciphers supported by `rustls`. If you specify a cipher that is completely unknown, the configuration will fail. If you specify a cipher that is known but not supported by `rustls`, a warning will be logged but the server will continue.
+
+### `TLSCipherSuppress`
+
+`TLSCipherSuppress cipher(-list)` defines ciphers that are not used. 
+
+This will not disable any unmentioned ciphers supported by `rustls`. If you specify a cipher that is completely unknown, the configuration will fail. If you specify a cipher that is known but not supported by `rustls`, a warning will be logged but the server will continue.
+
+### `TLSHonorClientOrder`
+
+`TLSHonorClientOrder on|off` determines if the order of ciphers supported by the client is honored. This is `on` by default.
+
+### `TLSOptions`
+
+`TLSOptions [+|-]StdEnvVars` is analog to `SSLOptions` in `mod_ssl`.
+
+It is only relevant if you want to have certain TLS variables visible to request processing (see [Variables](#variables) below). This can be set per directory/location.
+
+### `TLSStrictSNI`
+
+`TLSStrictSNI on|off` enforces exact matches of client server indicators (SNI) against host names. 
+
+Client connections will be unsuccessful if no match is found. This is `on` by default.
+
+### `TLSSessionCache`
+
+`TLSSessionCache cache-spec` specifies the cache for TLS session resumption. This uses a cache on the server side to allow clients to resume connections. 
+
+You can set this to `none` or define a cache as in the [`SSLSessionCache`](https://httpd.apache.org/docs/current/mod/mod_ssl.html#sslsessioncache) directive. If not configured, `mod_tls` will try to create a shared memory cache on its own, using `shmcb:tls/session-cache` as specification. Should that fail, a warning is logged, but the server continues.
+
+### `TLSClientCertificate`
+
+`TLSClientCertificate required|optional|none` controls the handling of client certificates in a server/virtual host.
+
+With `required` a client must present a valid certificate or the connection is rejected. `optional` allows the client to present one (which then must also validate) or continue without it. `none` is the default and no client certificate will be requested.
+
+NOTE: the current implementation is incomplete. Certificates are checked and validated, however the necessary field names are not extracted and hosted applications do not see a user name.
+
+### `TLSClientCA`
+
+`TLSClientCA file.pem` sets the root certificates to validate client certificates against.
+
+This must be defined if client certificates are configured. The file needs to contain the certificates that form a verifiable chain of trust together with the ones that clients present. If you have client certification with `mod_ssl` via [SSLCACertificateFile](https://httpd.apache.org/docs/current/mod/mod_ssl.html#sslcacertificatefile), the same file will work here.
+
+The path can be specified relative to the server root.
