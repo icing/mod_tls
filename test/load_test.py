@@ -543,7 +543,7 @@ class ConnectionLoadTest(LoadTestCase):
             if self._http_version == 1:
                 args.append('--h1')
             else:
-                args.extend(['-m', "6"])
+                args.extend(['-m', "1"])
             args += [
                 '--base-uri=https://{0}:{1}/'.format(
                     self.domain_a, self.env.https_port)

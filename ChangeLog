@@ -1,3 +1,8 @@
+ * Adding test cases for http and https proxy setups
+ * Intercepting mod_ssl/mod_proxy calling to avoid enabling mod_tls on proxy connections.
+
+v0.6.0
+----------------------------------------------------------------------------------------------------
  * Adapated to the new read/write callbacks in crustls
 
 v0.5.0

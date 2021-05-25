@@ -640,40 +640,47 @@ static apr_status_t tls_core_conn_free(void *data)
     return APR_SUCCESS;
 }
 
-int tls_core_conn_base_init(conn_rec *c)
+int tls_core_conn_base_init(conn_rec *c, int flag_enabled)
 {
     tls_conf_server_t *sc = tls_conf_server_get(c->base_server);
     tls_conf_conn_t *cc = tls_conf_conn_get(c);
-    int rv = DECLINED;
+    int rv = DECLINED, enabled;
     rustls_result rr = RUSTLS_RESULT_OK;
 
     /* Are we configured to work here? */
-    if (sc->enabled != TLS_FLAG_TRUE) goto cleanup;
+    enabled = (flag_enabled != TLS_FLAG_FALSE) && (sc->enabled == TLS_FLAG_TRUE);
+    if (!enabled && flag_enabled == TLS_FLAG_UNSET) {
+        ap_log_error(APLOG_MARK, APLOG_TRACE4, 0, c->base_server,
+            "tls_core_conn_base_init, not our connection: %s",
+            c->base_server->server_hostname);
+        goto cleanup;
+    }
     if (!cc) {
         cc = apr_pcalloc(c->pool, sizeof(*cc));
         cc->server = c->base_server;
-        cc->state = TLS_CONN_ST_PRE_HANDSHAKE;
+        cc->state = enabled? TLS_CONN_ST_PRE_HANDSHAKE : TLS_CONN_ST_IGNORED;
         tls_conf_conn_set(c, cc);
         apr_pool_cleanup_register(c->pool, cc, tls_core_conn_free,
                                   apr_pool_cleanup_null);
         ap_log_error(APLOG_MARK, APLOG_TRACE3, 0, c->base_server,
-            "tls_core_conn_init, prep for tls: %s",
-            c->base_server->server_hostname);
+            "tls_core_conn_base_init: %s for tls: %s",
+            enabled? "enabled" : "disabled", c->base_server->server_hostname);
+        if (enabled) {
+            /* Use a generic rustls_session with its defaults, which we feed
+             * the first TLS bytes from the client. Its Hello message will trigger
+             * our callback where we can inspect the (possibly) supplied SNI and
+             * select another server.
+             */
+            rr = rustls_server_connection_new(sc->global->rustls_hello_config, &cc->rustls_session);
+            if (RUSTLS_RESULT_OK != rr) goto cleanup;
 
-        /* Use a generic rustls_session with its defaults, which we feed
-         * the first TLS bytes from the client. Its Hello message will trigger
-         * our callback where we can inspect the (possibly) supplied SNI and
-         * select another server.
-         */
-        rr = rustls_server_connection_new(sc->global->rustls_hello_config, &cc->rustls_session);
-        if (RUSTLS_RESULT_OK != rr) goto cleanup;
-
-        rustls_connection_set_userdata(cc->rustls_session, c);
-        /* copy over mutable connection properties inherited from server setting */
-        cc->service_unavailable = sc->service_unavailable;
+            rustls_connection_set_userdata(cc->rustls_session, c);
+            /* copy over mutable connection properties inherited from server setting */
+            cc->service_unavailable = sc->service_unavailable;
+        }
     }
 
-    rv = OK;
+    rv = (cc->state == TLS_CONN_ST_PRE_HANDSHAKE)? OK : DECLINED;
 cleanup:
     if (RUSTLS_RESULT_OK != rr) {
         const char *err_descr = NULL;

@@ -6,7 +6,7 @@ from test_env import TlsTestEnv, ExecResult
 from test_conf import TlsTestConf
 
 
-class TestMD:
+class TestTLS:
 
     env = TlsTestEnv()
 

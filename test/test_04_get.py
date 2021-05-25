@@ -16,9 +16,7 @@ class TestGet:
 
     @staticmethod
     def mk_text_file(fpath:str, lines: int):
-        t110 = ""
-        for _ in range(11):
-            t110 += "0123456789"
+        t110 = 11 * "0123456789"
         with open(fpath, "w") as fd:
             for i in range(lines):
                 fd.write("{0:015d}: ".format(i)) # total 128 bytes per line

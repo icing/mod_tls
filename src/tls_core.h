@@ -81,7 +81,7 @@ apr_status_t tls_core_init(apr_pool_t *p, apr_pool_t *ptemp, server_rec *base_se
  * Initialize the module for the new connection based on 'c->base_server'.
  * The connection might not be for TLS which is then rememberd at the config.
  */
-int tls_core_conn_base_init(conn_rec *c);
+int tls_core_conn_base_init(conn_rec *c, int flag_enabled);
 
 /**
  * Called when the ClientHello has been received and values from it
