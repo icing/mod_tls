@@ -48,6 +48,7 @@ typedef struct {
     const char *tls_cipher_name;      /* the name of TLS cipher suite negotiated */
     const rustls_certificate *client_cert; /* handshaked client ceritificate or NULL */
     int session_id_cache_hit;         /* if a submitted session id was found in our cache */
+    const char *user_name;            /* != NULL if we derived a TLSUserName from the client_cert */
 
     apr_table_t *subprocess_env;      /* common TLS variables for this connection */
 

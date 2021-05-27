@@ -107,6 +107,7 @@ void *tls_conf_merge_svr(apr_pool_t *pool, void *basev, void *addv)
     nconf->client_ca = add->client_ca? add->client_ca : base->client_ca;
     nconf->client_auth = (add->client_auth != TLS_CLIENT_AUTH_UNSET)?
         add->client_auth : base->client_auth;
+    nconf->var_user_name = add->var_user_name? add->var_user_name : base->var_user_name;
     return nconf;
 }
 
@@ -517,6 +518,15 @@ static const char *tls_conf_set_client_auth(
     return err;
 }
 
+static const char *tls_conf_set_user_name(
+    cmd_parms *cmd, void *dc, const char *var_user_name)
+{
+    tls_conf_server_t *sc = tls_conf_server_get(cmd->server);
+    (void)dc;
+    sc->var_user_name = var_user_name;
+    return NULL;
+}
+
 const command_rec tls_conf_cmds[] = {
     AP_INIT_TAKE12("TLSCertificate", tls_conf_add_certificate, NULL, RSRC_CONF,
         "Add a certificate to the server by specifying a file containing the "
@@ -542,5 +552,7 @@ const command_rec tls_conf_cmds[] = {
         "Set strictness of client server name (SNI) check against hosts, default on."),
     AP_INIT_TAKE1("TLSSessionCache", tls_conf_set_session_cache, NULL, RSRC_CONF,
         "Set which cache to use for TLS sessions."),
+    AP_INIT_TAKE1("TLSUserName", tls_conf_set_user_name, NULL, RSRC_CONF,
+        "Set the SSL variable to be used as user name."),
     AP_INIT_TAKE1(NULL, NULL, NULL, RSRC_CONF, NULL)
 };

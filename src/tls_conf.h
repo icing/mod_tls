@@ -67,6 +67,7 @@ typedef struct {
 
     const char *client_ca;            /* PEM file with trust anchors for client certs */
     tls_client_auth_t client_auth;    /* how client authentication with certificates is used */
+    const char *var_user_name;        /* which SSL variable to use as user name */
 
     apr_array_header_t *certified_keys; /* rustls_certified_key list configured */
     int base_server;                  /* != 0 iff this is the base server */

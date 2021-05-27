@@ -19,13 +19,19 @@ class TestProxySSL:
         conf.add_vhosts(domains=[cls.env.domain_a, cls.env.domain_b], extras={
             'base': f"""
             LogLevel proxy:trace1 proxy_http:trace1
+            <Proxy https://127.0.0.1:{cls.env.https_port}/>
+                SSLProxyEngine on
+                SSLProxyVerify require
+                SSLProxyCACertificateFile {cls.env.CA.cert_file}
+                ProxyPreserveHost on
+            </Proxy>
+            <Proxy https://localhost:{cls.env.https_port}/>
+                ProxyPreserveHost on
+            </Proxy>
             """,
             cls.env.domain_b: f"""
-            SSLProxyEngine on
-            SSLProxyVerify none
-            ProxyPreserveHost on
-            ProxyPass "/proxy-ssl/" "https://127.0.0.1:{cls.env.https_port}/"
-            ProxyPassReverse "/proxy-ssl/" "https://{cls.env.domain_b}:{cls.env.https_port}" 
+            ProxyPass /proxy-ssl/ https://127.0.0.1:{cls.env.https_port}/
+            ProxyPass /proxy-local/ https://localhost:{cls.env.https_port}/
             TLSOptions +StdEnvVars
             """,
         })
@@ -43,6 +49,11 @@ class TestProxySSL:
     def test_13_proxy_ssl_get(self):
         data = self.env.https_get_json(self.env.domain_b, "/proxy-ssl/index.json")
         assert data == {'domain': self.env.domain_b}
+
+    def test_13_proxy_ssl_get_local(self):
+        # does not work, since SSLProxy* not configured
+        data = self.env.https_get_json(self.env.domain_b, "/proxy-local/index.json")
+        assert data == None
 
     @pytest.mark.parametrize("name, value", [
         ("SERVER_NAME", "b.mod-tls.test"),
@@ -62,7 +73,7 @@ class TestProxySSL:
         ("SSL_VERSION_LIBRARY", r'crustls/\d+\.\d+\.\d+/rustls/\d+\.\d+\.\d+'),
     ])
     def test_13_proxy_ssl_vars_match(self, name: str, pattern: str):
-        r = self.env.https_get(self.env.domain_b, f"/vars.py?name={name}")
+        r = self.env.https_get(self.env.domain_b, f"/proxy-ssl/vars.py?name={name}")
         assert r.exit_code == 0, r.stderr
         assert name in r.json
         assert re.match(pattern, r.json[name]), r.json

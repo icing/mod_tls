@@ -2,6 +2,7 @@ import os
 import time
 from datetime import timedelta
 
+from test_cert import Credentials
 from test_env import TlsTestEnv, ExecResult
 from test_conf import TlsTestConf
 
@@ -29,6 +30,13 @@ class TestTLS:
     def setup_method(self, _method):
         if self.env.is_live(timeout=timedelta(milliseconds=100)):
             assert self.env.apache_stop() == 0
+
+    def get_ssl_var(self, domain: str, cert: Credentials, name: str):
+        r = self.env.https_get(domain, f"/vars.py?name={name}", extra_args=[
+            "--cert", cert.cert_file
+        ] if cert else [])
+        assert r.exit_code == 0, r.stderr
+        return r.json[name] if name in r.json else None
 
     def test_12_set_ca_non_existing(self):
         conf = TlsTestConf(env=self.env)
@@ -67,6 +75,7 @@ class TestTLS:
             self.env.domain_b: f"""
             TLSClientCertificate required
             TLSClientCA {self.ca_file}
+            TLSUserName SSL_CLIENT_S_DN_CN 
             """
         })
         conf.write()
@@ -79,15 +88,12 @@ class TestTLS:
             "--cert", self.clientsX.get_first("user1").cert_file
         ])
         assert data == {'domain': self.env.domain_b}
-        r = self.env.https_get(self.env.domain_b, "/vars.py?name=REMOTE_USER")
+        r = self.env.https_get(self.env.domain_b, "/vars.py?name=SSL_CLIENT_S_DN_CN")
         assert r.exit_code != 0, "should have been prevented"
-        r = self.env.https_get(self.env.domain_b, "/vars.py?name=SSL_CLIENT_S_DN_CN", extra_args=[
-            "--cert", self.clientsX.get_first("user1").cert_file
-        ])
-        assert r.exit_code == 0, r.stderr
-        assert r.json == {
-            'SSL_CLIENT_S_DN_CN': 'Not Implemented',
-        }, r.stdout
+        val = self.get_ssl_var(self.env.domain_b, self.clientsX.get_first("user1"), "SSL_CLIENT_S_DN_CN")
+        assert val == 'Not Implemented'
+        val = self.get_ssl_var(self.env.domain_b, self.clientsX.get_first("user1"), "REMOTE_USER")
+        assert val == 'Not Implemented'
 
 
     def test_12_auth_ssl_optional(self):
@@ -99,6 +105,7 @@ class TestTLS:
             SSLVerifyDepth 2
             SSLOptions +StdEnvVars
             SSLCACertificateFile {self.ca_file}
+            SSLUserName SSL_CLIENT_S_DN
             """
         })
         conf.write()
@@ -107,24 +114,25 @@ class TestTLS:
         data = self.env.https_get_json(domain, "/index.json")
         assert data == {'domain': domain}
         # no client cert given, we expect the server variable to be empty
-        r = self.env.https_get(domain, "/vars.py?name=SSL_CLIENT_S_DN_CN")
-        assert r.exit_code == 0, r.stderr
-        assert r.json == {
-            'SSL_CLIENT_S_DN_CN': '',
-        }, r.stdout
+        val = self.get_ssl_var(self.env.domain_b, None, "SSL_CLIENT_S_DN_CN")
+        assert val == ''
         client_cert = self.clientsX.get_first("user1")
         data = self.env.https_get_json(domain, "/index.json", extra_args=[
             "--cert", client_cert.cert_file
         ])
         assert data == {'domain': domain}
-        r = self.env.https_get(domain, "/vars.py?name=SSL_CLIENT_S_DN_CN", extra_args=[
-            "--cert", client_cert.cert_file
-        ])
-        # with client cert, we expect the server variable to show? Do we?
-        assert r.exit_code == 0, r.stderr
-        assert r.json == {
-            'SSL_CLIENT_S_DN_CN': 'user1',
-        }, r.stdout
+        val = self.get_ssl_var(self.env.domain_b, client_cert, "SSL_CLIENT_S_DN_CN")
+        assert val == 'user1'
+        val = self.get_ssl_var(self.env.domain_b, client_cert, "SSL_CLIENT_S_DN")
+        assert val == 'O=abetterinternet-mod_tls,OU=clientsX,CN=user1'
+        val = self.get_ssl_var(self.env.domain_b, client_cert, "REMOTE_USER")
+        assert val == 'O=abetterinternet-mod_tls,OU=clientsX,CN=user1'
+        val = self.get_ssl_var(self.env.domain_b, client_cert, "SSL_CLIENT_I_DN")
+        assert val == 'O=abetterinternet-mod_tls,OU=clientsX'
+        val = self.get_ssl_var(self.env.domain_b, client_cert, "SSL_CLIENT_I_DN_CN")
+        assert val == ''
+        val = self.get_ssl_var(self.env.domain_b, client_cert, "SSL_CLIENT_I_DN_OU")
+        assert val == 'clientsX'
 
     def test_12_auth_optional(self):
         conf = TlsTestConf(env=self.env)

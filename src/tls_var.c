@@ -228,6 +228,14 @@ apr_status_t tls_var_handshake_done(conn_rec *c)
     if (!cc || (TLS_CONN_ST_IGNORED == cc->state)) goto cleanup;
 
     sc = tls_conf_server_get(cc->server);
+    if (cc->client_cert && sc->var_user_name) {
+        cc->user_name = tls_var_lookup(c->pool, cc->server, c, NULL, sc->var_user_name);
+        if (!cc->user_name) {
+            ap_log_error(APLOG_MARK, APLOG_WARNING, 0, cc->server, APLOGNO()
+                "Failed to set r->user to '%s'", sc->var_user_name);
+        }
+    }
+
     env = apr_table_make(c->pool, 5);
     ctx.p = c->pool;
     ctx.s = cc->server;
@@ -258,6 +266,10 @@ int tls_var_request_fixup(request_rec *r)
     cc = tls_conf_conn_get(c->master? c->master : c);
     if (!cc || (TLS_CONN_ST_IGNORED == cc->state)) goto cleanup;
 
+    if (cc->user_name) {
+        /* why is r->user a char* and not const? */
+        r->user = apr_pstrdup(r->pool, cc->user_name);
+    }
     if (cc->subprocess_env) {
         apr_table_overlap(r->subprocess_env, cc->subprocess_env, APR_OVERLAP_TABLES_SET);
     }

@@ -304,6 +304,8 @@ SSL\_COMPRESS_METHOD|     | always `NULL` since rustls does not support that fea
 SSL\_CIPHER_EXPORT |      | always `false` as rustls does not support such ciphers
 SSL\_CLIENT_VERIFY |      | either `SUCCESS` when a valid client certificate was presented or `NONE`
 SSL\_SESSION_RESUMED |    | either `Resumed` if a known TLS session id was presented by the client or `Initial` otherwise
+SSL\_CLIENT\_S\_DN\_CN |  | the common name (CN) of the distinguished name (DN) in the client certificate subject.
+
 
 The variables exposing several fields in the client and server certificate, such as `SSL_CLIENT_S_DN_CN` are not
 supported at the moment, as crustls is missing code to parse x.509 certificates.
@@ -401,3 +403,11 @@ NOTE: the current implementation is incomplete. Certificates are checked and val
 This must be defined if client certificates are configured. The file needs to contain the certificates that form a verifiable chain of trust together with the ones that clients present. If you have client certification with `mod_ssl` via [SSLCACertificateFile](https://httpd.apache.org/docs/current/mod/mod_ssl.html#sslcacertificatefile), the same file will work here.
 
 The path can be specified relative to the server root.
+
+### `TLSUserName`
+
+`TLSUserName var_name` sets the name of the SSL variable to get the user name from.
+
+This works when a client certificate is present. The SSL variable of that name is used to populate the
+user for requests, as visible in `REMOTE_USER` as forwarded to applications. A common approach is to use
+`SSL_CLIENT_S_DN_CN` for this.
