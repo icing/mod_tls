@@ -20,6 +20,7 @@
 
 #include "tls_conf.h"
 #include "tls_core.h"
+#include "tls_cert.h"
 #include "tls_util.h"
 #include "tls_var.h"
 #include "tls_version.h"
@@ -80,18 +81,37 @@ static const char *var_get_null(const tls_var_lookup_ctx_t *ctx)
 
 static const char *var_get_client_s_dn_cn(const tls_var_lookup_ctx_t *ctx)
 {
-    /* TODO: we need rust code to disect a certificate DER data */
-    return ctx->cc->client_cert? "Not Implemented" : NULL;
+    /* There is no support in the crustls/rustls/webpki APIs to
+     * parse X.509 certificates and extract information about
+     * subject, issuer, etc. */
+    if (!ctx->cc->client_certs || !ctx->cc->client_certs->nelts) return NULL;
+    return "Not Implemented";
 }
 
 static const char *var_get_client_verify(const tls_var_lookup_ctx_t *ctx)
 {
-    return ctx->cc->client_cert? "SUCCESS" : "NONE";
+    return ctx->cc->client_certs? "SUCCESS" : "NONE";
 }
 
 static const char *var_get_session_resumed(const tls_var_lookup_ctx_t *ctx)
 {
     return ctx->cc->session_id_cache_hit? "Resumed" : "Initial";
+}
+
+static const char *var_get_client_cert(const tls_var_lookup_ctx_t *ctx)
+{
+    const rustls_certificate *cert;
+    const char *pem;
+    apr_status_t rv;
+
+    if (!ctx->cc->client_certs || !ctx->cc->client_certs->nelts) return NULL;
+    cert = APR_ARRAY_IDX(ctx->cc->client_certs, 0, const rustls_certificate*);
+    if (APR_SUCCESS != (rv = tls_cert_to_pem(&pem, ctx->p, cert))) {
+        ap_log_error(APLOG_MARK, APLOG_DEBUG, rv, ctx->s, APLOGNO()
+                         "Failed to create certificate PEM");
+        return "Not Implemented";
+    }
+    return pem;
 }
 
 typedef struct {
@@ -111,6 +131,7 @@ static const var_def_t VAR_DEFS[] = {
     { "SSL_CIPHER_EXPORT", var_get_false },
     { "SSL_CLIENT_VERIFY", var_get_client_verify },
     { "SSL_SESSION_RESUMED", var_get_session_resumed },
+    { "SSL_CLIENT_CERT", var_get_client_cert },
 };
 
 static const char *const TlsAlwaysVars[] = {
@@ -129,6 +150,7 @@ static const char *const StdEnvVars[] = {
     "SSL_CIPHER_EXPORT",     /* implemented: always "false" */
     "SSL_CIPHER_USEKEYSIZE",
     "SSL_CIPHER_ALGKEYSIZE",
+    "SSL_CLIENT_CERT",       /* implemented: */
     "SSL_CLIENT_VERIFY",     /* implemented: always "SUCCESS" or "NONE" */
     "SSL_CLIENT_M_VERSION",
     "SSL_CLIENT_M_SERIAL",
@@ -228,7 +250,7 @@ apr_status_t tls_var_handshake_done(conn_rec *c)
     if (!cc || (TLS_CONN_ST_IGNORED == cc->state)) goto cleanup;
 
     sc = tls_conf_server_get(cc->server);
-    if (cc->client_cert && sc->var_user_name) {
+    if (cc->client_certs && sc->var_user_name) {
         cc->user_name = tls_var_lookup(c->pool, cc->server, c, NULL, sc->var_user_name);
         if (!cc->user_name) {
             ap_log_error(APLOG_MARK, APLOG_WARNING, 0, cc->server, APLOGNO()

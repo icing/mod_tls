@@ -76,6 +76,7 @@ class TestTLS:
             TLSClientCertificate required
             TLSClientCA {self.ca_file}
             TLSUserName SSL_CLIENT_S_DN_CN 
+            TLSOptions +StdEnvVars
             """
         })
         conf.write()
@@ -93,6 +94,8 @@ class TestTLS:
         val = self.get_ssl_var(self.env.domain_b, self.clientsX.get_first("user1"), "SSL_CLIENT_S_DN_CN")
         assert val == 'Not Implemented'
         val = self.get_ssl_var(self.env.domain_b, self.clientsX.get_first("user1"), "REMOTE_USER")
+        assert val == 'Not Implemented'
+        val = self.get_ssl_var(self.env.domain_b, self.clientsX.get_first("user1"), "SSL_CLIENT_CERT")
         assert val == 'Not Implemented'
 
 

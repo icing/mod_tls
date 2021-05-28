@@ -7,6 +7,7 @@
 
 #include <assert.h>
 #include <apr_lib.h>
+#include <apr_base64.h>
 #include <apr_strings.h>
 
 #include <httpd.h>
@@ -53,6 +54,14 @@ apr_status_t tls_cert_load_pem(
 cleanup:
     *ppem = (APR_SUCCESS == rv)? cpem : NULL;
     return rv;
+}
+
+apr_status_t tls_cert_to_pem(const char **ppem, apr_pool_t *p, const rustls_certificate *cert)
+{
+    (void)cert;
+    (void)p;
+    *ppem = NULL;
+    return APR_ENOTIMPL;
 }
 
 static void nullify_key_pem(tls_cert_pem_t *pems)

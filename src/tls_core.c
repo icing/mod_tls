@@ -871,6 +871,7 @@ apr_status_t tls_core_conn_post_handshake(conn_rec *c)
     tls_conf_conn_t *cc = tls_conf_conn_get(c);
     tls_conf_server_t *sc = tls_conf_server_get(cc->server);
     const rustls_supported_ciphersuite *rsuite;
+    const rustls_certificate *cert;
     apr_status_t rv = APR_SUCCESS;
 
     if (rustls_connection_is_handshaking(cc->rustls_session)) {
@@ -898,8 +899,17 @@ apr_status_t tls_core_conn_post_handshake(conn_rec *c)
     ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, c, "post_handshake %s: %s [%s]",
         cc->server->server_hostname, cc->tls_protocol_name, cc->tls_cipher_name);
 
-    cc->client_cert = rustls_connection_get_peer_certificate(cc->rustls_session, 0);
-    if (!cc->client_cert && sc->client_auth == TLS_CLIENT_AUTH_REQUIRED) {
+    cert = rustls_connection_get_peer_certificate(cc->rustls_session, 0);
+    if (cert) {
+        size_t i = 0;
+
+        cc->client_certs = apr_array_make(c->pool, 5, sizeof(const rustls_certificate*));
+        while (cert) {
+            APR_ARRAY_PUSH(cc->client_certs, const rustls_certificate*) = cert;
+            cert = rustls_connection_get_peer_certificate(cc->rustls_session, ++i);
+        }
+    }
+    if (!cc->client_certs && sc->client_auth == TLS_CLIENT_AUTH_REQUIRED) {
         ap_log_cerror(APLOG_MARK, APLOG_INFO, 0, c, APLOGNO()
               "A client certificate is required, but no acceptable certificate was presented.");
         rv = APR_ECONNABORTED;

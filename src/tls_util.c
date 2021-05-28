@@ -58,11 +58,13 @@ const char *tls_data_to_str(apr_pool_t *p, const tls_data_t *d)
 apr_status_t tls_util_rustls_error(
     apr_pool_t *p, rustls_result rr, const char **perr_descr)
 {
-    char buffer[HUGE_STRING_LEN];
-    apr_size_t len = 0;
+    if (perr_descr) {
+        char buffer[HUGE_STRING_LEN];
+        apr_size_t len = 0;
 
-    rustls_error(rr, buffer, sizeof(buffer), &len);
-    *perr_descr = apr_pstrndup(p, buffer, len);
+        rustls_error(rr, buffer, sizeof(buffer), &len);
+        *perr_descr = apr_pstrndup(p, buffer, len);
+    }
     return APR_EGENERAL;
 }
 

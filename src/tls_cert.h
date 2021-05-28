@@ -33,6 +33,8 @@ typedef struct {
 apr_status_t tls_cert_load_pem(
     apr_pool_t *p, const tls_cert_spec_t *cert, tls_cert_pem_t **ppem);
 
+apr_status_t tls_cert_to_pem(const char **ppem, apr_pool_t *p, const rustls_certificate *cert);
+
 /**
  * Load a rustls certified key from a certificate specification.
  * The returned `rustls_certified_key` is owned by the caller.
