@@ -77,6 +77,7 @@ typedef struct {
 
 typedef struct {
     int std_env_vars;
+    int export_cert_vars;
 } tls_conf_dir_t;
 
 /* our static registry of configuration directives. */
@@ -104,6 +105,9 @@ tls_conf_server_t *tls_conf_server_get(server_rec *s);
 
 /* Get the directory specific module configuration for the request. */
 tls_conf_dir_t *tls_conf_dir_get(request_rec *r);
+
+/* Get the directory specific module configuration for the server. */
+tls_conf_dir_t *tls_conf_dir_server_get(server_rec *s);
 
 /* If any configuration values are unset, supply the global defaults. */
 apr_status_t tls_conf_server_apply_defaults(tls_conf_server_t *sc, apr_pool_t *p);

@@ -292,20 +292,25 @@ If you suppress all ciphers supported for a TLS protocol version, that version i
 
 Like `mod_ssl` the module supports variables in the request environment (e.g. forwarded to CGI processing). There is a small set of variables that will always be set and a larger one that is only added when `TLSOptions StdEnvVars` is configured.
 
-*Variable*       | Always | *Description*
------------------|:------:|--------------
-SSL\_TLS_SNI     |  x     | the server name indicator (SNI) send by the client
-SSL\_PROTOCOL     |  x    | the TLS protocol negotiated (TLSv1.2, TLSv1.3)
-SSL\_CIPHER       |  x    | the name of the TLS cipher negotiated
-SSL\_VERSION_INTERFACE |  | the module version as `mod_tls/n.n.n`
-SSL\_VERSION_LIBRARY |    | the rustls version as `crustls/n.n.n/rustls/n.n.n` 
-SSL\_SECURE_RENEG |       | always `false` since rustls does not support that feature
-SSL\_COMPRESS_METHOD|     | always `NULL` since rustls does not support that feature
-SSL\_CIPHER_EXPORT |      | always `false` as rustls does not support such ciphers
-SSL\_CLIENT_VERIFY |      | either `SUCCESS` when a valid client certificate was presented or `NONE`
-SSL\_SESSION_RESUMED |    | either `Resumed` if a known TLS session id was presented by the client or `Initial` otherwise
-SSL\_CLIENT\_S\_DN\_CN |  | the common name (CN) of the distinguished name (DN) in the client certificate subject.
+Variable       | TLSOption | Description
+-----------------|:---------:|:-----------------
+`SSL_TLS_SNI`    |  *     |  the server name indicator (SNI) send by the client
+`SSL_PROTOCOL`     |  *    |  the TLS protocol negotiated (TLSv1.2, TLSv1.3)
+`SSL_CIPHER`       |  *    |  the name of the TLS cipher negotiated
+`SSL_VERSION_INTERFACE` |StdEnvVars| the module version as `mod_tls/n.n.n`
+`SSL_VERSION_LIBRARY` |StdEnvVars  | the rustls version as `crustls/n.n.n/rustls/n.n.n` 
+`SSL_SECURE_RENEG` | StdEnvVars    | always `false` since rustls does not support that feature
+`SSL_COMPRESS_METHOD`| StdEnvVars  | always `NULL` since rustls does not support that feature
+`SSL_CIPHER_EXPORT` |  StdEnvVars  | always `false` as rustls does not support such ciphers
+`SSL_CLIENT_VERIFY` |  StdEnvVars  | either `SUCCESS` when a valid client certificate was presented or `NONE`
+`SSL_SESSION_RESUMED` | StdEnvVars | either `Resumed` if a known TLS session id was presented by the client or `Initial` otherwise
+`SSL_CLIENT_S_DN_CN` | NI*       | the common name (CN) of the distinguished name (DN) in the client certificate subject.
+`SSL_CLIENT_CERT` | ExportCertData| the client certificate in PEM format.
+`SSL_CLIENT_CHAIN_0` | ExportCertData| the 1st client chain certificate in PEM format.
+`SSL_CLIENT_CHAIN_[1-9]` | ExportCertData| the 2nd to 10th client chain certificate in PEM format.
+`SSL_SERVER_CERT` | ExportCertData| the selected server certificate in PEM format.
 
+*) NI: Not Implemented
 
 The variables exposing several fields in the client and server certificate, such as `SSL_CLIENT_S_DN_CN` are not
 supported at the moment, as crustls is missing code to parse x.509 certificates.
@@ -372,9 +377,30 @@ This will not disable any unmentioned ciphers supported by `rustls`. If you spec
 
 ### `TLSOptions`
 
-`TLSOptions [+|-]StdEnvVars` is analog to `SSLOptions` in `mod_ssl`.
+`TLSOptions [+|-]option` is analog to `SSLOptions` in `mod_ssl`.
 
-It is only relevant if you want to have certain TLS variables visible to request processing (see [Variables](#variables) below). This can be set per directory/location.
+This can be set per directory/location and `option` can be:
+
+* `StdEnvVars`: adds more variables to the requests environemnt, as forwarded for example to CGI processing and other applications.
+* `ExportCertData`: adds certificate related variables to the request environment.
+* `Defaults`: resets all options to their default values.
+
+See [Variables](#variables) to see exactly which values are set on an option.
+
+Adding variables to a request environment adds overhead, especially when certificates need to be inspected and
+fields extracted. Therefore most variables are not set by default.
+
+You can configure `TLSOptions` per location or generally on a server/virtual host. Prefixing an option with `-` disables this option while leaving others unchanged. A `+` prefix is the same as writing the option without one.
+
+The `Defaults` value can be used to reset any options that are inherited from other locations or the virtual host/server. Example:
+
+```
+<Location /myplace/app>
+  TLSOptions Defaults StdEnvVars
+  ...
+</Location>
+```
+
 
 ### `TLSStrictSNI`
 
@@ -404,10 +430,3 @@ This must be defined if client certificates are configured. The file needs to co
 
 The path can be specified relative to the server root.
 
-### `TLSUserName`
-
-`TLSUserName var_name` sets the name of the SSL variable to get the user name from.
-
-This works when a client certificate is present. The SSL variable of that name is used to populate the
-user for requests, as visible in `REMOTE_USER` as forwarded to applications. A common approach is to use
-`SSL_CLIENT_S_DN_CN` for this.

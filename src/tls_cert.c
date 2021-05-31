@@ -7,7 +7,7 @@
 
 #include <assert.h>
 #include <apr_lib.h>
-#include <apr_base64.h>
+#include <apr_encode.h>
 #include <apr_strings.h>
 
 #include <httpd.h>
@@ -56,12 +56,77 @@ cleanup:
     return rv;
 }
 
+#define PEM_IN_CHUNK    48      /* PEM demands at most 64 chars per line */
+
+static apr_status_t tls_der_to_pem(
+    const char **ppem, apr_pool_t *p,
+    const unsigned char *der_data, apr_size_t der_len,
+    const char *header, const char *footer)
+{
+    apr_status_t rv = APR_SUCCESS;
+    char *pem = NULL, *s;
+    apr_size_t b64_len, n, hd_len, ft_len;
+    apr_ssize_t in_len, i;
+
+    if (der_len > INT_MAX) {
+        rv = APR_ENOMEM;
+        goto cleanup;
+    }
+    in_len = (apr_ssize_t)der_len;
+    rv = apr_encode_base64(NULL, (const char*)der_data, in_len, APR_ENCODE_NONE, &b64_len);
+    if (APR_SUCCESS != rv) goto cleanup;
+    if (b64_len > INT_MAX) {
+        rv = APR_ENOMEM;
+        goto cleanup;
+    }
+    hd_len = header? strlen(header) : 0;
+    ft_len = footer? strlen(footer) : 0;
+    s = pem = apr_pcalloc(p,
+        + b64_len + (der_len/PEM_IN_CHUNK) + 1 /* \n per chunk */
+        + hd_len +1 + ft_len + 1 /* adding \n */
+        + 1); /* NUL-terminated */
+    if (header) {
+        strcpy(s, header);
+        s += hd_len;
+        *s++ = '\n';
+    }
+    for (i = 0; in_len > 0; i += PEM_IN_CHUNK, in_len -= PEM_IN_CHUNK) {
+        rv = apr_encode_base64(s,
+            (const char*)der_data + i, in_len > PEM_IN_CHUNK? PEM_IN_CHUNK : in_len,
+            APR_ENCODE_NONE, &n);
+        s += n;
+        *s++ = '\n';
+    }
+    if (footer) {
+        strcpy(s, footer);
+        s += ft_len;
+        *s++ = '\n';
+    }
+cleanup:
+    *ppem = (APR_SUCCESS == rv)? pem : NULL;
+    return rv;
+}
+
+#define PEM_CERT_HD     "-----BEGIN CERTIFICATE-----"
+#define PEM_CERT_FT     "-----END CERTIFICATE-----"
+
 apr_status_t tls_cert_to_pem(const char **ppem, apr_pool_t *p, const rustls_certificate *cert)
 {
-    (void)cert;
-    (void)p;
-    *ppem = NULL;
-    return APR_ENOTIMPL;
+    const unsigned char* der_data;
+    size_t der_len;
+    rustls_result rr = RUSTLS_RESULT_OK;
+    apr_status_t rv = APR_SUCCESS;
+    const char *pem = NULL;
+
+    rr = rustls_certificate_get_der(cert, &der_data, &der_len);
+    if (RUSTLS_RESULT_OK != rr) goto cleanup;
+    rv = tls_der_to_pem(&pem, p, der_data, der_len, PEM_CERT_HD, PEM_CERT_FT);
+cleanup:
+    if (RUSTLS_RESULT_OK != rr) {
+        rv = tls_util_rustls_error(p, rr, NULL);
+    }
+    *ppem = (APR_SUCCESS == rv)? pem : NULL;
+    return rv;
 }
 
 static void nullify_key_pem(tls_cert_pem_t *pems)

@@ -118,6 +118,13 @@ tls_conf_dir_t *tls_conf_dir_get(request_rec *r)
     return dc;
 }
 
+tls_conf_dir_t *tls_conf_dir_server_get(server_rec *s)
+{
+    tls_conf_dir_t *dc = ap_get_module_config(s->lookup_defaults, &tls_module);
+    ap_assert(dc);
+    return dc;
+}
+
 void *tls_conf_create_dir(apr_pool_t *pool, char *dir)
 {
     tls_conf_dir_t *conf;
@@ -136,6 +143,7 @@ void *tls_conf_merge_dir(apr_pool_t *pool, void *basev, void *addv)
 
     nconf = apr_pcalloc(pool, sizeof(*nconf));
     nconf->std_env_vars = MERGE_INT(base, add, std_env_vars);
+    nconf->export_cert_vars = MERGE_INT(base, add, export_cert_vars);
     return nconf;
 }
 
@@ -143,6 +151,7 @@ static void tls_conf_dir_set_options_defaults(apr_pool_t *pool, tls_conf_dir_t *
 {
     (void)pool;
     dc->std_env_vars = TLS_FLAG_FALSE;
+    dc->export_cert_vars = TLS_FLAG_FALSE;
 }
 
 apr_status_t tls_conf_server_apply_defaults(tls_conf_server_t *sc, apr_pool_t *p)
@@ -450,8 +459,15 @@ static const char *tls_conf_set_options(
             ++option;
         }
 
-        if (!apr_strnatcasecmp("StdEnvVars", option)) {
+        if (!apr_strnatcasecmp("Defaults", option)) {
+            dc->std_env_vars = TLS_FLAG_FALSE;
+            dc->export_cert_vars = TLS_FLAG_FALSE;
+        }
+        else if (!apr_strnatcasecmp("StdEnvVars", option)) {
             dc->std_env_vars = val;
+        }
+        else if (!apr_strnatcasecmp("ExportCertData", option)) {
+            dc->export_cert_vars = val;
         }
         else {
             err = apr_pstrcat(cmd->pool, cmd->cmd->name,
@@ -518,6 +534,7 @@ static const char *tls_conf_set_client_auth(
     return err;
 }
 
+#if 0
 static const char *tls_conf_set_user_name(
     cmd_parms *cmd, void *dc, const char *var_user_name)
 {
@@ -526,6 +543,7 @@ static const char *tls_conf_set_user_name(
     sc->var_user_name = var_user_name;
     return NULL;
 }
+#endif
 
 const command_rec tls_conf_cmds[] = {
     AP_INIT_TAKE12("TLSCertificate", tls_conf_add_certificate, NULL, RSRC_CONF,
@@ -552,7 +570,8 @@ const command_rec tls_conf_cmds[] = {
         "Set strictness of client server name (SNI) check against hosts, default on."),
     AP_INIT_TAKE1("TLSSessionCache", tls_conf_set_session_cache, NULL, RSRC_CONF,
         "Set which cache to use for TLS sessions."),
-    AP_INIT_TAKE1("TLSUserName", tls_conf_set_user_name, NULL, RSRC_CONF,
+/* Not there yet    AP_INIT_TAKE1("TLSUserName", tls_conf_set_user_name, NULL, RSRC_CONF,
         "Set the SSL variable to be used as user name."),
+*/
     AP_INIT_TAKE1(NULL, NULL, NULL, RSRC_CONF, NULL)
 };

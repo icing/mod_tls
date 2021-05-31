@@ -1,3 +1,5 @@
+ * Added `TLSOptions ExportCertData` to export the certificates PEM data to the request env.
+ * Added `TLSOptions Defaults` to reset options settings in a location.
  * Adding test cases for http and https proxy setups
  * Intercepting mod_ssl/mod_proxy calling to avoid enabling mod_tls on proxy connections.
 

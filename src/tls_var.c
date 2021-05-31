@@ -36,6 +36,8 @@ typedef struct {
     request_rec *r;
     tls_conf_conn_t *cc;
     const char *name;
+    const char *arg_s;
+    int arg_i;
 } tls_var_lookup_ctx_t;
 
 typedef const char *var_lookup(const tls_var_lookup_ctx_t *ctx);
@@ -103,13 +105,36 @@ static const char *var_get_client_cert(const tls_var_lookup_ctx_t *ctx)
     const rustls_certificate *cert;
     const char *pem;
     apr_status_t rv;
+    int cert_idx = 0;
 
-    if (!ctx->cc->client_certs || !ctx->cc->client_certs->nelts) return NULL;
-    cert = APR_ARRAY_IDX(ctx->cc->client_certs, 0, const rustls_certificate*);
+    if (ctx->arg_s) {
+        if (strcmp(ctx->arg_s, "chain")) return NULL;
+        /* ctx->arg_i'th chain cert, which is in out list as */
+        cert_idx = ctx->arg_i + 1;
+    }
+    if (!ctx->cc->client_certs || cert_idx >= ctx->cc->client_certs->nelts) return NULL;
+    cert = APR_ARRAY_IDX(ctx->cc->client_certs, cert_idx, const rustls_certificate*);
     if (APR_SUCCESS != (rv = tls_cert_to_pem(&pem, ctx->p, cert))) {
         ap_log_error(APLOG_MARK, APLOG_DEBUG, rv, ctx->s, APLOGNO()
-                         "Failed to create certificate PEM");
-        return "Not Implemented";
+                         "Failed to create client certificate PEM");
+        return NULL;
+    }
+    return pem;
+}
+
+static const char *var_get_server_cert(const tls_var_lookup_ctx_t *ctx)
+{
+    const rustls_certificate *cert;
+    const char *pem;
+    apr_status_t rv;
+
+    if (!ctx->cc->key) return NULL;
+    cert = rustls_certified_key_get_certificate(ctx->cc->key, 0);
+    if (!cert) return NULL;
+    if (APR_SUCCESS != (rv = tls_cert_to_pem(&pem, ctx->p, cert))) {
+        ap_log_error(APLOG_MARK, APLOG_DEBUG, rv, ctx->s, APLOGNO()
+                         "Failed to create server certificate PEM");
+        return NULL;
     }
     return pem;
 }
@@ -117,21 +142,34 @@ static const char *var_get_client_cert(const tls_var_lookup_ctx_t *ctx)
 typedef struct {
     const char *name;
     var_lookup* fn;
+    const char *arg_s;
+    int arg_i;
 } var_def_t;
 
 static const var_def_t VAR_DEFS[] = {
-    { "SSL_PROTOCOL", var_get_ssl_protocol },
-    { "SSL_CIPHER", var_get_ssl_cipher },
-    { "SSL_TLS_SNI", var_get_sni_hostname },
-    { "SSL_CLIENT_S_DN_CN", var_get_client_s_dn_cn },
-    { "SSL_VERSION_INTERFACE", var_get_version_interface },
-    { "SSL_VERSION_LIBRARY", var_get_version_library },
-    { "SSL_SECURE_RENEG", var_get_false },
-    { "SSL_COMPRESS_METHOD", var_get_null },
-    { "SSL_CIPHER_EXPORT", var_get_false },
-    { "SSL_CLIENT_VERIFY", var_get_client_verify },
-    { "SSL_SESSION_RESUMED", var_get_session_resumed },
-    { "SSL_CLIENT_CERT", var_get_client_cert },
+    { "SSL_PROTOCOL", var_get_ssl_protocol, NULL, 0 },
+    { "SSL_CIPHER", var_get_ssl_cipher, NULL, 0 },
+    { "SSL_TLS_SNI", var_get_sni_hostname, NULL, 0 },
+    { "SSL_CLIENT_S_DN_CN", var_get_client_s_dn_cn, NULL, 0 },
+    { "SSL_VERSION_INTERFACE", var_get_version_interface, NULL, 0 },
+    { "SSL_VERSION_LIBRARY", var_get_version_library, NULL, 0 },
+    { "SSL_SECURE_RENEG", var_get_false, NULL, 0 },
+    { "SSL_COMPRESS_METHOD", var_get_null, NULL, 0 },
+    { "SSL_CIPHER_EXPORT", var_get_false, NULL, 0 },
+    { "SSL_CLIENT_VERIFY", var_get_client_verify, NULL, 0 },
+    { "SSL_SESSION_RESUMED", var_get_session_resumed, NULL, 0 },
+    { "SSL_CLIENT_CERT", var_get_client_cert, NULL, 0 },
+    { "SSL_CLIENT_CHAIN_0", var_get_client_cert, "chain", 0 },
+    { "SSL_CLIENT_CHAIN_1", var_get_client_cert, "chain", 1 },
+    { "SSL_CLIENT_CHAIN_2", var_get_client_cert, "chain", 2 },
+    { "SSL_CLIENT_CHAIN_3", var_get_client_cert, "chain", 3 },
+    { "SSL_CLIENT_CHAIN_4", var_get_client_cert, "chain", 4 },
+    { "SSL_CLIENT_CHAIN_5", var_get_client_cert, "chain", 5 },
+    { "SSL_CLIENT_CHAIN_6", var_get_client_cert, "chain", 6 },
+    { "SSL_CLIENT_CHAIN_7", var_get_client_cert, "chain", 7 },
+    { "SSL_CLIENT_CHAIN_8", var_get_client_cert, "chain", 8 },
+    { "SSL_CLIENT_CHAIN_9", var_get_client_cert, "chain", 9 },
+    { "SSL_SERVER_CERT", var_get_server_cert, NULL, 0 },
 };
 
 static const char *const TlsAlwaysVars[] = {
@@ -150,7 +188,6 @@ static const char *const StdEnvVars[] = {
     "SSL_CIPHER_EXPORT",     /* implemented: always "false" */
     "SSL_CIPHER_USEKEYSIZE",
     "SSL_CIPHER_ALGKEYSIZE",
-    "SSL_CLIENT_CERT",       /* implemented: */
     "SSL_CLIENT_VERIFY",     /* implemented: always "SUCCESS" or "NONE" */
     "SSL_CLIENT_M_VERSION",
     "SSL_CLIENT_M_SERIAL",
@@ -174,6 +211,22 @@ static const char *const StdEnvVars[] = {
     "SSL_SESSION_RESUMED",   /* implemented: if our cache was hit successfully */
 };
 
+/* Cert related variables, export when TLSOption ExportCertData is set */
+static const char *const ExportCertVars[] = {
+    "SSL_CLIENT_CERT",       /* implemented: */
+    "SSL_CLIENT_CHAIN_0",    /* implemented: */
+    "SSL_CLIENT_CHAIN_1",    /* implemented: */
+    "SSL_CLIENT_CHAIN_2",    /* implemented: */
+    "SSL_CLIENT_CHAIN_3",    /* implemented: */
+    "SSL_CLIENT_CHAIN_4",    /* implemented: */
+    "SSL_CLIENT_CHAIN_5",    /* implemented: */
+    "SSL_CLIENT_CHAIN_6",    /* implemented: */
+    "SSL_CLIENT_CHAIN_7",    /* implemented: */
+    "SSL_CLIENT_CHAIN_8",    /* implemented: */
+    "SSL_CLIENT_CHAIN_9",    /* implemented: */
+    "SSL_SERVER_CERT",       /* implemented: */
+};
+
 void tls_var_init_lookup_hash(apr_pool_t *pool, apr_hash_t *map)
 {
     const var_def_t *def;
@@ -186,18 +239,21 @@ void tls_var_init_lookup_hash(apr_pool_t *pool, apr_hash_t *map)
     }
 }
 
-static const char *invoke(var_def_t* def, const tls_var_lookup_ctx_t *ctx)
+static const char *invoke(var_def_t* def, tls_var_lookup_ctx_t *ctx)
 {
     if (ctx->cc && (ctx->cc->state != TLS_CONN_ST_IGNORED)) {
         const char *val = ctx->cc->subprocess_env?
             apr_table_get(ctx->cc->subprocess_env, def->name) : NULL;
-        return (val && *val)? val : def->fn(ctx);
+        if (val && *val) return val;
+        ctx->arg_s = def->arg_s;
+        ctx->arg_i = def->arg_i;
+        return def->fn(ctx);
     }
     return NULL;
 }
 
 static void set_var(
-    const tls_var_lookup_ctx_t *ctx, apr_hash_t *lookups, apr_table_t *table)
+    tls_var_lookup_ctx_t *ctx, apr_hash_t *lookups, apr_table_t *table)
 {
     var_def_t* def = apr_hash_get(lookups, ctx->name, APR_HASH_KEY_STRING);
     if (def) {
@@ -237,14 +293,65 @@ const char *tls_var_lookup(
     return val;
 }
 
+static void add_vars(apr_table_t *env, conn_rec *c, server_rec *s, request_rec *r)
+{
+    tls_conf_server_t *sc;
+    tls_conf_dir_t *dc, *sdc;
+    tls_var_lookup_ctx_t ctx;
+    apr_size_t i;
+    int overlap;
+
+    sc = tls_conf_server_get(s);
+    dc = r? tls_conf_dir_get(r) : tls_conf_dir_server_get(s);
+    sdc = r? tls_conf_dir_server_get(s): dc;
+    ctx.p = r? r->pool : c->pool;
+    ctx.s = s;
+    ctx.c = c;
+    ctx.r = r;
+    ctx.cc = tls_conf_conn_get(c->master? c->master : c);
+    /* Can we re-use teh precomputed connection values? */
+    overlap = (r && ctx.cc->subprocess_env && r->server == ctx.cc->server);
+    if (overlap) {
+        apr_table_overlap(env, ctx.cc->subprocess_env, APR_OVERLAP_TABLES_SET);
+    }
+    else {
+        apr_table_setn(env, "HTTPS", "on");
+        for (i = 0; i < TLS_DIM(TlsAlwaysVars); ++i) {
+            ctx.name = TlsAlwaysVars[i];
+            set_var(&ctx, sc->global->var_lookups, env);
+        }
+    }
+    if (dc->std_env_vars == TLS_FLAG_TRUE) {
+        for (i = 0; i < TLS_DIM(StdEnvVars); ++i) {
+            ctx.name = StdEnvVars[i];
+            set_var(&ctx, sc->global->var_lookups, env);
+        }
+    }
+    else if (overlap && sdc->std_env_vars == TLS_FLAG_TRUE) {
+        /* Remove variables added on connection init that are disbled here */
+        for (i = 0; i < TLS_DIM(StdEnvVars); ++i) {
+            apr_table_unset(env, StdEnvVars[i]);
+        }
+    }
+    if (dc->export_cert_vars == TLS_FLAG_TRUE) {
+        for (i = 0; i < TLS_DIM(ExportCertVars); ++i) {
+            ctx.name = ExportCertVars[i];
+            set_var(&ctx, sc->global->var_lookups, env);
+        }
+    }
+    else if (overlap && sdc->std_env_vars == TLS_FLAG_TRUE) {
+        /* Remove variables added on connection init that are disbled here */
+        for (i = 0; i < TLS_DIM(ExportCertVars); ++i) {
+            apr_table_unset(env, ExportCertVars[i]);
+        }
+    }
+ }
+
 apr_status_t tls_var_handshake_done(conn_rec *c)
 {
     tls_conf_conn_t *cc;
-    apr_status_t rv = APR_SUCCESS;
-    apr_table_t *env = NULL;
     tls_conf_server_t *sc;
-    tls_var_lookup_ctx_t ctx;
-    apr_size_t i;
+    apr_status_t rv = APR_SUCCESS;
 
     cc = tls_conf_conn_get(c);
     if (!cc || (TLS_CONN_ST_IGNORED == cc->state)) goto cleanup;
@@ -257,58 +364,26 @@ apr_status_t tls_var_handshake_done(conn_rec *c)
                 "Failed to set r->user to '%s'", sc->var_user_name);
         }
     }
-
-    env = apr_table_make(c->pool, 5);
-    ctx.p = c->pool;
-    ctx.s = cc->server;
-    ctx.c = c;
-    ctx.r = NULL;
-    ctx.cc = cc;
-
-    apr_table_setn(env, "HTTPS", "on");
-    for (i = 0; i < TLS_DIM(TlsAlwaysVars); ++i) {
-        ctx.name = TlsAlwaysVars[i];
-        set_var(&ctx, sc->global->var_lookups, env);
-    }
+    cc->subprocess_env = apr_table_make(c->pool, 5);
+    add_vars(cc->subprocess_env, c, cc->server, NULL);
 
 cleanup:
-    cc->subprocess_env = (APR_SUCCESS == rv)? env : NULL;
     return rv;
 }
 
 int tls_var_request_fixup(request_rec *r)
 {
     conn_rec *c = r->connection;
-    tls_conf_server_t *sc;
-    tls_conf_dir_t *dc = tls_conf_dir_get(r);
     tls_conf_conn_t *cc;
-    tls_var_lookup_ctx_t ctx;
-    apr_size_t i;
 
     cc = tls_conf_conn_get(c->master? c->master : c);
     if (!cc || (TLS_CONN_ST_IGNORED == cc->state)) goto cleanup;
-
     if (cc->user_name) {
         /* why is r->user a char* and not const? */
         r->user = apr_pstrdup(r->pool, cc->user_name);
     }
-    if (cc->subprocess_env) {
-        apr_table_overlap(r->subprocess_env, cc->subprocess_env, APR_OVERLAP_TABLES_SET);
-    }
+    add_vars(r->subprocess_env, c, r->server, r);
 
-    if (dc->std_env_vars == TLS_FLAG_TRUE) {
-        sc = tls_conf_server_get(cc->server);
-        ctx.p = r->pool;
-        ctx.s = cc->server;
-        ctx.c = c;
-        ctx.r = r;
-        ctx.cc = cc;
-
-        for (i = 0; i < TLS_DIM(StdEnvVars); ++i) {
-            ctx.name = StdEnvVars[i];
-            set_var(&ctx, sc->global->var_lookups, r->subprocess_env);
-        }
-    }
 cleanup:
     return DECLINED;
 }
