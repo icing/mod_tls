@@ -453,26 +453,28 @@ static const char *tls_conf_set_options(
 
     for (i = 0; i < argc; ++i) {
         option = argv[i];
-        val = TLS_FLAG_TRUE;
-        if (*option == '+' || *option == '-') {
-            val = (*option == '+')? TLS_FLAG_TRUE : TLS_FLAG_FALSE;
-            ++option;
-        }
-
         if (!apr_strnatcasecmp("Defaults", option)) {
             dc->std_env_vars = TLS_FLAG_FALSE;
             dc->export_cert_vars = TLS_FLAG_FALSE;
         }
-        else if (!apr_strnatcasecmp("StdEnvVars", option)) {
-            dc->std_env_vars = val;
-        }
-        else if (!apr_strnatcasecmp("ExportCertData", option)) {
-            dc->export_cert_vars = val;
-        }
         else {
-            err = apr_pstrcat(cmd->pool, cmd->cmd->name,
-                               ": unknown option '", option, "'", NULL);
-            goto cleanup;
+            val = TLS_FLAG_TRUE;
+            if (*option == '+' || *option == '-') {
+                val = (*option == '+')? TLS_FLAG_TRUE : TLS_FLAG_FALSE;
+                ++option;
+            }
+            
+            if (!apr_strnatcasecmp("StdEnvVars", option)) {
+                dc->std_env_vars = val;
+            }
+            else if (!apr_strnatcasecmp("ExportCertData", option)) {
+                dc->export_cert_vars = val;
+            }
+            else {
+                err = apr_pstrcat(cmd->pool, cmd->cmd->name,
+                                   ": unknown option '", option, "'", NULL);
+                goto cleanup;
+            }
         }
     }
 cleanup:
