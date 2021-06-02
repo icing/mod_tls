@@ -648,7 +648,11 @@ int tls_core_conn_base_init(conn_rec *c, int flag_enabled)
     rustls_result rr = RUSTLS_RESULT_OK;
 
     /* Are we configured to work here? */
-    enabled = (flag_enabled != TLS_FLAG_FALSE) && (sc->enabled == TLS_FLAG_TRUE);
+    enabled = flag_enabled != TLS_FLAG_FALSE
+#if AP_MODULE_MAGIC_AT_LEAST(20210531, 0)
+              && !c->outgoing
+#endif
+              && sc->enabled == TLS_FLAG_TRUE;
     if (!enabled && flag_enabled == TLS_FLAG_UNSET) {
         ap_log_error(APLOG_MARK, APLOG_TRACE4, 0, c->base_server,
             "tls_core_conn_base_init, not our connection: %s",
