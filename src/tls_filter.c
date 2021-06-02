@@ -419,6 +419,9 @@ static apr_status_t filter_conn_input(
      * b) read TLS bytes from the network and feed them to the rustls session.
      * c) go back to a) if b) added data.
      */
+#if AP_MODULE_MAGIC_AT_LEAST(20200420, 1)
+    ap_filter_reinstate_brigade(f, fctx->fin_plain_bb, NULL);
+#endif
     while (APR_BRIGADE_EMPTY(fctx->fin_plain_bb)) {
         apr_size_t rlen = 0;
         apr_bucket *b;
@@ -500,6 +503,11 @@ cleanup:
         ap_log_cerror(APLOG_MARK, APLOG_TRACE2, rv, fctx->c,
                      "tls_filter_conn_input: passed %ld bytes", (long)passed);
     }
+#if AP_MODULE_MAGIC_AT_LEAST(20200420, 1)
+    if (rv == APR_SUCCESS && AP_MODE_INIT != mode) {
+        rv = ap_filter_setaside_brigade(f, fctx->fin_plain_bb);
+    }
+#endif
     return rv;
 }
 
@@ -831,24 +839,10 @@ int tls_filter_conn_init(conn_rec *c)
     return OK;
 }
 
-static int tls_filter_input_pending(conn_rec *c)
-{
-    tls_conf_conn_t *cc = tls_conf_conn_get(c);
-
-    if (c->aborted || !cc || (TLS_CONN_ST_IGNORED == cc->state)) return DECLINED;
-    if (cc && cc->filter_ctx && !APR_BRIGADE_EMPTY(cc->filter_ctx->fin_plain_bb)) return OK;
-    return DECLINED;
-}
-
 void tls_filter_register(
     apr_pool_t *pool)
 {
     (void)pool;
     ap_register_input_filter(TLS_FILTER_RAW, filter_conn_input,  NULL, AP_FTYPE_CONNECTION + 5);
     ap_register_output_filter(TLS_FILTER_RAW, filter_conn_output, NULL, AP_FTYPE_CONNECTION + 5);
-#if AP_MODULE_MAGIC_AT_LEAST(20160312, 0)
-    ap_hook_input_pending(tls_filter_input_pending, NULL, NULL, APR_HOOK_MIDDLE);
-#else
-    (void)tls_filter_input_pending;
-#endif
 }
