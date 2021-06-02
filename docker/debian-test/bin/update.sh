@@ -38,8 +38,8 @@ cd httpd
 if test ! -d srclib/apr; then
   svn co http://svn.apache.org/repos/asf/apr/apr/trunk srclib/apr
 fi
-git fetch origin icing/2.4.x-ap_ssl_things ||fail
-git checkout icing/2.4.x-ap_ssl_things ||fail
+git fetch origin 2.4.x ||fail
+git checkout 2.4.x ||fail
 if needs_update $DATADIR/apache2/.installed .; then
   rm -f $DATADIR/apache2/.installed
   ./buildconf ||fail
@@ -51,13 +51,13 @@ if needs_update $DATADIR/apache2/.installed .; then
 fi
 
 cd $DATADIR
+rm -f $DATADIR/apache2/.crustls-installed
 if test ! -d crustls; then
-  rm -f $DATADIR/apache2/.crustls-installed
-  git clone https://github.com/icing/crustls.git crustls
+  git clone https://github.com/abetterinternet/crustls.git crustls
 fi
 cd crustls
-git fetch origin icing/main
-git checkout icing/main
+git fetch origin main
+git checkout main
 if needs_update $DATADIR/apache2/.crustls-installed .; then
   rm -f $DATADIR/apache2/.crustls-installed
   touch src/crustls.h ||fail "missing src/crustls.h"

@@ -463,7 +463,7 @@ static const char *tls_conf_set_options(
                 val = (*option == '+')? TLS_FLAG_TRUE : TLS_FLAG_FALSE;
                 ++option;
             }
-            
+
             if (!apr_strnatcasecmp("StdEnvVars", option)) {
                 dc->std_env_vars = val;
             }
