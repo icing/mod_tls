@@ -1,3 +1,7 @@
+ * Adding support for new ssl/proxy interworking PR in apache trunk.
+
+v0.7.1
+----------------------------------------------------------------------------------------------------
  * Renamed `TLSListen` configuration directive to `TLSEngine` after feedback
    from early tester (thanks @djc!).
 

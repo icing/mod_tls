@@ -93,6 +93,20 @@ static apr_status_t tls_post_config(apr_pool_t *p, apr_pool_t *plog,
     return tls_core_init(p, ptemp, s);
 }
 
+#if AP_MODULE_MAGIC_AT_LEAST(20210531, 0)
+static int tls_ssl_outgoing(conn_rec *c, ap_conf_vector_t *dir_conf, int enable_ssl)
+{
+    ap_log_error(APLOG_MARK, APLOG_TRACE3, 0, c->base_server,
+        "ssl_outgoing(enable=%d) for %s",
+        enable_ssl, c->base_server->server_hostname);
+    /* we are not handling proxy connections - for now */
+    (void)dir_conf;
+    tls_core_conn_base_init(c, TLS_FLAG_FALSE);
+    return DECLINED;
+}
+
+#else /* AP_MODULE_MAGIC_AT_LEAST(20210531, 0) */
+
 APR_DECLARE_OPTIONAL_FN(int, ssl_proxy_enable, (conn_rec *));
 APR_DECLARE_OPTIONAL_FN(int, ssl_engine_disable, (conn_rec *));
 APR_DECLARE_OPTIONAL_FN(int, ssl_engine_set, (conn_rec *,
@@ -129,39 +143,41 @@ static int ssl_engine_disable(conn_rec *c)
 static apr_status_t tls_post_config_proxy_ssl(
     apr_pool_t *p, apr_pool_t *plog, apr_pool_t *ptemp, server_rec *s)
 {
-    const char *tls_init_key = "mod_tls_proxy_ssl_counter";
-    void *data = NULL;
-    APR_OPTIONAL_FN_TYPE(ssl_engine_set) *fn_ssl_engine_set;
+    if (1) {
+        const char *tls_init_key = "mod_tls_proxy_ssl_counter";
+        void *data = NULL;
+        APR_OPTIONAL_FN_TYPE(ssl_engine_set) *fn_ssl_engine_set;
 
-    (void)p;
-    (void)plog;
-    (void)ptemp;
-    apr_pool_userdata_get(&data, tls_init_key, s->process->pool);
-    if (data == NULL) {
-        /* At the first start, httpd makes a config check dry run
-        * to see if the config is ok in principle.
-         */
-        apr_pool_userdata_set((const void *)1, tls_init_key,
-                              apr_pool_cleanup_null, s->process->pool);
-        return APR_SUCCESS;
+        (void)p;
+        (void)plog;
+        (void)ptemp;
+        apr_pool_userdata_get(&data, tls_init_key, s->process->pool);
+        if (data == NULL) {
+            /* At the first start, httpd makes a config check dry run
+            * to see if the config is ok in principle.
+             */
+            apr_pool_userdata_set((const void *)1, tls_init_key,
+                                  apr_pool_cleanup_null, s->process->pool);
+            return APR_SUCCESS;
+        }
+
+        /* mod_ssl (if so loaded, has registered its optional functions.
+         * When mod_proxy runs in post-config, it looks up those functions and uses
+         * them to manipulate SSL status for backend connections.
+         * We provide our own implementations to avoid becoming active on such
+         * connections for now.
+         * TODO: the real fix is to add this interworking in core ap_ssl_*() stuff
+         * */
+        fn_ssl_engine_set = APR_RETRIEVE_OPTIONAL_FN(ssl_engine_set);
+        module_ssl_engine_set = (fn_ssl_engine_set
+            && fn_ssl_engine_set != ssl_engine_set)? fn_ssl_engine_set : NULL;
+        APR_REGISTER_OPTIONAL_FN(ssl_engine_set);
+        APR_REGISTER_OPTIONAL_FN(ssl_proxy_enable);
+        APR_REGISTER_OPTIONAL_FN(ssl_engine_disable);
     }
-
-    /* mod_ssl (if so loaded, has registered its optional functions.
-     * When mod_proxy runs in post-config, it looks up those functions and uses
-     * them to manipulate SSL status for backend connections.
-     * We provide our own implementations to avoid becoming active on such
-     * connections for now.
-     * TODO: the real fix is to add this interworking in core ap_ssl_*() stuff
-     * */
-    fn_ssl_engine_set = APR_RETRIEVE_OPTIONAL_FN(ssl_engine_set);
-    module_ssl_engine_set = (fn_ssl_engine_set
-        && fn_ssl_engine_set != ssl_engine_set)? fn_ssl_engine_set : NULL;
-    APR_REGISTER_OPTIONAL_FN(ssl_engine_set);
-    APR_REGISTER_OPTIONAL_FN(ssl_proxy_enable);
-    APR_REGISTER_OPTIONAL_FN(ssl_engine_disable);
-
     return APR_SUCCESS;
 }
+#endif /* AP_MODULE_MAGIC_AT_LEAST(20210531, 0) else part */
 
 static void tls_init_child(apr_pool_t *p, server_rec *s)
 {
@@ -233,7 +249,6 @@ static void tls_hooks(apr_pool_t *pool)
 
     ap_hook_pre_config(tls_pre_config, NULL,NULL, APR_HOOK_MIDDLE);
     ap_hook_post_config(tls_post_config, NULL, NULL, APR_HOOK_MIDDLE);
-    ap_hook_post_config(tls_post_config_proxy_ssl, NULL, pre_proxy, APR_HOOK_MIDDLE);
     ap_hook_child_init(tls_init_child, NULL,NULL, APR_HOOK_MIDDLE);
     /* connection things */
     ap_hook_pre_connection(hook_pre_connection, NULL, NULL, APR_HOOK_MIDDLE);
@@ -246,4 +261,12 @@ static void tls_hooks(apr_pool_t *pool)
 
     ap_hook_ssl_conn_is_ssl(tls_conn_check_ssl, NULL, NULL, APR_HOOK_MIDDLE);
     ap_hook_ssl_var_lookup(tls_var_lookup, NULL, NULL, APR_HOOK_MIDDLE);
+
+#if AP_MODULE_MAGIC_AT_LEAST(20210531, 0)
+    (void)pre_proxy;
+    ap_hook_ssl_outgoing(tls_ssl_outgoing, NULL, NULL, APR_HOOK_MIDDLE);
+#else
+    ap_hook_post_config(tls_post_config_proxy_ssl, NULL, pre_proxy, APR_HOOK_MIDDLE);
+#endif
+
 }

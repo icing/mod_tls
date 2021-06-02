@@ -18,7 +18,7 @@ class TestProxy:
         # add vhosts a+b and a ssl proxy from a to b
         conf.add_vhosts(domains=[cls.env.domain_a, cls.env.domain_b], extras={
             'base': f"""
-            LogLevel proxy:trace1 proxy_http:trace1
+            LogLevel proxy:trace1 proxy_http:trace1 ssl:trace1
             """,
             cls.env.domain_b: f"""
             ProxyPreserveHost on

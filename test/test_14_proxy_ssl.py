@@ -18,7 +18,7 @@ class TestProxySSL:
         # add vhosts a+b and a ssl proxy from a to b
         conf.add_vhosts(domains=[cls.env.domain_a, cls.env.domain_b], extras={
             'base': f"""
-            LogLevel proxy:trace1 proxy_http:trace1
+            LogLevel proxy:trace1 proxy_http:trace1 ssl:trace1
             <Proxy https://127.0.0.1:{cls.env.https_port}/>
                 SSLProxyEngine on
                 SSLProxyVerify require
