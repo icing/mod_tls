@@ -41,7 +41,7 @@ API which has become part of the 2.4.48 release..
 
 ### Installation from source
 
-Run the usual autoconf/automake magic incantations. You need a built Apache trunk and specify the `--with-apxe=<path>/bin/apxs` on configuration if that is not in your `$PATH`. Also, you need [crustls](https://github.com/abtterinternet/crustls/) installed.
+Run the usual autoconf/automake magic incantations. You need a built Apache trunk and specify the `--with-apxe=<path>/bin/apxs` on configuration if that is not in your `$PATH`. Also, you need [crustls](https://github.com/abetterinternet/crustls/) installed.
 
 Run the usual autoconf/automake magic incantations.
 
