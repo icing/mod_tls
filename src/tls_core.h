@@ -32,7 +32,7 @@ typedef struct {
     int client_hello_seen;            /* the client hello has been inspected */
 
     const rustls_server_config *rustls_config; /* the config specially made for this connection or NULL */
-    rustls_connection *rustls_session; /* the session used on this connection or NULL */
+    rustls_connection *rustls_connection; /* the session used on this connection or NULL */
 
     apr_array_header_t *local_keys;   /* rustls_certified_key* array of connection specific keys */
     const rustls_certified_key *key;  /* the key selected for the session */
