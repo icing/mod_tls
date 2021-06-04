@@ -495,6 +495,8 @@ cleanup:
     return err;
 }
 
+#if TLS_CLIENT_CERTS
+
 static const char *tls_conf_set_client_ca(
     cmd_parms *cmd, void *dc, const char *client_ca)
 {
@@ -536,7 +538,6 @@ static const char *tls_conf_set_client_auth(
     return err;
 }
 
-#if 0
 static const char *tls_conf_set_user_name(
     cmd_parms *cmd, void *dc, const char *var_user_name)
 {
@@ -545,17 +546,14 @@ static const char *tls_conf_set_user_name(
     sc->var_user_name = var_user_name;
     return NULL;
 }
-#endif
+
+#endif /* if TLS_CLIENT_CERTS */
 
 const command_rec tls_conf_cmds[] = {
     AP_INIT_TAKE12("TLSCertificate", tls_conf_add_certificate, NULL, RSRC_CONF,
         "Add a certificate to the server by specifying a file containing the "
         "certificate PEM, followed by its chain PEMs. The PEM of the key must "
         "either also be there or can be given as a separate file."),
-    AP_INIT_TAKE1("TLSClientCA", tls_conf_set_client_ca, NULL, RSRC_CONF,
-        "Set the trust anchors for client certificates from a PEM file."),
-    AP_INIT_TAKE1("TLSClientCertificate", tls_conf_set_client_auth, NULL, RSRC_CONF,
-        "If TLS client authentication is 'required', 'optional' or 'none'."),
     AP_INIT_TAKE_ARGV("TLSCiphersPrefer", tls_conf_set_preferred_ciphers, NULL, RSRC_CONF,
         "Set the TLS ciphers to prefer when negotiating with a client."),
     AP_INIT_TAKE_ARGV("TLSCiphersSuppress", tls_conf_set_suppressed_ciphers, NULL, RSRC_CONF,
@@ -572,8 +570,13 @@ const command_rec tls_conf_cmds[] = {
         "Set strictness of client server name (SNI) check against hosts, default on."),
     AP_INIT_TAKE1("TLSSessionCache", tls_conf_set_session_cache, NULL, RSRC_CONF,
         "Set which cache to use for TLS sessions."),
-/* Not there yet    AP_INIT_TAKE1("TLSUserName", tls_conf_set_user_name, NULL, RSRC_CONF,
+#if TLS_CLIENT_CERTS
+    AP_INIT_TAKE1("TLSClientCA", tls_conf_set_client_ca, NULL, RSRC_CONF,
+        "Set the trust anchors for client certificates from a PEM file."),
+    AP_INIT_TAKE1("TLSClientCertificate", tls_conf_set_client_auth, NULL, RSRC_CONF,
+        "If TLS client authentication is 'required', 'optional' or 'none'."),
+    AP_INIT_TAKE1("TLSUserName", tls_conf_set_user_name, NULL, RSRC_CONF,
         "Set the SSL variable to be used as user name."),
-*/
+#endif
     AP_INIT_TAKE1(NULL, NULL, NULL, RSRC_CONF, NULL)
 };

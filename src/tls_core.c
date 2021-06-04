@@ -615,9 +615,9 @@ static apr_status_t tls_core_conn_free(void *data)
     tls_conf_conn_t *cc = data;
 
     /* free all rustls things we are owning. */
-    if (cc->rustls_session) {
-        rustls_connection_free(cc->rustls_session);
-        cc->rustls_session = NULL;
+    if (cc->rustls_connection) {
+        rustls_connection_free(cc->rustls_connection);
+        cc->rustls_connection = NULL;
     }
     if (cc->rustls_config) {
         rustls_server_config_free(cc->rustls_config);
@@ -670,15 +670,15 @@ int tls_core_conn_base_init(conn_rec *c, int flag_enabled)
             "tls_core_conn_base_init: %s for tls: %s",
             enabled? "enabled" : "disabled", c->base_server->server_hostname);
         if (enabled) {
-            /* Use a generic rustls_session with its defaults, which we feed
+            /* Use a generic rustls_connection with its defaults, which we feed
              * the first TLS bytes from the client. Its Hello message will trigger
              * our callback where we can inspect the (possibly) supplied SNI and
              * select another server.
              */
-            rr = rustls_server_connection_new(sc->global->rustls_hello_config, &cc->rustls_session);
+            rr = rustls_server_connection_new(sc->global->rustls_hello_config, &cc->rustls_connection);
             if (RUSTLS_RESULT_OK != rr) goto cleanup;
 
-            rustls_connection_set_userdata(cc->rustls_session, c);
+            rustls_connection_set_userdata(cc->rustls_connection, c);
             /* copy over mutable connection properties inherited from server setting */
             cc->service_unavailable = sc->service_unavailable;
         }
@@ -844,13 +844,13 @@ apr_status_t tls_core_conn_init_server(conn_rec *c)
      * the real handshake and, if successful, the traffic after that.
      * Free the current session and create the real one for the
      * selected server. */
-    rustls_connection_free(cc->rustls_session);
-    cc->rustls_session = NULL;
+    rustls_connection_free(cc->rustls_connection);
+    cc->rustls_connection = NULL;
     cc->rustls_config = rustls_server_config_builder_build(builder);
     builder = NULL;
-    rr = rustls_server_connection_new(cc->rustls_config, &cc->rustls_session);
+    rr = rustls_server_connection_new(cc->rustls_config, &cc->rustls_connection);
     if (RUSTLS_RESULT_OK != rr) goto cleanup;
-    rustls_connection_set_userdata(cc->rustls_session, c);
+    rustls_connection_set_userdata(cc->rustls_connection, c);
 
 cleanup:
     if (builder != NULL) {
@@ -878,7 +878,7 @@ apr_status_t tls_core_conn_post_handshake(conn_rec *c)
     const rustls_certificate *cert;
     apr_status_t rv = APR_SUCCESS;
 
-    if (rustls_connection_is_handshaking(cc->rustls_session)) {
+    if (rustls_connection_is_handshaking(cc->rustls_connection)) {
         rv = APR_EGENERAL;
         ap_log_error(APLOG_MARK, APLOG_ERR, rv, cc->server, APLOGNO()
                      "post handshake, but rustls claims to still be handshaking: %s",
@@ -886,10 +886,10 @@ apr_status_t tls_core_conn_post_handshake(conn_rec *c)
         goto cleanup;
     }
 
-    cc->tls_protocol_id = rustls_connection_get_protocol_version(cc->rustls_session);
+    cc->tls_protocol_id = rustls_connection_get_protocol_version(cc->rustls_connection);
     cc->tls_protocol_name = tls_proto_get_version_name(sc->global->proto,
         cc->tls_protocol_id, c->pool);
-    rsuite = rustls_connection_get_negotiated_ciphersuite(cc->rustls_session);
+    rsuite = rustls_connection_get_negotiated_ciphersuite(cc->rustls_connection);
     if (!rsuite) {
         rv = APR_EGENERAL;
         ap_log_error(APLOG_MARK, APLOG_ERR, rv, cc->server, APLOGNO()
@@ -903,14 +903,14 @@ apr_status_t tls_core_conn_post_handshake(conn_rec *c)
     ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, c, "post_handshake %s: %s [%s]",
         cc->server->server_hostname, cc->tls_protocol_name, cc->tls_cipher_name);
 
-    cert = rustls_connection_get_peer_certificate(cc->rustls_session, 0);
+    cert = rustls_connection_get_peer_certificate(cc->rustls_connection, 0);
     if (cert) {
         size_t i = 0;
 
         cc->client_certs = apr_array_make(c->pool, 5, sizeof(const rustls_certificate*));
         while (cert) {
             APR_ARRAY_PUSH(cc->client_certs, const rustls_certificate*) = cert;
-            cert = rustls_connection_get_peer_certificate(cc->rustls_session, ++i);
+            cert = rustls_connection_get_peer_certificate(cc->rustls_connection, ++i);
         }
     }
     if (!cc->client_certs && sc->client_auth == TLS_CLIENT_AUTH_REQUIRED) {

@@ -52,6 +52,7 @@ fi
 
 cd $DATADIR
 rm -f $DATADIR/apache2/.crustls-installed
+rm -rf crustls
 if test ! -d crustls; then
   git clone https://github.com/abetterinternet/crustls.git crustls
 fi

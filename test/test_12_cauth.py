@@ -2,11 +2,14 @@ import os
 import time
 from datetime import timedelta
 
+import pytest
+
 from test_cert import Credentials
 from test_env import TlsTestEnv, ExecResult
 from test_conf import TlsTestConf
 
 
+@pytest.mark.skip(reason="client certs disabled")
 class TestTLS:
 
     env = TlsTestEnv()

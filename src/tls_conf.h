@@ -20,6 +20,19 @@ struct ap_socache_instance_t;
 struct ap_socache_provider_t;
 struct apr_global_mutex_t;
 
+
+/* disabled, since rustls support is lacking
+ * - x.509 retrieval of certificate fields and extensions
+ * - certificate revocation lists (CRL)
+ * - x.509 access to issuer of trust chain in x.509 CA store:
+ *      server CA has ca1, ca2, ca3
+ *      client present certA
+ *      rustls verifies that it is signed by *one of* ca* certs
+ *      OCSP check needs (certA, issuing cert) for query
+ */
+#define TLS_CLIENT_CERTS    0
+
+
 typedef enum {
     TLS_CLIENT_AUTH_UNSET,
     TLS_CLIENT_AUTH_NONE,
