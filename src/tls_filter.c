@@ -286,7 +286,7 @@ static apr_status_t filter_do_pre_handshake(
         /* We have seen the client hello and selected the server (vhost) to use
          * on this connection. Set up the 'real' rustls_connection based on the
          * servers 'real' rustls_config. */
-        rv = tls_core_conn_init_server(fctx->c);
+        rv = tls_core_conn_seen_client_hello(fctx->c);
         if (APR_SUCCESS != rv) goto cleanup;
 
         bb_tmp = fctx->fin_tls_bb; /* data we have yet to feed to rustls */

@@ -100,8 +100,8 @@ static int tls_ssl_outgoing(conn_rec *c, ap_conf_vector_t *dir_conf, int enable_
         "ssl_outgoing(enable=%d) for %s",
         enable_ssl, c->base_server->server_hostname);
     /* we are not handling proxy connections - for now */
-    (void)dir_conf;
-    tls_core_conn_base_init(c, TLS_FLAG_FALSE);
+    tls_core_conn_bind(c, dir_conf);
+    tls_core_conn_disable(c);
     return DECLINED;
 }
 
@@ -122,7 +122,7 @@ static int ssl_engine_set(
         proxy, enable, c->base_server->server_hostname);
     if (proxy || !enable) {
         /* we are not handling proxy connections - for now */
-        tls_core_conn_base_init(c, TLS_FLAG_FALSE);
+        tls_core_conn_disable(c);
     }
     if (module_ssl_engine_set) {
         return module_ssl_engine_set(c, dc, proxy, enable);
@@ -194,7 +194,7 @@ static int hook_pre_connection(conn_rec *c, void *csd)
     if (c->master) goto cleanup;
 
     /* Configure settings for the base server. */
-    rv = tls_core_conn_base_init(c, TLS_FLAG_UNSET);
+    rv = tls_core_conn_init(c);
     if (OK != rv) goto cleanup;
 
     /* Install our input/output filters for handling TLS/application data */

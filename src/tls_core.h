@@ -10,13 +10,16 @@
 /* The module's state handling of a connection in normal chronological order,
  */
 typedef enum {
-    TLS_CONN_ST_IGNORED,
-    TLS_CONN_ST_PRE_HANDSHAKE,
-    TLS_CONN_ST_HANDSHAKE,
-    TLS_CONN_ST_TRAFFIC,
-    TLS_CONN_ST_NOTIFIED,
-    TLS_CONN_ST_DONE,
+    TLS_CONN_ST_INIT,             /* being initialized */
+    TLS_CONN_ST_DISABLED,         /* TLS is disabled here */
+    TLS_CONN_ST_PRE_HANDSHAKE,    /* TLS is enabled, prep handshake */
+    TLS_CONN_ST_HANDSHAKE,        /* TLS is enabled, handshake ongonig */
+    TLS_CONN_ST_TRAFFIC,          /* TLS is enabled, handshake done */
+    TLS_CONN_ST_NOTIFIED,         /* TLS is enabled, notification to end sent */
+    TLS_CONN_ST_DONE,             /* TLS is enabled, TLS has shut down */
 } tls_conn_state_t;
+
+#define TLS_CONN_ST_IS_ENABLED(cc)  (cc && cc->state >= TLS_CONN_ST_PRE_HANDSHAKE)
 
 struct tls_filter_ctx_t;
 
@@ -27,29 +30,30 @@ struct tls_filter_ctx_t;
 typedef struct {
     server_rec *server;               /* the server_rec selected for this connection,
                                        * initially c->base_server, to be negotiated via SNI. */
+    tls_conf_dir_t *dc;               /* directory config applying here */
     tls_conn_state_t state;
     int service_unavailable;          /* we 503 all requests on this connection */
     int client_hello_seen;            /* the client hello has been inspected */
 
-    const rustls_server_config *rustls_config; /* the config specially made for this connection or NULL */
     rustls_connection *rustls_connection; /* the session used on this connection or NULL */
+    struct tls_filter_ctx_t *filter_ctx; /* the context used by this connection's tls filters */
 
     apr_array_header_t *local_keys;   /* rustls_certified_key* array of connection specific keys */
     const rustls_certified_key *key;  /* the key selected for the session */
     int key_cloned;                   /* != 0 iff the key is a unique clone, to be freed */
-    struct tls_filter_ctx_t *filter_ctx; /* the context used by this connection's tls filters */
-
+    apr_array_header_t *peer_certs;   /* handshaked peer ceritificates or NULL */
     const char *sni_hostname;         /* the SNI value from the client hello, or NULL */
     const apr_array_header_t *alpn;   /* the protocols proposed via ALPN by the client */
-    const char *protocol_selected;    /* the ALPN selected protocol or NULL */
+    const char *application_protocol;    /* the ALPN selected protocol or NULL */
+
+    int session_id_cache_hit;         /* if a submitted session id was found in our cache */
+
     apr_uint16_t tls_protocol_id;      /* the TLS version negotiated */
     const char *tls_protocol_name;     /* the name of the TLS version negotiated */
     apr_uint16_t tls_cipher_id;       /* the TLS cipher suite negotiated */
     const char *tls_cipher_name;      /* the name of TLS cipher suite negotiated */
-    apr_array_header_t *client_certs; /* handshaked client ceritificates or NULL */
-    int session_id_cache_hit;         /* if a submitted session id was found in our cache */
-    const char *user_name;            /* != NULL if we derived a TLSUserName from the client_cert */
 
+    const char *user_name;            /* != NULL if we derived a TLSUserName from the client_cert */
     apr_table_t *subprocess_env;      /* common TLS variables for this connection */
 
     rustls_result last_error;
@@ -79,10 +83,27 @@ int tls_conn_check_ssl(conn_rec *c);
 apr_status_t tls_core_init(apr_pool_t *p, apr_pool_t *ptemp, server_rec *base_server);
 
 /**
- * Initialize the module for the new connection based on 'c->base_server'.
- * The connection might not be for TLS which is then rememberd at the config.
+ * Supply a directory configuration for the connection to work with. This
+ * maybe NULL. This can be called several times during the lifetime of a
+ * connection and must not change the current TLS state.
+ * @param c the connection
+ * @param dir_conf optional directory configuration that applies
  */
-int tls_core_conn_base_init(conn_rec *c, int flag_enabled);
+void tls_core_conn_bind(conn_rec *c, ap_conf_vector_t *dir_conf);
+
+/**
+ * Disable TLS on a new connection. Will do nothing on already initialized
+ * connections.
+ * @param c a new connection
+ */
+void tls_core_conn_disable(conn_rec *c);
+
+/**
+ * Initialize the module for the new connection.
+ * @param c a new connection
+ * @return OK if TLS has been enabled, DECLINED otherwise
+ */
+int tls_core_conn_init(conn_rec *c);
 
 /**
  * Called when the ClientHello has been received and values from it
@@ -97,7 +118,7 @@ int tls_core_conn_base_init(conn_rec *c, int flag_enabled);
  * On success, a proper `rustls_connection` will have been
  * created and set in the `tls_conf_conn_t` of the connection.
  */
-apr_status_t tls_core_conn_init_server(conn_rec *c);
+apr_status_t tls_core_conn_seen_client_hello(conn_rec *c);
 
 /**
  * The TLS handshake for the connection has been successfully performed.

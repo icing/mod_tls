@@ -86,13 +86,13 @@ static const char *var_get_client_s_dn_cn(const tls_var_lookup_ctx_t *ctx)
     /* There is no support in the crustls/rustls/webpki APIs to
      * parse X.509 certificates and extract information about
      * subject, issuer, etc. */
-    if (!ctx->cc->client_certs || !ctx->cc->client_certs->nelts) return NULL;
+    if (!ctx->cc->peer_certs || !ctx->cc->peer_certs->nelts) return NULL;
     return "Not Implemented";
 }
 
 static const char *var_get_client_verify(const tls_var_lookup_ctx_t *ctx)
 {
-    return ctx->cc->client_certs? "SUCCESS" : "NONE";
+    return ctx->cc->peer_certs? "SUCCESS" : "NONE";
 }
 
 static const char *var_get_session_resumed(const tls_var_lookup_ctx_t *ctx)
@@ -112,8 +112,8 @@ static const char *var_get_client_cert(const tls_var_lookup_ctx_t *ctx)
         /* ctx->arg_i'th chain cert, which is in out list as */
         cert_idx = ctx->arg_i + 1;
     }
-    if (!ctx->cc->client_certs || cert_idx >= ctx->cc->client_certs->nelts) return NULL;
-    cert = APR_ARRAY_IDX(ctx->cc->client_certs, cert_idx, const rustls_certificate*);
+    if (!ctx->cc->peer_certs || cert_idx >= ctx->cc->peer_certs->nelts) return NULL;
+    cert = APR_ARRAY_IDX(ctx->cc->peer_certs, cert_idx, const rustls_certificate*);
     if (APR_SUCCESS != (rv = tls_cert_to_pem(&pem, ctx->p, cert))) {
         ap_log_error(APLOG_MARK, APLOG_DEBUG, rv, ctx->s, APLOGNO()
                          "Failed to create client certificate PEM");
@@ -241,7 +241,7 @@ void tls_var_init_lookup_hash(apr_pool_t *pool, apr_hash_t *map)
 
 static const char *invoke(var_def_t* def, tls_var_lookup_ctx_t *ctx)
 {
-    if (ctx->cc && (ctx->cc->state != TLS_CONN_ST_IGNORED)) {
+    if (TLS_CONN_ST_IS_ENABLED(ctx->cc)) {
         const char *val = ctx->cc->subprocess_env?
             apr_table_get(ctx->cc->subprocess_env, def->name) : NULL;
         if (val && *val) return val;
@@ -354,10 +354,10 @@ apr_status_t tls_var_handshake_done(conn_rec *c)
     apr_status_t rv = APR_SUCCESS;
 
     cc = tls_conf_conn_get(c);
-    if (!cc || (TLS_CONN_ST_IGNORED == cc->state)) goto cleanup;
+    if (!TLS_CONN_ST_IS_ENABLED(cc)) goto cleanup;
 
     sc = tls_conf_server_get(cc->server);
-    if (cc->client_certs && sc->var_user_name) {
+    if (cc->peer_certs && sc->var_user_name) {
         cc->user_name = tls_var_lookup(c->pool, cc->server, c, NULL, sc->var_user_name);
         if (!cc->user_name) {
             ap_log_error(APLOG_MARK, APLOG_WARNING, 0, cc->server, APLOGNO()
@@ -377,7 +377,7 @@ int tls_var_request_fixup(request_rec *r)
     tls_conf_conn_t *cc;
 
     cc = tls_conf_conn_get(c->master? c->master : c);
-    if (!cc || (TLS_CONN_ST_IGNORED == cc->state)) goto cleanup;
+    if (!TLS_CONN_ST_IS_ENABLED(cc)) goto cleanup;
     if (cc->user_name) {
         /* why is r->user a char* and not const? */
         r->user = apr_pstrdup(r->pool, cc->user_name);
