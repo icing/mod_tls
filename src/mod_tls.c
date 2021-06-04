@@ -97,7 +97,7 @@ static apr_status_t tls_post_config(apr_pool_t *p, apr_pool_t *plog,
 static int tls_ssl_outgoing(conn_rec *c, ap_conf_vector_t *dir_conf, int enable_ssl)
 {
     ap_log_error(APLOG_MARK, APLOG_TRACE3, 0, c->base_server,
-        "ssl_outgoing(enable=%d) for %s",
+        "ssl_bind_outgoing(enable=%d) for %s",
         enable_ssl, c->base_server->server_hostname);
     /* we are not handling proxy connections - for now */
     (void)dir_conf;
@@ -264,7 +264,7 @@ static void tls_hooks(apr_pool_t *pool)
 
 #if AP_MODULE_MAGIC_AT_LEAST(20210531, 0)
     (void)pre_proxy;
-    ap_hook_ssl_outgoing(tls_ssl_outgoing, NULL, NULL, APR_HOOK_MIDDLE);
+    ap_hook_ssl_bind_outgoing(tls_ssl_outgoing, NULL, NULL, APR_HOOK_MIDDLE);
 #else
     ap_hook_post_config(tls_post_config_proxy_ssl, NULL, pre_proxy, APR_HOOK_MIDDLE);
 #endif
