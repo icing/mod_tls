@@ -30,8 +30,8 @@ API which has become part of the 2.4.48 release..
 
 `mod_tls` currently does **not** support:
  
-  * client certificates
   * backend connections (via `mod_proxy`)
+  * client certificates
 
 ## Platforms
 
@@ -302,38 +302,21 @@ Variable       | TLSOption | Description
 `SSL_SECURE_RENEG` | StdEnvVars    | always `false` since rustls does not support that feature
 `SSL_COMPRESS_METHOD`| StdEnvVars  | always `NULL` since rustls does not support that feature
 `SSL_CIPHER_EXPORT` |  StdEnvVars  | always `false` as rustls does not support such ciphers
-`SSL_CLIENT_VERIFY` |  StdEnvVars  | either `SUCCESS` when a valid client certificate was presented or `NONE`
+`SSL_CLIENT_VERIFY` |  StdEnvVars  | always `NONE` as client certificates are not supported
 `SSL_SESSION_RESUMED` | StdEnvVars | either `Resumed` if a known TLS session id was presented by the client or `Initial` otherwise
-`SSL_CLIENT_S_DN_CN` | NI*       | the common name (CN) of the distinguished name (DN) in the client certificate subject.
-`SSL_CLIENT_CERT` | ExportCertData| the client certificate in PEM format.
-`SSL_CLIENT_CHAIN_0` | ExportCertData| the 1st client chain certificate in PEM format.
-`SSL_CLIENT_CHAIN_[1-9]` | ExportCertData| the 2nd to 10th client chain certificate in PEM format.
 `SSL_SERVER_CERT` | ExportCertData| the selected server certificate in PEM format.
 
 *) NI: Not Implemented
-
-The variables exposing several fields in the client and server certificate, such as `SSL_CLIENT_S_DN_CN` are not
-supported at the moment, as crustls is missing code to parse x.509 certificates.
 
 The variable `SSL_SESSION_ID` is intentionally not supported as it contains sensitive information.
 
 ### Client Certificates
 
-NOTE: the current implementation is incomplete. Certificates are checked and validated, however the necessary field names are not extracted and hosted applications do not see a user name.
+Client certificates are currently not supported my `mod_tls`. The basic infrastructure is there, but
+suitable Rust implementations for revocations checks on such certificates (CRL, OCSP) have so far 
+not been identified.
 
-You may use client certificates in a server/virtual host. They might be optional or required. Validation is performed against a set of root certificates which you need to provide in a PEM file. An example would be:
-
-```
-<VirtalHost *:443>
-  ServerName b.net
-  TLSClientCertificate required
-  TLSClientCA my_client_roots.pem
-  ...
-</VirtualHost>
-```
-
-Contrary to `mod_ssl` this can not be specified at directory level, only on a host or the complete server. 
-The reason behind this is that `rustls` does not allow renegotiation in an ongoing TLS connection.
+Offering client certificate authentication without a revocation mechanism is not an option, we feel.
 
 ## Directives
 
@@ -381,7 +364,7 @@ This will not disable any unmentioned ciphers supported by `rustls`. If you spec
 
 This can be set per directory/location and `option` can be:
 
-* `StdEnvVars`: adds more variables to the requests environemnt, as forwarded for example to CGI processing and other applications.
+* `StdEnvVars`: adds more variables to the requests environment, as forwarded for example to CGI processing and other applications.
 * `ExportCertData`: adds certificate related variables to the request environment.
 * `Defaults`: resets all options to their default values.
 
@@ -401,7 +384,7 @@ The `Defaults` value can be used to reset any options that are inherited from ot
 </Location>
 ```
 
-
+<!---
 ### `TLSStrictSNI`
 
 `TLSStrictSNI on|off` enforces exact matches of client server indicators (SNI) against host names. 
@@ -430,3 +413,4 @@ This must be defined if client certificates are configured. The file needs to co
 
 The path can be specified relative to the server root.
 
+-->

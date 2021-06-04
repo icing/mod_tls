@@ -30,8 +30,8 @@ API which has become part of the 2.4.48 release..
 
 `mod_tls` currently does **not** support:
  
-  * client certificates
   * backend connections (via `mod_proxy`)
+  * client certificates
 
 ## Platforms
 
@@ -179,7 +179,7 @@ TLSListen 443
 </VirtualHost>
 ```
 
-You instruct `mod_tls` to encrypt all incoming connections on port 443. You add the certicate+key to the `VirtualHost`s like with `mod_ssl`. If you have certificate and key in the same file (no real reason not to), you can just add the file once.
+You instruct `mod_tls` to encrypt all incoming connections on port 443. You add the certificate+key to the `VirtualHost`s like with `mod_ssl`. If you have certificate and key in the same file (no real reason not to), you can just add the file once.
 
 The certificate and key file formats are the same.
 
@@ -214,7 +214,7 @@ If `cert_A` is an EC certificate and `cert_B` is RSA, all capable clients will g
 
 #### ACME (Let's Encrypt) certificates
 
-Certificates obtained by ACME clients, such as `certbot` can be used with `mod_tls` as well. However their automatic rewriting of Apache httpd configurations does commonly assume a `mod_ssl`. So, you have to check their documenation on how to best integrate them.
+Certificates obtained by ACME clients, such as `certbot` can be used with `mod_tls` as well. However their automatic rewriting of Apache httpd configurations does commonly assume a `mod_ssl`. So, you have to check their documentation on how to best integrate them.
 
 The ACME support in Apache itself, the module `mod_md`, does work with `mod_tls` just like with `mod_ssl`. For example:
 
@@ -292,41 +292,31 @@ If you suppress all ciphers supported for a TLS protocol version, that version i
 
 Like `mod_ssl` the module supports variables in the request environment (e.g. forwarded to CGI processing). There is a small set of variables that will always be set and a larger one that is only added when `TLSOptions StdEnvVars` is configured.
 
-*Variable*       | Always | *Description*
------------------|:------:|--------------
-SSL\_TLS_SNI     |  x     | the server name indicator (SNI) send by the client
-SSL\_PROTOCOL     |  x    | the TLS protocol negotiated (TLSv1.2, TLSv1.3)
-SSL\_CIPHER       |  x    | the name of the TLS cipher negotiated
-SSL\_VERSION_INTERFACE |  | the module version as `mod_tls/n.n.n`
-SSL\_VERSION_LIBRARY |    | the rustls version as `crustls/n.n.n/rustls/n.n.n` 
-SSL\_SECURE_RENEG |       | always `false` since rustls does not support that feature
-SSL\_COMPRESS_METHOD|     | always `NULL` since rustls does not support that feature
-SSL\_CIPHER_EXPORT |      | always `false` as rustls does not support such ciphers
-SSL\_CLIENT_VERIFY |      | either `SUCCESS` when a valid client certificate was presented or `NONE`
-SSL\_SESSION_RESUMED |    | either `Resumed` if a known TLS session id was presented by the client or `Initial` otherwise
+Variable       | TLSOption | Description
+-----------------|:---------:|:-----------------
+`SSL_TLS_SNI`    |  *     |  the server name indicator (SNI) send by the client
+`SSL_PROTOCOL`     |  *    |  the TLS protocol negotiated (TLSv1.2, TLSv1.3)
+`SSL_CIPHER`       |  *    |  the name of the TLS cipher negotiated
+`SSL_VERSION_INTERFACE` |StdEnvVars| the module version as `mod_tls/n.n.n`
+`SSL_VERSION_LIBRARY` |StdEnvVars  | the rustls version as `crustls/n.n.n/rustls/n.n.n` 
+`SSL_SECURE_RENEG` | StdEnvVars    | always `false` since rustls does not support that feature
+`SSL_COMPRESS_METHOD`| StdEnvVars  | always `NULL` since rustls does not support that feature
+`SSL_CIPHER_EXPORT` |  StdEnvVars  | always `false` as rustls does not support such ciphers
+`SSL_CLIENT_VERIFY` |  StdEnvVars  | always `NONE` as client certificates are not supported
+`SSL_SESSION_RESUMED` | StdEnvVars | either `Resumed` if a known TLS session id was presented by the client or `Initial` otherwise
+`SSL_SERVER_CERT` | ExportCertData| the selected server certificate in PEM format.
 
-The variables exposing several fields in the client and server certiticate, such as `SSL_CLIENT_S_DN_CN` are not
-supported at the moment, as crustls is missing code to parse x.509 certificates.
+*) NI: Not Implemented
 
 The variable `SSL_SESSION_ID` is intentionally not supported as it contains sensitive information.
 
 ### Client Certificates
 
-NOTE: the current implementation is incomplete. Certificates are checked and validated, however the necessary field names are not extracted and hosted applications do not see a user name.
+Client certificates are currently not supported my `mod_tls`. The basic infrastructure is there, but
+suitable Rust implementations for revocations checks on such certificates (CRL, OCSP) have so far 
+not been identified.
 
-You may use client certificates in a server/virtual host. They might be optional or required. Validation is performed against a set of root certificates which you need to provide in a PEM file. An example would be:
-
-```
-<VirtalHost *:443>
-  ServerName b.net
-  TLSClientCertificate required
-  TLSClientCA my_client_roots.pem
-  ...
-</VirtualHost>
-```
-
-Contrary to `mod_ssl` this can not be specified at directory level, only on a host or the complete server. 
-The reason behind this is that `rustls` does not allow renegotiations in an ongoing TLS connection.
+Offering client certificate authentication without a revocation mechanism is not an option, we feel.
 
 ## Directives
 
@@ -370,10 +360,31 @@ This will not disable any unmentioned ciphers supported by `rustls`. If you spec
 
 ### `TLSOptions`
 
-`TLSOptions [+|-]StdEnvVars` is analog to `SSLOptions` in `mod_ssl`.
+`TLSOptions [+|-]option` is analog to `SSLOptions` in `mod_ssl`.
 
-It is only relevant if you want to have certain TLS variables visible to request processing (see [Variables](#variables) below). This can be set per directory/location.
+This can be set per directory/location and `option` can be:
 
+* `StdEnvVars`: adds more variables to the requests environemnt, as forwarded for example to CGI processing and other applications.
+* `ExportCertData`: adds certificate related variables to the request environment.
+* `Defaults`: resets all options to their default values.
+
+See [Variables](#variables) to see exactly which values are set on an option.
+
+Adding variables to a request environment adds overhead, especially when certificates need to be inspected and
+fields extracted. Therefore most variables are not set by default.
+
+You can configure `TLSOptions` per location or generally on a server/virtual host. Prefixing an option with `-` disables this option while leaving others unchanged. A `+` prefix is the same as writing the option without one.
+
+The `Defaults` value can be used to reset any options that are inherited from other locations or the virtual host/server. Example:
+
+```
+<Location /myplace/app>
+  TLSOptions Defaults StdEnvVars
+  ...
+</Location>
+```
+
+<!---
 ### `TLSStrictSNI`
 
 `TLSStrictSNI on|off` enforces exact matches of client server indicators (SNI) against host names. 
@@ -398,6 +409,8 @@ NOTE: the current implementation is incomplete. Certificates are checked and val
 
 `TLSClientCA file.pem` sets the root certificates to validate client certificates against.
 
-This must be defined if client certificats are configured. The file needs to contain the certificates that form a verfiable chain of trust together with the ones that clients present. If you have client certification with `mod_ssl` via [SSLCACertificateFile](https://httpd.apache.org/docs/current/mod/mod_ssl.html#sslcacertificatefile), the same file will work here.
+This must be defined if client certificates are configured. The file needs to contain the certificates that form a verifiable chain of trust together with the ones that clients present. If you have client certification with `mod_ssl` via [SSLCACertificateFile](https://httpd.apache.org/docs/current/mod/mod_ssl.html#sslcacertificatefile), the same file will work here.
 
 The path can be specified relative to the server root.
+
+-->

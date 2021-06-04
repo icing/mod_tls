@@ -1,3 +1,11 @@
+v0.6.2
+----------------------------------------------------------------------------------------------------
+ * Disabled all client certificate related configurations and test. Cleint certificates
+   are unsupported in mod_tls for the time being, as there is no Rust revocation
+   mechanism currently available. See also README.md.
+
+v0.6.1
+----------------------------------------------------------------------------------------------------
  * Added `TLSOptions ExportCertData` to export the certificates PEM data to the request env.
  * Added `TLSOptions Defaults` to reset options settings in a location.
  * Adding test cases for http and https proxy setups
