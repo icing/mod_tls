@@ -47,7 +47,7 @@ void tls_conf_conn_set(conn_rec *c, tls_conf_conn_t *cc)
 int tls_conn_check_ssl(conn_rec *c)
 {
     tls_conf_conn_t *cc = tls_conf_conn_get(c->master? c->master : c);
-    if (cc && (TLS_CONN_ST_IGNORED != cc->state)) {
+    if (TLS_CONN_ST_IS_ENABLED(cc)) {
         return OK;
     }
     return DECLINED;
@@ -619,10 +619,6 @@ static apr_status_t tls_core_conn_free(void *data)
         rustls_connection_free(cc->rustls_connection);
         cc->rustls_connection = NULL;
     }
-    if (cc->rustls_config) {
-        rustls_server_config_free(cc->rustls_config);
-        cc->rustls_config = NULL;
-    }
     if (cc->key_cloned && cc->key) {
         rustls_certified_key_free(cc->key);
         cc->key = NULL;
@@ -640,62 +636,87 @@ static apr_status_t tls_core_conn_free(void *data)
     return APR_SUCCESS;
 }
 
-int tls_core_conn_base_init(conn_rec *c, int flag_enabled)
+static tls_conf_conn_t *cc_get_or_make(conn_rec *c)
 {
-    tls_conf_server_t *sc = tls_conf_server_get(c->base_server);
     tls_conf_conn_t *cc = tls_conf_conn_get(c);
-    int rv = DECLINED, enabled;
-    rustls_result rr = RUSTLS_RESULT_OK;
-
-    /* Are we configured to work here? */
-    enabled = flag_enabled != TLS_FLAG_FALSE
-#if AP_MODULE_MAGIC_AT_LEAST(20210531, 0)
-              && !c->outgoing
-#endif
-              && sc->enabled == TLS_FLAG_TRUE;
-    if (!enabled && flag_enabled == TLS_FLAG_UNSET) {
-        ap_log_error(APLOG_MARK, APLOG_TRACE4, 0, c->base_server,
-            "tls_core_conn_base_init, not our connection: %s",
-            c->base_server->server_hostname);
-        goto cleanup;
-    }
     if (!cc) {
         cc = apr_pcalloc(c->pool, sizeof(*cc));
         cc->server = c->base_server;
-        cc->state = enabled? TLS_CONN_ST_PRE_HANDSHAKE : TLS_CONN_ST_IGNORED;
+        cc->state = TLS_CONN_ST_INIT;
         tls_conf_conn_set(c, cc);
         apr_pool_cleanup_register(c->pool, cc, tls_core_conn_free,
                                   apr_pool_cleanup_null);
-        ap_log_error(APLOG_MARK, APLOG_TRACE3, 0, c->base_server,
-            "tls_core_conn_base_init: %s for tls: %s",
-            enabled? "enabled" : "disabled", c->base_server->server_hostname);
-        if (enabled) {
-            /* Use a generic rustls_connection with its defaults, which we feed
-             * the first TLS bytes from the client. Its Hello message will trigger
-             * our callback where we can inspect the (possibly) supplied SNI and
-             * select another server.
-             */
-            rr = rustls_server_connection_new(sc->global->rustls_hello_config, &cc->rustls_connection);
-            if (RUSTLS_RESULT_OK != rr) goto cleanup;
+    }
+    return cc;
+}
 
-            rustls_connection_set_userdata(cc->rustls_connection, c);
-            /* copy over mutable connection properties inherited from server setting */
-            cc->service_unavailable = sc->service_unavailable;
-        }
+void tls_core_conn_disable(conn_rec *c)
+{
+    tls_conf_conn_t *cc;
+    cc = cc_get_or_make(c);
+    if (cc->state == TLS_CONN_ST_INIT) {
+        cc->state = TLS_CONN_ST_DISABLED;
+    }
+}
+
+void tls_core_conn_bind(conn_rec *c, ap_conf_vector_t *dir_conf)
+{
+    tls_conf_conn_t *cc = cc_get_or_make(c);
+    cc->dc = dir_conf? ap_get_module_config(dir_conf, &tls_module) : NULL;
+}
+
+
+int tls_core_conn_init(conn_rec *c)
+{
+    tls_conf_server_t *sc = tls_conf_server_get(c->base_server);
+    tls_conf_conn_t *cc;
+    rustls_result rr = RUSTLS_RESULT_OK;
+
+    cc = cc_get_or_make(c);
+    if (cc->state == TLS_CONN_ST_INIT) {
+        /* Need to decide if we TLS this connection or not */
+        int enabled =
+#if AP_MODULE_MAGIC_AT_LEAST(20210531, 0)
+                !c->outgoing &&
+#endif
+                sc->enabled == TLS_FLAG_TRUE;
+        cc->state = enabled? TLS_CONN_ST_PRE_HANDSHAKE : TLS_CONN_ST_DISABLED;
+        ap_log_error(APLOG_MARK, APLOG_TRACE3, 0, c->base_server,
+            "tls_core_conn_init: %s for tls: %s",
+            enabled? "enabled" : "disabled", c->base_server->server_hostname);
+    }
+    else if (cc->state == TLS_CONN_ST_DISABLED) {
+        ap_log_error(APLOG_MARK, APLOG_TRACE4, 0, c->base_server,
+            "tls_core_conn_init, not our connection: %s",
+            c->base_server->server_hostname);
+        goto cleanup;
     }
 
-    rv = (cc->state == TLS_CONN_ST_PRE_HANDSHAKE)? OK : DECLINED;
+    if (TLS_CONN_ST_IS_ENABLED(cc) && !cc->rustls_connection) {
+        /* Use a generic rustls_connection with its defaults, which we feed
+         * the first TLS bytes from the client. Its Hello message will trigger
+         * our callback where we can inspect the (possibly) supplied SNI and
+         * select another server.
+         */
+        rr = rustls_server_connection_new(sc->global->rustls_hello_config, &cc->rustls_connection);
+        if (RUSTLS_RESULT_OK != rr) goto cleanup;
+        rustls_connection_set_userdata(cc->rustls_connection, c);
+        /* we might refuse requests on this connection, e.g. ACME challenge */
+        cc->service_unavailable = sc->service_unavailable;
+    }
+
 cleanup:
     if (RUSTLS_RESULT_OK != rr) {
         const char *err_descr = NULL;
-        rv = tls_util_rustls_error(c->pool, rr, &err_descr);
+        apr_status_t rv = tls_util_rustls_error(c->pool, rr, &err_descr);
         ap_log_error(APLOG_MARK, APLOG_ERR, rv, sc->server, APLOGNO()
                      "Failed to init pre_session for server %s: [%d] %s",
                      sc->server->server_hostname, (int)rr, err_descr);
         c->aborted = 1;
+        cc->state = TLS_CONN_ST_DISABLED;
         goto cleanup;
     }
-    return rv;
+    return TLS_CONN_ST_IS_ENABLED(cc)? OK : DECLINED;
 }
 
 static int find_vhost(void *sni_hostname, conn_rec *c, server_rec *s)
@@ -708,7 +729,7 @@ static int find_vhost(void *sni_hostname, conn_rec *c, server_rec *s)
     return 0;
 }
 
-static apr_status_t process_alpn(
+static apr_status_t select_application_protocol(
     conn_rec *c, server_rec *s, rustls_server_config_builder *builder)
 {
     tls_conf_conn_t *cc = tls_conf_conn_get(c);
@@ -716,18 +737,25 @@ static apr_status_t process_alpn(
     rustls_result rr = RUSTLS_RESULT_OK;
     apr_status_t rv = APR_SUCCESS;
 
-    if (cc->protocol_selected) goto cleanup;
-
-    /* the server always has a protocol it uses. We need only to do something
-     * if ALPN successfully proposes something different. */
-    cc->protocol_selected = ap_get_protocol(c);
+    /* The server always has a protocol it uses, normally "http/1.1".
+     * if the client, via ALPN, proposes protocols, they are in
+     * order of preference.
+     * We propose those to modules registered in the server and
+     * get the protocol back that someone is willing to run on this
+     * connection.
+     * If this is different from what the connection already does,
+     * we tell the server (and all protocol modules) to switch.
+     * If successful, we announce that protocol back to the client as
+     * our only ALPN protocol and then do the 'real' handshake.
+     */
+    cc->application_protocol = ap_get_protocol(c);
     if (cc->alpn && cc->alpn->nelts > 0
         && (proposed = ap_select_protocol(c, NULL, s, cc->alpn))
-        && strcmp(proposed, cc->protocol_selected)) {
+        && strcmp(proposed, cc->application_protocol)) {
         rustls_slice_bytes rsb;
 
         ap_log_cerror(APLOG_MARK, APLOG_TRACE2, rv, c,
-            "ALPN: switching protocol from `%s` to `%s`", cc->protocol_selected, proposed);
+            "ALPN: switching protocol from `%s` to `%s`", cc->application_protocol, proposed);
         rv = ap_switch_protocol(c, NULL, cc->server, proposed);
         if (APR_SUCCESS != rv) goto cleanup;
 
@@ -736,9 +764,9 @@ static apr_status_t process_alpn(
         rr = rustls_server_config_builder_set_protocols(builder, &rsb, 1);
         if (RUSTLS_RESULT_OK != rr) goto cleanup;
 
-        cc->protocol_selected = proposed;
+        cc->application_protocol = proposed;
         ap_log_cerror(APLOG_MARK, APLOG_TRACE2, rv, c,
-            "ALPN: switched connection to protocol `%s`", cc->protocol_selected);
+            "ALPN: switched connection to protocol `%s`", cc->application_protocol);
 
         /* protocol was switched, this could be a challenge protocol
          * such as "acme-tls/1". Give handlers the opportunity to
@@ -767,16 +795,15 @@ cleanup:
         c->aborted = 1;
         goto cleanup;
     }
-    ap_log_cerror(APLOG_MARK, APLOG_TRACE2, rv, c, "process_alpn done");
     return rv;
 }
 
-apr_status_t tls_core_conn_init_server(conn_rec *c)
+apr_status_t tls_core_conn_seen_client_hello(conn_rec *c)
 {
     tls_conf_conn_t *cc = tls_conf_conn_get(c);
     tls_conf_server_t *sc, *initial_sc;
-    const rustls_server_config *base_config = NULL;
     rustls_server_config_builder *builder = NULL;
+    const rustls_server_config *config = NULL;
     rustls_result rr = RUSTLS_RESULT_OK;
     apr_status_t rv = APR_SUCCESS;
     int sni_match = 0;
@@ -826,18 +853,19 @@ apr_status_t tls_core_conn_init_server(conn_rec *c)
      * certificates. */
     cc->service_unavailable = sni_match? sc->service_unavailable : 0;
 
-    base_config = sc->rustls_config? sc->rustls_config : initial_sc->rustls_config;
-    if (!base_config) {
+    if (!sc->rustls_config && !initial_sc->rustls_config) {
         ap_log_cerror(APLOG_MARK, APLOG_DEBUG, 0, c, APLOGNO()
             "vhost_init: no base rustls config found, denying to serve");
         rv = APR_NOTFOUND; goto cleanup;
     }
-    builder = rustls_server_config_builder_from_config(base_config);
+    builder = rustls_server_config_builder_from_config(
+        sc->rustls_config? sc->rustls_config : initial_sc->rustls_config);
     if (NULL == builder) {
         rv = APR_ENOMEM; goto cleanup;
     }
 
-    rv = process_alpn(c, cc->server, builder);
+    /* decide on the application protocol we use */
+    rv = select_application_protocol(c, cc->server, builder);
     if (APR_SUCCESS != rv) goto cleanup;
 
     /* if found or not, cc->server will be the server we use now to do
@@ -846,16 +874,15 @@ apr_status_t tls_core_conn_init_server(conn_rec *c)
      * selected server. */
     rustls_connection_free(cc->rustls_connection);
     cc->rustls_connection = NULL;
-    cc->rustls_config = rustls_server_config_builder_build(builder);
+    config = rustls_server_config_builder_build(builder);
     builder = NULL;
-    rr = rustls_server_connection_new(cc->rustls_config, &cc->rustls_connection);
+    rr = rustls_server_connection_new(config, &cc->rustls_connection);
     if (RUSTLS_RESULT_OK != rr) goto cleanup;
     rustls_connection_set_userdata(cc->rustls_connection, c);
 
 cleanup:
-    if (builder != NULL) {
-        rustls_server_config_builder_free(builder);
-    }
+    if (builder != NULL) rustls_server_config_builder_free(builder);
+    if (config != NULL) rustls_server_config_free(config);
     if (rr != RUSTLS_RESULT_OK) {
         const char *err_descr = NULL;
         rv = tls_util_rustls_error(c->pool, rr, &err_descr);
@@ -907,13 +934,13 @@ apr_status_t tls_core_conn_post_handshake(conn_rec *c)
     if (cert) {
         size_t i = 0;
 
-        cc->client_certs = apr_array_make(c->pool, 5, sizeof(const rustls_certificate*));
+        cc->peer_certs = apr_array_make(c->pool, 5, sizeof(const rustls_certificate*));
         while (cert) {
-            APR_ARRAY_PUSH(cc->client_certs, const rustls_certificate*) = cert;
+            APR_ARRAY_PUSH(cc->peer_certs, const rustls_certificate*) = cert;
             cert = rustls_connection_get_peer_certificate(cc->rustls_connection, ++i);
         }
     }
-    if (!cc->client_certs && sc->client_auth == TLS_CLIENT_AUTH_REQUIRED) {
+    if (!cc->peer_certs && sc->client_auth == TLS_CLIENT_AUTH_REQUIRED) {
         ap_log_cerror(APLOG_MARK, APLOG_INFO, 0, c, APLOGNO()
               "A client certificate is required, but no acceptable certificate was presented.");
         rv = APR_ECONNABORTED;
@@ -964,7 +991,7 @@ int tls_core_request_check(request_rec *r)
     ap_log_rerror(APLOG_MARK, APLOG_TRACE2, 0, r,
                  "tls_core_request_check[%s, %d]: %s", r->hostname,
                  cc? cc->service_unavailable : 2, r->the_request);
-    if (!cc || (TLS_CONN_ST_IGNORED == cc->state)) goto cleanup;
+    if (!TLS_CONN_ST_IS_ENABLED(cc)) goto cleanup;
     if (cc->service_unavailable) {
         rv = HTTP_SERVICE_UNAVAILABLE; goto cleanup;
     }
