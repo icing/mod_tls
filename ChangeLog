@@ -1,6 +1,6 @@
  * Adding support for new ssl/proxy interworking PR in apache trunk.
 
-v0.6.2
+v0.7.0
 ----------------------------------------------------------------------------------------------------
  * Disabled all client certificate related configurations and test. Cleint certificates
    are unsupported in mod_tls for the time being, as there is no Rust revocation
