@@ -32,6 +32,7 @@ typedef struct {
                                        * initially c->base_server, to be negotiated via SNI. */
     tls_conf_dir_t *dc;               /* directory config applying here */
     tls_conn_state_t state;
+    int outgoing;                     /* != 0 iff outgoing connection (redundant once c->outgoing is everywhere) */
     int service_unavailable;          /* we 503 all requests on this connection */
     int client_hello_seen;            /* the client hello has been inspected */
 
@@ -148,5 +149,12 @@ int tls_core_request_check(request_rec *r);
  * this as the last error at tls_conf_conn_t.
  */
 apr_status_t tls_core_error(conn_rec *c, rustls_result rr, const char **perrstr);
+
+/**
+ * Determine if we handle the TLS for an outgoing connection or not.
+ * @param c the connection
+ * @return OK if we handle the TLS, DECLINED otherwise.
+ */
+int tls_core_setup_outgoing(conn_rec *c);
 
 #endif /* tls_core_h */
