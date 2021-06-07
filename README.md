@@ -10,7 +10,10 @@ This project is sponsored by the [ISRG](https://www.abetterinternet.org).
 
 ## Status
 
-In development. The module's `master` branch follows the `main` branch of [crustls](https://github.com/abetterinternet/crustls),
+In development/beta test. See [beta testing](#beta-testing) for instructions how to use the recent release.
+
+
+The module's `master` branch follows the `main` branch of [crustls](https://github.com/abetterinternet/crustls),
 the `C` binding for the `rustls` crate and the `trunk` version of the Apache httpd server.
 
 Apache `trunk` has received patches that allow two (or more) SSL providing modules
@@ -63,6 +66,97 @@ There is now support for building a Docker image based on `debian sid` to run th
 ```
 
 This clone the git repository from `apache` and `crustls`, switched to the necessary branches and builds a copy of the local `mod_tls` sources. If you want to setup your own build, you'll find the instructions in `docker/debian-test/bin/update.sh`.
+
+## Beta Testing
+
+The release v0.7.0 is a beta release that lets you run `mod_tls` inside the Apache web server. What your need:
+
+* [Apache httpd](https://httpd.apache.org) 2.4.48 (earlier versions will **not** work). 
+* [crustls](https://github.com/abetterinternet/crustls) 0.6.1
+
+#### What to Expect
+
+* Frontend TLS (v1.2 + v1.3) for the clients connecting to Apache
+* ACME certiciates (via Apache's `mod_md`)
+* OCSP stapling (via Apache's `mod_md`)
+* TLS session handling
+* multiple certificates per virtual host, SNI, ALPN
+
+#### Detailed Instructions
+
+At the time of this writing Apache 2.4.48 was not generally availabe as package, but expect that to change soon. When you have it, it usually is accompanied by a `apache2-dev` package that includes all header files and binaries to build `mod_tls`.
+
+When you have that, you need to checkout and build `crustls`. It has [its own build instructions](https://github.com/abetterinternet/crustls#build). Basically, you need the `Rust` toolset installed and the run `make` which will pull in the components needed.
+
+After you have the `apache2-dev` package, the tool `apxs` is installed (also when you build apach2 from source yourself). `apxs` is useful to give information about the environment and parameters apache2 was built with. For example:
+
+```
+> apxs -q exec_prefix
+/usr
+```
+will tell you the directory underneath everything else is placed. When you have built `crustls` you need to install it in this location with
+
+```
+crustls> make install DESTDIR=/usr
+```
+
+which copies the header file and library. Then get the `mod_tls` release, unpack it somewhere and run:
+
+```
+mod_tls-0.7.0> ./configure
+```
+
+It should find the `apxs` tool in the path. If not, you can give it:
+
+```
+mod_tls-0.7.0> ./configure --with-apxs=/usr/bin/apxs
+...
+    Version:        0.7.0 shared 11:0:6
+    Host type:      x86_64-pc-linux-gnu
+    Install prefix: /usr
+    APXS:           /usr/bin/apxs
+    HTTPD-VERSION:  2.4.48
+    C compiler:     gcc => gcc 
+    CFLAGS:         -g -O2
+    LDFLAGS:         -L/usr/lib -Wl,--gc-sections -lpthread -ldl
+    CPPFLAGS:        -I/usr/include/apache2 -I/usr/include/apr-1.0
+```
+Something similar will be printed at the end of the configuration. Then you just:
+
+```
+mod_tls-0.7.0> make install
+```
+
+This places the built module in Apache's `modules` directory. You can check:
+
+```
+> apxs -q exp_libexecdir
+/usr/lib/apache2/modules
+> ls -l /usr/lib/apache2/modules/mod_tls*
+lrwxrwxrwx 1 sei users       16 Jun  7 14:01 /usr/lib/apache2/modules/mod_tls.so -> mod_tls.so.0.0.0
+-rwxr-xr-x 1 sei users 23785144 Jun  7 14:01 /usr/lib/apache2/modules/mod_tls.so.0.0.0
+```
+
+To load it into the server, you then add a line to a `httpd` configuration file. Some installations have a `modules.conf` file where you add:
+
+```
+LoadModule tls_module           "/usr/lib/apache2/modules/mod_tls.so"
+```
+Some installations do it differently. `Debian` has a directory `/etc/apache2/mods-available` where you create 2 files `mod_tls.conf` and `mod_tls.load`. The first one can be empty, the second one just has the `LoadModule` instruction as shown above. To enable the module, you then type:
+
+```
+> /usr/sbin/a2enmod tls
+```
+which creates some symlinks in `/etc/apache2/mods-enabled`.
+
+Then you start/reload your server. If your server logs on level `info` you will see an entry like:
+
+```
+[2021-06-07 ...] [tls:info] [pid ...] AH: mod_tls/0.7.0 (crustls/0.6.1/rustls/0.19.0), initializing...
+```
+
+And otherwise it will just do nothing! You need to configure where in your server `mod_tls` should be active and there are several [descriptions below](#configuration) on how to do that.
+
 
 ## Tests
 
