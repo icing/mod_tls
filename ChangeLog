@@ -1,3 +1,6 @@
+ * Renamed `TLSListen` configuration directive to `TLSEngine` after feedback
+   from early tester (thanks @djc!).
+
 v0.7.0
 ----------------------------------------------------------------------------------------------------
  * Disabled all client certificate related configurations and test. Cleint certificates

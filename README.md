@@ -264,7 +264,7 @@ With `mod_tls`, the configuration is slightly different:
 
 ```
 ...
-TLSListen 443
+TLSEngine 443
 
 <VirtalHost *:443>
   ServerName b.net
@@ -277,12 +277,13 @@ You instruct `mod_tls` to encrypt all incoming connections on port 443. You add 
 
 The certificate and key file formats are the same.
 
-#### `https:` with both?
+#### `https:` with `mod_ssl` *and* `mod_tls`?
 
-First: you cannot mix both modules on the same address and port. You may use the modules on different ports and, with some care, on the same port for different addresses. Maybe you do that for evaluation, if `mod_tls` fits your setup well. But for production setups, this is most likely not a good idea. Every module offers an attack surface and having two for the same task does only make you more vulnerable.
+First: you can **not** mix both modules on the same address and port! 
 
-That being said, it makes sense to use one module for connection from outside and the other for proxy connections to backend servers. Especially when legacy backend with older SSL protocols need to be proxied.
+But you can use `mod_ssl` on one port and `mod_tls` on another. You can also use `mod_tls` for incoming connections and `mod_ssl` for connections to proxied servers (backends).
 
+Theoretically, if your server has two interfaces (IP addresses `addr1` and `addr2`), you could use one module on `addr1:443` and another on `addr2:443`. But you would need to define separate `VirtualHost`s for particular addresses. That seems quite an edge configuration, but it is doable.
 
 ### Handling certificates
 
@@ -314,7 +315,7 @@ The ACME support in Apache itself, the module `mod_md`, does work with `mod_tls`
 
 ```
 Listen 443
-TLSListen 443
+TLSEngine 443
 MDomain b.net
 
 <VirtalHost *:443>
@@ -416,11 +417,14 @@ Offering client certificate authentication without a revocation mechanism is not
 
 The following configuration directives are available once `mod_tls` is loaded into Apache:
 
-### `TLSListen`
+### `TLSEngine`
  
-`TLSListen [address:]port` defines on which address+port the module shall handle incoming connections. 
+`TLSEngine [address:]port` defines on which address+port the module shall handle incoming connections. 
 
-This is similar to the [Listen](https://httpd.apache.org/docs/2.4/en/bind.html) binding directive of Apache. You can use `TLSListen` several times to use more than one binding address.
+This is set on a global level, not in individual `VirtualHost`s. It will affect all `VirtualHost` that match
+the specified address/port. You can use `TLSEngine` several times to use more than one address/port.
+ 
+It is similar but different to the [SSLEngein](https://httpd.apache.org/docs/current/mod/mod_ssl.html#sslengine) directive of mod_ssl. If you have `VirtualHost`s, some on port 443, you need to set `SSLEngine on` in every `VirtualHost` that is defined for `*:443`.
  
 ### `TLSCertificate`
 

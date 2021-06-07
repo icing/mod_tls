@@ -170,7 +170,7 @@ With `mod_tls`, the configuration is slightly different:
 
 ```
 ...
-TLSListen 443
+TLSEngine 443
 
 <VirtalHost *:443>
   ServerName b.net
@@ -220,7 +220,7 @@ The ACME support in Apache itself, the module `mod_md`, does work with `mod_tls`
 
 ```
 Listen 443
-TLSListen 443
+TLSEngine 443
 MDomain b.net
 
 <VirtalHost *:443>
@@ -322,11 +322,11 @@ Offering client certificate authentication without a revocation mechanism is not
 
 The following configuration directives are available once `mod_tls` is loaded into Apache:
 
-### `TLSListen`
+### `TLSEngine`
  
-`TLSListen [address:]port` defines on which address+port the module shall handle incoming connections. 
+`TLSEngine [address:]port` defines on which address+port the module shall handle incoming connections.
 
-This is similar to the [Listen](https://httpd.apache.org/docs/2.4/en/bind.html) binding directive of Apache. You can use `TLSListen` several times to use more than one binding address.
+This is similar to the [Listen](https://httpd.apache.org/docs/2.4/en/bind.html) binding directive of Apache. You can use `TLSEngine` several times to use more than one binding address.
  
 ### `TLSCertificate`
 

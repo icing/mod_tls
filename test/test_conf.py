@@ -30,7 +30,7 @@ class TlsTestConf:
     def add_vhosts(self, domains: List[str], extras: Dict[str, str] = None):
         extras = extras if extras is not None else {}
         self.add("""
-TLSListen {https}
+TLSEngine {https}
 LogLevel tls:trace4
 {extras}
         """.format(
@@ -102,7 +102,7 @@ LogLevel ssl:trace4
         self.add(f"""
 LoadModule md_module       {self.env.prefix}/modules/mod_md.so
 
-TLSListen {self.env.https_port}
+TLSEngine {self.env.https_port}
 LogLevel md:debug
 LogLevel tls:trace8
 {extras['base'] if 'base' in extras else ""}
@@ -132,7 +132,7 @@ LogLevel tls:trace8
         self.add(f"""
     LoadModule md_module       {self.env.prefix}/modules/mod_md.so
 
-    TLSListen {self.env.https_port}
+    TLSEngine {self.env.https_port}
     LogLevel md:debug
     LogLevel tls:trace8
     
