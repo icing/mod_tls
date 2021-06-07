@@ -1022,3 +1022,35 @@ apr_status_t tls_core_error(conn_rec *c, rustls_result rr, const char **perrstr)
     }
     return rv;
 }
+
+int tls_core_setup_outgoing(conn_rec *c)
+{
+    tls_conf_conn_t *cc;
+    int rv = DECLINED;
+
+#if AP_MODULE_MAGIC_AT_LEAST(20210531, 0)
+    if (!c->outgoing) goto cleanup;
+#endif
+    cc = cc_get_or_make(c);
+    if (cc->state == TLS_CONN_ST_DISABLED) goto cleanup;
+    if (TLS_CONN_ST_IS_ENABLED(cc)) {
+        /* we already handle it, allow repeated calls */
+        rv = OK; goto cleanup;
+    }
+    cc->outgoing = 1;
+    if (!cc->dc) {
+        /* In case there is not dir_conf bound for this connection, we fallback
+         * to the defaults in the base server (we have no virtual host config to use) */
+        cc->dc = ap_get_module_config(c->base_server->lookup_defaults, &tls_module);
+    }
+    if (cc->dc->outgoing_enabled != TLS_FLAG_TRUE) {
+        cc->state = TLS_CONN_ST_DISABLED;
+        goto cleanup;
+    }
+    /* we handle this connection */
+    cc->state = TLS_CONN_ST_PRE_HANDSHAKE;
+    rv = OK;
+
+cleanup:
+    return rv;
+}

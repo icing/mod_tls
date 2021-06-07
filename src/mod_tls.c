@@ -101,6 +101,9 @@ static int tls_ssl_outgoing(conn_rec *c, ap_conf_vector_t *dir_conf, int enable_
         enable_ssl, c->base_server->server_hostname);
     /* we are not handling proxy connections - for now */
     tls_core_conn_bind(c, dir_conf);
+    if (enable_ssl && tls_core_setup_outgoing(c) == OK) {
+        return OK;
+    }
     tls_core_conn_disable(c);
     return DECLINED;
 }
@@ -120,6 +123,12 @@ static int ssl_engine_set(
     ap_log_error(APLOG_MARK, APLOG_TRACE3, 0, c->base_server,
         "ssl_engine_set(proxy=%d, enable=%d) for %s",
         proxy, enable, c->base_server->server_hostname);
+    if (enable && tls_core_setup_outgoing(c) == OK) {
+        if (module_ssl_engine_set) {
+            module_ssl_engine_set(c, dc, proxy, 0);
+        }
+        return 1;
+    }
     if (proxy || !enable) {
         /* we are not handling proxy connections - for now */
         tls_core_conn_disable(c);

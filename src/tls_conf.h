@@ -91,6 +91,7 @@ typedef struct {
 typedef struct {
     int std_env_vars;
     int export_cert_vars;
+    int outgoing_enabled;            /* TLS_FLAG_TRUE if mod_tls is active on outgoing connections */
 } tls_conf_dir_t;
 
 /* our static registry of configuration directives. */
