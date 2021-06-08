@@ -40,6 +40,12 @@ typedef enum {
     TLS_CLIENT_AUTH_OPTIONAL,
 } tls_client_auth_t;
 
+typedef enum {
+    TLS_CONF_ST_INIT,
+    TLS_CONF_ST_INCOMING_DONE,
+    TLS_CONF_ST_DONE,
+} tls_conf_status_t;
+
 /* The global module configuration, created after post-config
  * and then readonly.
  */
@@ -47,7 +53,13 @@ typedef struct {
     server_rec *ap_server;            /* the gobal server we initialized on */
     const char *module_version;
     const char *crustls_version;
-    server_addr_rec *tls_addresses;   /* the addresses/port we are active on */
+
+    tls_conf_status_t status;
+    int mod_proxy_post_config_done;   /* if mod_proxy did its post-config things */
+
+    server_addr_rec *tls_addresses;   /* the addresses/ports our engine is enabled on */
+    apr_array_header_t *proxy_dir_configs; /* dir configs where proxying with TLS is enabled */
+
     struct tls_proto_conf_t *proto;   /* TLS protocol/rustls specific globals */
     apr_hash_t *var_lookups;          /* variable lookup functions by var name */
     struct tls_cert_reg_t *cert_reg;  /* all certified keys loaded */
@@ -91,7 +103,7 @@ typedef struct {
 typedef struct {
     int std_env_vars;
     int export_cert_vars;
-    int outgoing_enabled;            /* TLS_FLAG_TRUE if mod_tls is active on outgoing connections */
+    int proxy_enabled;            /* TLS_FLAG_TRUE if mod_tls is active on outgoing connections */
 } tls_conf_dir_t;
 
 /* our static registry of configuration directives. */
@@ -123,7 +135,14 @@ tls_conf_dir_t *tls_conf_dir_get(request_rec *r);
 /* Get the directory specific module configuration for the server. */
 tls_conf_dir_t *tls_conf_dir_server_get(server_rec *s);
 
-/* If any configuration values are unset, supply the global defaults. */
+/* If any configuration values are unset, supply the global server defaults. */
 apr_status_t tls_conf_server_apply_defaults(tls_conf_server_t *sc, apr_pool_t *p);
+
+/* If any configuration values are unset, supply the global dir defaults. */
+apr_status_t tls_conf_dir_apply_defaults(tls_conf_dir_t *dc, apr_pool_t *p);
+
+int tls_proxy_section_post_config(
+    apr_pool_t *p, apr_pool_t *plog, apr_pool_t *ptemp, server_rec *s,
+    ap_conf_vector_t *section_config);
 
 #endif /* tls_conf_h */

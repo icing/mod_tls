@@ -84,6 +84,12 @@ int tls_conn_check_ssl(conn_rec *c);
 apr_status_t tls_core_init(apr_pool_t *p, apr_pool_t *ptemp, server_rec *base_server);
 
 /**
+ * Initialize the module's outgoing connection settings. This runs
+ * in Apache's "post-config" phase after mod_proxy.
+ */
+apr_status_t tls_core_init_outgoing(apr_pool_t *p, apr_pool_t *ptemp, server_rec *base_server);
+
+/**
  * Supply a directory configuration for the connection to work with. This
  * maybe NULL. This can be called several times during the lifetime of a
  * connection and must not change the current TLS state.

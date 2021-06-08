@@ -548,7 +548,7 @@ cleanup:
     return rv;
 }
 
-apr_status_t tls_core_init(apr_pool_t *p, apr_pool_t *ptemp, server_rec *base_server)
+static apr_status_t init_incoming(apr_pool_t *p, apr_pool_t *ptemp, server_rec *base_server)
 {
     tls_conf_server_t *sc = tls_conf_server_get(base_server);
     tls_conf_global_t *gc = sc->global;
@@ -609,6 +609,57 @@ cleanup:
     return rv;
 }
 
+static apr_status_t init_outgoing(apr_pool_t *p, apr_pool_t *ptemp, server_rec *base_server)
+{
+    tls_conf_server_t *sc = tls_conf_server_get(base_server);
+    tls_conf_global_t *gc = sc->global;
+    tls_conf_dir_t *dc;
+    server_rec *s;
+    apr_status_t rv = APR_SUCCESS;
+
+    (void)p; (void)ptemp;
+    (void)gc;
+    ap_assert(gc->mod_proxy_post_config_done);
+    /* Collect all proxy'ing default server dir configs.
+     * All <Proxy> section dir_configs should already be there - if there were any. */
+    for (s = base_server; s; s = s->next) {
+        dc = tls_conf_dir_server_get(s);
+        rv = tls_conf_dir_apply_defaults(dc, p);
+        if (APR_SUCCESS != rv) goto cleanup;
+        if (dc->proxy_enabled != TLS_FLAG_TRUE) continue;
+        APR_ARRAY_PUSH(gc->proxy_dir_configs, tls_conf_dir_t*) = dc;
+    }
+    /* Now gc->proxy_dir_configs contains all configurations we need to possibly
+     * act on for outgoing connections. */
+    /* TODO: read certs, CAfiles, prepare rustls_client_configs */
+    
+cleanup:
+    return rv;
+}
+
+apr_status_t tls_core_init(apr_pool_t *p, apr_pool_t *ptemp, server_rec *base_server)
+{
+    tls_conf_server_t *sc = tls_conf_server_get(base_server);
+    tls_conf_global_t *gc = sc->global;
+    apr_status_t rv = APR_SUCCESS;
+
+    ap_assert(gc);
+    if (TLS_CONF_ST_INIT == gc->status) {
+        rv = init_incoming(p, ptemp, base_server);
+        if (APR_SUCCESS != rv) goto cleanup;
+        gc->status = TLS_CONF_ST_INCOMING_DONE;
+    }
+    if (TLS_CONF_ST_INCOMING_DONE == gc->status) {
+        if (!gc->mod_proxy_post_config_done) goto cleanup;
+
+        rv = init_outgoing(p, ptemp, base_server);
+        if (APR_SUCCESS != rv) goto cleanup;
+        gc->status = TLS_CONF_ST_DONE;
+    }
+
+cleanup:
+    return rv;
+}
 
 static apr_status_t tls_core_conn_free(void *data)
 {
@@ -1043,7 +1094,7 @@ int tls_core_setup_outgoing(conn_rec *c)
          * to the defaults in the base server (we have no virtual host config to use) */
         cc->dc = ap_get_module_config(c->base_server->lookup_defaults, &tls_module);
     }
-    if (cc->dc->outgoing_enabled != TLS_FLAG_TRUE) {
+    if (cc->dc->proxy_enabled != TLS_FLAG_TRUE) {
         cc->state = TLS_CONN_ST_DISABLED;
         goto cleanup;
     }

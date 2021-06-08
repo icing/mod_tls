@@ -46,7 +46,9 @@ static tls_conf_global_t *conf_global_get_or_make(apr_pool_t *pool, server_rec *
 
     gconf = apr_pcalloc(pool, sizeof(*gconf));
     gconf->ap_server = ap_server_conf;
+    gconf->status = TLS_CONF_ST_INIT;
     gconf->proto = tls_proto_init(pool, s);
+    gconf->proxy_dir_configs = apr_array_make(pool, 10, sizeof(tls_conf_dir_t*));
 
     gconf->var_lookups = apr_hash_make(pool);
     tls_var_init_lookup_hash(pool, gconf->var_lookups);
@@ -132,18 +134,24 @@ void *tls_conf_create_dir(apr_pool_t *pool, char *dir)
     (void)dir;
     conf = apr_pcalloc(pool, sizeof(*conf));
     conf->std_env_vars = TLS_FLAG_UNSET;
+    conf->proxy_enabled = TLS_FLAG_UNSET;
     return conf;
+}
+
+static void dir_assign_merge(
+    tls_conf_dir_t *dest, tls_conf_dir_t *base, tls_conf_dir_t *add)
+{
+    dest->std_env_vars = MERGE_INT(base, add, std_env_vars);
+    dest->export_cert_vars = MERGE_INT(base, add, export_cert_vars);
+    dest->proxy_enabled = MERGE_INT(base, add, proxy_enabled);
 }
 
 void *tls_conf_merge_dir(apr_pool_t *pool, void *basev, void *addv)
 {
     tls_conf_dir_t *base = basev;
     tls_conf_dir_t *add = addv;
-    tls_conf_dir_t *nconf;
-
-    nconf = apr_pcalloc(pool, sizeof(*nconf));
-    nconf->std_env_vars = MERGE_INT(base, add, std_env_vars);
-    nconf->export_cert_vars = MERGE_INT(base, add, export_cert_vars);
+    tls_conf_dir_t *nconf = apr_pcalloc(pool, sizeof(*nconf));
+    dir_assign_merge(nconf, base, add);
     return nconf;
 }
 
@@ -163,6 +171,50 @@ apr_status_t tls_conf_server_apply_defaults(tls_conf_server_t *sc, apr_pool_t *p
     if (sc->strict_sni == TLS_FLAG_UNSET) sc->strict_sni = TLS_FLAG_TRUE;
     if (sc->client_auth == TLS_CLIENT_AUTH_UNSET) sc->client_auth = TLS_CLIENT_AUTH_NONE;
     return APR_SUCCESS;
+}
+
+apr_status_t tls_conf_dir_apply_defaults(tls_conf_dir_t *dc, apr_pool_t *p)
+{
+    (void)p;
+    if (dc->std_env_vars == TLS_FLAG_UNSET) dc->std_env_vars = TLS_FLAG_FALSE;
+    if (dc->export_cert_vars == TLS_FLAG_UNSET) dc->export_cert_vars = TLS_FLAG_FALSE;
+    if (dc->proxy_enabled == TLS_FLAG_UNSET) dc->proxy_enabled = TLS_FLAG_FALSE;
+    return APR_SUCCESS;
+}
+
+int tls_proxy_section_post_config(
+    apr_pool_t *p, apr_pool_t *plog, apr_pool_t *ptemp, server_rec *s,
+    ap_conf_vector_t *section_config)
+{
+    tls_conf_dir_t *proxy_dc, *server_dc;
+    tls_conf_server_t *sc;
+
+    /* mod_proxy collects the <Proxy>...</Proxy> sections per server (base server or virtualhost)
+     * and in its post_config hook, calls our function registered at its hook for each with
+     * s - the server they were define in
+     * section_config - the set of dir_configs for a <Proxy> section
+     *
+     * If none of _our_ config directives had been used, here or in the server, we get a NULL.
+     * Which means we have to do nothing. Otherwise, we add to `proxy_dc` the
+     * settings from `server_dc` - since this is not automagically done by apache.
+     *
+     * `proxy_dc` is then complete and tells us if we handle outgoing connections
+     * here and with what parameter settings.
+     */
+    (void)p; (void)ptemp; (void)plog,
+    proxy_dc = ap_get_module_config(section_config, &tls_module);
+    if (!proxy_dc) goto cleanup;
+    server_dc = ap_get_module_config(s->lookup_defaults, &tls_module);
+    ap_assert(server_dc);
+    dir_assign_merge(proxy_dc, server_dc, proxy_dc);
+    tls_conf_dir_apply_defaults(proxy_dc, p);
+    if (proxy_dc->proxy_enabled) {
+        /* remember `proxy_dc` for subsequent configuration of outoing TLS setups */
+        sc = tls_conf_server_get(s);
+        APR_ARRAY_PUSH(sc->global->proxy_dir_configs, tls_conf_dir_t*) = proxy_dc;
+    }
+cleanup:
+    return OK;
 }
 
 static const char *cmd_check_file(cmd_parms *cmd, const char *fpath)
@@ -495,6 +547,14 @@ cleanup:
     return err;
 }
 
+static const char *tls_conf_set_proxy_engine(cmd_parms *cmd, void *dir_conf, int flag)
+{
+    tls_conf_dir_t *dc = dir_conf;
+    (void)cmd;
+    dc->proxy_enabled = flag ? TLS_FLAG_TRUE : TLS_FLAG_FALSE;
+    return NULL;
+}
+
 #if TLS_CLIENT_CERTS
 
 static const char *tls_conf_set_client_ca(
@@ -570,6 +630,8 @@ const command_rec tls_conf_cmds[] = {
         "Set strictness of client server name (SNI) check against hosts, default on."),
     AP_INIT_TAKE1("TLSSessionCache", tls_conf_set_session_cache, NULL, RSRC_CONF,
         "Set which cache to use for TLS sessions."),
+    AP_INIT_FLAG("TLSProxyEngine", tls_conf_set_proxy_engine, NULL, RSRC_CONF|PROXY_CONF,
+        "Enable TLS encryption of outgoing connections in this location/server."),
 #if TLS_CLIENT_CERTS
     AP_INIT_TAKE1("TLSClientCA", tls_conf_set_client_ca, NULL, RSRC_CONF,
         "Set the trust anchors for client certificates from a PEM file."),

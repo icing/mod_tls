@@ -28,6 +28,8 @@
 #include "tls_var.h"
 #include "tls_version.h"
 
+#include "mod_proxy.h"
+
 static void tls_hooks(apr_pool_t *pool);
 
 AP_DECLARE_MODULE(tls) = {
@@ -66,7 +68,6 @@ static apr_status_t tls_post_config(apr_pool_t *p, apr_pool_t *plog,
     tls_conf_server_t *sc;
     void *data = NULL;
 
-    (void)p;
     (void)plog;
     sc = tls_conf_server_get(s);
     assert(sc);
@@ -90,6 +91,15 @@ static apr_status_t tls_post_config(apr_pool_t *p, apr_pool_t *plog,
                      sc->global->crustls_version);
     }
 
+    return tls_core_init(p, ptemp, s);
+}
+
+static apr_status_t tls_post_proxy_config(
+    apr_pool_t *p, apr_pool_t *plog, apr_pool_t *ptemp, server_rec *s)
+{
+    tls_conf_server_t *sc = tls_conf_server_get(s);
+    (void)plog;
+    sc->global->mod_proxy_post_config_done = 1;
     return tls_core_init(p, ptemp, s);
 }
 
@@ -243,21 +253,20 @@ static void tls_hooks(apr_pool_t *pool)
 {
     /* If our request check denies further processing, certain things
      * need to be in place for the response to be correctly generated. */
-    static const char *pre_req_check[] = { "mod_setenvif.c", NULL };
-    static const char *pre_proxy[] = { "mod_proxy.c", NULL };
+    static const char *dep_req_check[] = { "mod_setenvif.c", NULL };
+    static const char *dep_proxy[] = { "mod_proxy.c", NULL };
 
     ap_log_perror(APLOG_MARK, APLOG_TRACE1, 0, pool, "installing hooks");
-    /* TODO: the order that config hooks run determines the order in which
-     * vital filters are installed. There are challenges:
-     * - some modules need to run before and/or after mod_ssl. they probably
-     *   need to run before/after mod_tls as well.
-     * - coexistence: if mod_ssl is loaded as well, does in matter where
-     *   mod_tls runs in relation to it?
-     */
     tls_filter_register(pool);
 
     ap_hook_pre_config(tls_pre_config, NULL,NULL, APR_HOOK_MIDDLE);
-    ap_hook_post_config(tls_post_config, NULL, NULL, APR_HOOK_MIDDLE);
+    /* run post-config hooks one before, one after mod_proxy, as the
+     * mod_proxy's own one calls us in its "section_post_config" hook. */
+    ap_hook_post_config(tls_post_config, NULL, dep_proxy, APR_HOOK_MIDDLE);
+    APR_OPTIONAL_HOOK(proxy, section_post_config,
+                      tls_proxy_section_post_config, NULL, NULL,
+                      APR_HOOK_MIDDLE);
+    ap_hook_post_config(tls_post_proxy_config, dep_proxy, NULL, APR_HOOK_MIDDLE);
     ap_hook_child_init(tls_init_child, NULL,NULL, APR_HOOK_MIDDLE);
     /* connection things */
     ap_hook_pre_connection(hook_pre_connection, NULL, NULL, APR_HOOK_MIDDLE);
@@ -265,17 +274,16 @@ static void tls_hooks(apr_pool_t *pool)
     /* request things */
     ap_hook_default_port(tls_hook_default_port, NULL,NULL, APR_HOOK_MIDDLE);
     ap_hook_http_scheme(tls_hook_http_scheme, NULL,NULL, APR_HOOK_MIDDLE);
-    ap_hook_post_read_request(tls_core_request_check, pre_req_check, NULL, APR_HOOK_MIDDLE);
+    ap_hook_post_read_request(tls_core_request_check, dep_req_check, NULL, APR_HOOK_MIDDLE);
     ap_hook_fixups(tls_var_request_fixup, NULL,NULL, APR_HOOK_MIDDLE);
 
     ap_hook_ssl_conn_is_ssl(tls_conn_check_ssl, NULL, NULL, APR_HOOK_MIDDLE);
     ap_hook_ssl_var_lookup(tls_var_lookup, NULL, NULL, APR_HOOK_MIDDLE);
 
 #if AP_MODULE_MAGIC_AT_LEAST(20210531, 0)
-    (void)pre_proxy;
     ap_hook_ssl_bind_outgoing(tls_ssl_outgoing, NULL, NULL, APR_HOOK_MIDDLE);
 #else
-    ap_hook_post_config(tls_post_config_proxy_ssl, NULL, pre_proxy, APR_HOOK_MIDDLE);
+    ap_hook_post_config(tls_post_config_proxy_ssl, NULL, dep_proxy, APR_HOOK_MIDDLE);
 #endif
 
 }
