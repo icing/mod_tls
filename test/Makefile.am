@@ -18,7 +18,7 @@ SERVER_DIR     = gen/apache
 
 .phony: unit_tests
 
-EXTRA_DIST     = conf htdocs $(wildcard *.py)
+EXTRA_DIST     = conf htdocs *.py
  	
 dist-hook:
 	rm -rf $(distdir)/conf/httpd.conf

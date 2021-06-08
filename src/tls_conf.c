@@ -186,7 +186,7 @@ static const char *cmd_check_file(cmd_parms *cmd, const char *fpath)
     return NULL;
 }
 
-static const char *tls_conf_add_listener(cmd_parms *cmd, void *dc, const char*v)
+static const char *tls_conf_add_engine(cmd_parms *cmd, void *dc, const char*v)
 {
     tls_conf_server_t *sc = tls_conf_server_get(cmd->server);
     tls_conf_global_t *gc = sc->global;
@@ -199,10 +199,10 @@ static const char *tls_conf_add_listener(cmd_parms *cmd, void *dc, const char*v)
 
     (void)dc;
     /* Example of use:
-     * TLSListen 443
-     * TLSListen hostname:443
-     * TLSListen 91.0.0.1:443
-     * TLSListen [::0]:443
+     * TLSEngine 443
+     * TLSEngine hostname:443
+     * TLSEngine 91.0.0.1:443
+     * TLSEngine [::0]:443
      */
     rv = apr_parse_addr_port(&host, &scope_id, &port, v, cmd->pool);
     if (APR_SUCCESS != rv) {
@@ -560,7 +560,7 @@ const command_rec tls_conf_cmds[] = {
         "Set the TLS ciphers to never use when negotiating with a client."),
     AP_INIT_TAKE1("TLSHonorClientOrder", tls_conf_set_honor_client_order, NULL, RSRC_CONF,
         "Set 'on' to have the server honor client preferences in cipher suites, default off."),
-    AP_INIT_TAKE1("TLSListen", tls_conf_add_listener, NULL, RSRC_CONF,
+    AP_INIT_TAKE1("TLSEngine", tls_conf_add_engine, NULL, RSRC_CONF,
         "Specify an adress+port where the module shall handle incoming TLS connections."),
     AP_INIT_TAKE_ARGV("TLSOptions", tls_conf_set_options, NULL, OR_OPTIONS,
         "En-/disables optional features in the module."),

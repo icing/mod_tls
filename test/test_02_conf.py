@@ -44,7 +44,7 @@ class TestConf:
 
     def test_02_conf_cert_file_exist(self):
         conf = TlsTestConf(env=self.env)
-        conf.add(f"TLSListen {self.env.https_port}")
+        conf.add(f"TLSEngine {self.env.https_port}")
         conf.add("TLSCertificate test-02-cert.pem test-02-key.pem")
         conf.write()
         for name in ["test-02-cert.pem", "test-02-key.pem"]:
@@ -54,13 +54,13 @@ class TestConf:
 
     def test_02_conf_cert_listen_missing(self):
         conf = TlsTestConf(env=self.env)
-        conf.add("TLSListen")
+        conf.add("TLSEngine")
         conf.write()
         assert self.env.apache_fail() == 0
 
     def test_02_conf_cert_listen_wrong(self):
         conf = TlsTestConf(env=self.env)
-        conf.add("TLSListen ^^^^^")
+        conf.add("TLSEngine ^^^^^")
         conf.write()
         assert self.env.apache_fail() == 0
 
@@ -71,7 +71,7 @@ class TestConf:
     ])
     def test_02_conf_cert_listen_valid(self, listen: str):
         conf = TlsTestConf(env=self.env)
-        conf.add("TLSListen {listen}".format(listen=listen))
+        conf.add("TLSEngine {listen}".format(listen=listen))
         conf.write()
         assert self.env.apache_restart() == 0
 

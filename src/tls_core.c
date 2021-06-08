@@ -567,7 +567,7 @@ apr_status_t tls_core_init(apr_pool_t *p, apr_pool_t *ptemp, server_rec *base_se
         assert(sc);
         ap_assert(sc->global == gc);
 
-        /* If 'TLSListen' has been configured, use those addresses to
+        /* If 'TLSEngine' has been configured, use those addresses to
          * decide if we are enabled on this server. */
         sc->base_server = (s == base_server);
         sc->enabled = we_listen_on(gc, s, sc)? TLS_FLAG_TRUE : TLS_FLAG_FALSE;
