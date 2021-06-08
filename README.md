@@ -69,7 +69,7 @@ This clone the git repository from `apache` and `crustls`, switched to the neces
 
 ## Beta Testing
 
-The release v0.7.0 is a beta release that lets you run `mod_tls` inside the Apache web server. What your need:
+The releases v0.7.x are beta release that lets you run `mod_tls` inside the Apache web server. What your need:
 
 * [Apache httpd](https://httpd.apache.org) 2.4.48 (earlier versions will **not** work). 
 * [crustls](https://github.com/abetterinternet/crustls) 0.6.1
@@ -77,18 +77,18 @@ The release v0.7.0 is a beta release that lets you run `mod_tls` inside the Apac
 #### What to Expect
 
 * Frontend TLS (v1.2 + v1.3) for the clients connecting to Apache
-* ACME certiciates (via Apache's `mod_md`)
+* ACME certificates (via Apache's `mod_md`)
 * OCSP stapling (via Apache's `mod_md`)
 * TLS session handling
 * multiple certificates per virtual host, SNI, ALPN
 
 #### Detailed Instructions
 
-At the time of this writing Apache 2.4.48 was not generally availabe as package, but expect that to change soon. When you have it, it usually is accompanied by a `apache2-dev` package that includes all header files and binaries to build `mod_tls`.
+At the time of this writing Apache 2.4.48 was not generally available as package, but expect that to change soon. When you have it, it usually is accompanied by a `apache2-dev` package that includes all header files and binaries to build `mod_tls`.
 
-When you have that, you need to checkout and build `crustls`. It has [its own build instructions](https://github.com/abetterinternet/crustls#build). Basically, you need the `Rust` toolset installed and the run `make` which will pull in the components needed.
+When you have that, you need to checkout and build `crustls`. It has [its own build instructions](https://github.com/abetterinternet/crustls#build). Basically, you need the `Rust` tool set installed and the run `make` which will pull in the components needed.
 
-After you have the `apache2-dev` package, the tool `apxs` is installed (also when you build apach2 from source yourself). `apxs` is useful to give information about the environment and parameters apache2 was built with. For example:
+After you have the `apache2-dev` package, the tool `apxs` is installed (also when you build apache2 from source yourself). `apxs` is useful to give information about the environment and parameters apache2 was built with. For example:
 
 ```
 > apxs -q exec_prefix
@@ -103,15 +103,15 @@ crustls> make install DESTDIR=/usr
 which copies the header file and library. Then get the `mod_tls` release, unpack it somewhere and run:
 
 ```
-mod_tls-0.7.0> ./configure
+mod_tls-0.7.x> ./configure
 ```
 
 It should find the `apxs` tool in the path. If not, you can give it:
 
 ```
-mod_tls-0.7.0> ./configure --with-apxs=/usr/bin/apxs
+mod_tls-0.7.x> ./configure --with-apxs=/usr/bin/apxs
 ...
-    Version:        0.7.0 shared 11:0:6
+    Version:        0.7.x shared 11:0:6
     Host type:      x86_64-pc-linux-gnu
     Install prefix: /usr
     APXS:           /usr/bin/apxs
@@ -124,7 +124,7 @@ mod_tls-0.7.0> ./configure --with-apxs=/usr/bin/apxs
 Something similar will be printed at the end of the configuration. Then you just:
 
 ```
-mod_tls-0.7.0> make install
+mod_tls-0.7.x> make install
 ```
 
 This places the built module in Apache's `modules` directory. You can check:
@@ -152,10 +152,24 @@ which creates some symlinks in `/etc/apache2/mods-enabled`.
 Then you start/reload your server. If your server logs on level `info` you will see an entry like:
 
 ```
-[2021-06-07 ...] [tls:info] [pid ...] AH: mod_tls/0.7.0 (crustls/0.6.1/rustls/0.19.0), initializing...
+[2021-06-07 ...] [tls:info] [pid ...] AH: mod_tls/0.7.x (crustls/0.6.1/rustls/0.19.0), initializing...
 ```
 
 And otherwise it will just do nothing! You need to configure where in your server `mod_tls` should be active and there are several [descriptions below](#configuration) on how to do that.
+
+#### OCSP Stapling with mod_tls
+
+`mod_tls` adds OCSP responses to TLS handshakes (this is what "Stapling" is), **when** someone provides these responses. It has no own implementation to retrieve these responses, like `mod_ssl` does.
+
+In Apache 2.4.48 there is a new internal API where modules can ask around for someone willing to provide this. `mod_md` is currently the only choice here and you need to enable this via:
+
+```
+MDStapling on       # provide OCSP responses (for certificates by mod_md)
+MDStapleOthers on   # provide OCSP for all other server certs as well
+```
+
+You'd want to enable this when you use `mod_tls`. To check that this works, you can enable Apache's `server-status`
+handler by [`mod_status`](https://httpd.apache.org/docs/2.4/mod/mod_status.html). On that page, you'll then also see certificate and OCSP information from `mod_md`.
 
 
 ## Tests
@@ -424,7 +438,7 @@ The following configuration directives are available once `mod_tls` is loaded in
 This is set on a global level, not in individual `VirtualHost`s. It will affect all `VirtualHost` that match
 the specified address/port. You can use `TLSEngine` several times to use more than one address/port.
  
-It is similar but different to the [SSLEngein](https://httpd.apache.org/docs/current/mod/mod_ssl.html#sslengine) directive of mod_ssl. If you have `VirtualHost`s, some on port 443, you need to set `SSLEngine on` in every `VirtualHost` that is defined for `*:443`.
+It is similar but different to the [SSLEngine](https://httpd.apache.org/docs/current/mod/mod_ssl.html#sslengine) directive of mod_ssl. If you have `VirtualHost`s, some on port 443, you need to set `SSLEngine on` in every `VirtualHost` that is defined for `*:443`.
  
 ### `TLSCertificate`
 
