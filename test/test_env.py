@@ -247,7 +247,7 @@ class TlsTestEnv:
                 log.debug("connection refused")
                 time.sleep(.1)
             except:
-                log.warning("Unexpected error:", sys.exc_info()[0])
+                log.warning(f"Unexpected error: {sys.exc_info()[0]}", )
                 time.sleep(.1)
         log.warning("Unable to contact server after {timeout} sec".format(timeout=timeout))
         return False

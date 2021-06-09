@@ -43,6 +43,7 @@ typedef enum {
 typedef enum {
     TLS_CONF_ST_INIT,
     TLS_CONF_ST_INCOMING_DONE,
+    TLS_CONF_ST_OUTGOING_DONE,
     TLS_CONF_ST_DONE,
 } tls_conf_status_t;
 
@@ -58,7 +59,7 @@ typedef struct {
     int mod_proxy_post_config_done;   /* if mod_proxy did its post-config things */
 
     server_addr_rec *tls_addresses;   /* the addresses/ports our engine is enabled on */
-    apr_array_header_t *proxy_dir_configs; /* dir configs where proxying with TLS is enabled */
+    apr_array_header_t *proxy_configs; /* tls_conf_proxy_t* collected from everywhere */
 
     struct tls_proto_conf_t *proto;   /* TLS protocol/rustls specific globals */
     apr_hash_t *var_lookups;          /* variable lookup functions by var name */
@@ -101,9 +102,17 @@ typedef struct {
 } tls_conf_server_t;
 
 typedef struct {
+    server_rec *defined_in;           /* the server/host defining this dir_conf */
+    const char *proxy_ca;             /* PEM file with trust anchors for proxied remote server certs */
+    const rustls_client_config *rustls_config;
+} tls_conf_proxy_t;
+
+typedef struct {
     int std_env_vars;
     int export_cert_vars;
-    int proxy_enabled;            /* TLS_FLAG_TRUE if mod_tls is active on outgoing connections */
+    int proxy_enabled;                /* TLS_FLAG_TRUE if mod_tls is active on outgoing connections */
+    const char *proxy_ca;             /* PEM file with trust anchors for proxied remote server certs */
+    tls_conf_proxy_t *proxy_config;
 } tls_conf_dir_t;
 
 /* our static registry of configuration directives. */
@@ -140,6 +149,10 @@ apr_status_t tls_conf_server_apply_defaults(tls_conf_server_t *sc, apr_pool_t *p
 
 /* If any configuration values are unset, supply the global dir defaults. */
 apr_status_t tls_conf_dir_apply_defaults(tls_conf_dir_t *dc, apr_pool_t *p);
+
+/* create a new proxy configuration from directory config in server */
+tls_conf_proxy_t *tls_conf_proxy_make(
+    apr_pool_t *p, tls_conf_dir_t *dc, server_rec *s);
 
 int tls_proxy_section_post_config(
     apr_pool_t *p, apr_pool_t *plog, apr_pool_t *ptemp, server_rec *s,

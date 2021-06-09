@@ -48,7 +48,7 @@ static tls_conf_global_t *conf_global_get_or_make(apr_pool_t *pool, server_rec *
     gconf->ap_server = ap_server_conf;
     gconf->status = TLS_CONF_ST_INIT;
     gconf->proto = tls_proto_init(pool, s);
-    gconf->proxy_dir_configs = apr_array_make(pool, 10, sizeof(tls_conf_dir_t*));
+    gconf->proxy_configs = apr_array_make(pool, 10, sizeof(tls_conf_proxy_t*));
 
     gconf->var_lookups = apr_hash_make(pool);
     tls_var_init_lookup_hash(pool, gconf->var_lookups);
@@ -138,12 +138,31 @@ void *tls_conf_create_dir(apr_pool_t *pool, char *dir)
     return conf;
 }
 
+
+static int same_proxy_settings(tls_conf_dir_t *a, tls_conf_dir_t *b)
+{
+    return a->proxy_ca == b->proxy_ca;
+}
+
 static void dir_assign_merge(
     tls_conf_dir_t *dest, tls_conf_dir_t *base, tls_conf_dir_t *add)
 {
-    dest->std_env_vars = MERGE_INT(base, add, std_env_vars);
-    dest->export_cert_vars = MERGE_INT(base, add, export_cert_vars);
-    dest->proxy_enabled = MERGE_INT(base, add, proxy_enabled);
+    tls_conf_dir_t local;
+
+    memset(&local, 0, sizeof(local));
+    local.std_env_vars = MERGE_INT(base, add, std_env_vars);
+    local.export_cert_vars = MERGE_INT(base, add, export_cert_vars);
+    local.proxy_enabled = MERGE_INT(base, add, proxy_enabled);
+    local.proxy_ca = add->proxy_ca? add->proxy_ca : base->proxy_ca;
+    if (local.proxy_enabled == TLS_FLAG_TRUE) {
+        if (add->proxy_config) {
+            local.proxy_config = same_proxy_settings(&local, add)? add->proxy_config : NULL;
+        }
+        else if (base->proxy_config) {
+            local.proxy_config = same_proxy_settings(&local, base)? add->proxy_config : NULL;
+        }
+    }
+    memcpy(dest, &local, sizeof(*dest));
 }
 
 void *tls_conf_merge_dir(apr_pool_t *pool, void *basev, void *addv)
@@ -182,6 +201,15 @@ apr_status_t tls_conf_dir_apply_defaults(tls_conf_dir_t *dc, apr_pool_t *p)
     return APR_SUCCESS;
 }
 
+tls_conf_proxy_t *tls_conf_proxy_make(
+    apr_pool_t *p, tls_conf_dir_t *dc, server_rec *s)
+{
+    tls_conf_proxy_t *pc = apr_pcalloc(p, sizeof(*pc));
+    pc->defined_in = s;
+    pc->proxy_ca = dc->proxy_ca;
+    return pc;
+}
+
 int tls_proxy_section_post_config(
     apr_pool_t *p, apr_pool_t *plog, apr_pool_t *ptemp, server_rec *s,
     ap_conf_vector_t *section_config)
@@ -201,17 +229,23 @@ int tls_proxy_section_post_config(
      * `proxy_dc` is then complete and tells us if we handle outgoing connections
      * here and with what parameter settings.
      */
-    (void)p; (void)ptemp; (void)plog,
+    (void)p; (void)ptemp; (void)plog;
+    ap_log_error(APLOG_MARK, APLOG_TRACE3, 0, s,
+        "%s: tls_proxy_section_post_config called", s->server_hostname);
     proxy_dc = ap_get_module_config(section_config, &tls_module);
     if (!proxy_dc) goto cleanup;
     server_dc = ap_get_module_config(s->lookup_defaults, &tls_module);
     ap_assert(server_dc);
     dir_assign_merge(proxy_dc, server_dc, proxy_dc);
     tls_conf_dir_apply_defaults(proxy_dc, p);
-    if (proxy_dc->proxy_enabled) {
+    if (proxy_dc->proxy_enabled && !proxy_dc->proxy_config) {
         /* remember `proxy_dc` for subsequent configuration of outoing TLS setups */
         sc = tls_conf_server_get(s);
-        APR_ARRAY_PUSH(sc->global->proxy_dir_configs, tls_conf_dir_t*) = proxy_dc;
+        proxy_dc->proxy_config = tls_conf_proxy_make(p, proxy_dc, s);
+        ap_log_error(APLOG_MARK, APLOG_TRACE3, 0, s,
+            "%s: adding proxy_conf to globals in proxy_post_config_section",
+            s->server_hostname);
+        APR_ARRAY_PUSH(sc->global->proxy_configs, tls_conf_proxy_t*) = proxy_dc->proxy_config;
     }
 cleanup:
     return OK;
@@ -555,22 +589,28 @@ static const char *tls_conf_set_proxy_engine(cmd_parms *cmd, void *dir_conf, int
     return NULL;
 }
 
+static const char *tls_conf_set_proxy_ca(
+    cmd_parms *cmd, void *dir_conf, const char *proxy_ca)
+{
+    tls_conf_dir_t *dc = dir_conf;
+    const char *err = NULL;
+
+    if (strcasecmp(proxy_ca, "default") && NULL != (err = cmd_check_file(cmd, proxy_ca))) goto cleanup;
+    dc->proxy_ca = proxy_ca;
+cleanup:
+    return err;
+}
+
 #if TLS_CLIENT_CERTS
 
 static const char *tls_conf_set_client_ca(
     cmd_parms *cmd, void *dc, const char *client_ca)
 {
     tls_conf_server_t *sc = tls_conf_server_get(cmd->server);
-    const char *err = NULL, *fpath;
+    const char *err;
 
     (void)dc;
     if (NULL != (err = cmd_check_file(cmd, client_ca))) goto cleanup;
-    fpath = ap_server_root_relative(cmd->pool, client_ca);
-    if (!tls_util_is_file(cmd->pool, fpath)) {
-        err = apr_pstrcat(cmd->pool, cmd->cmd->name,
-                    ": unable to find client CA file: '", fpath, "'", NULL);
-        goto cleanup;
-    }
     sc->client_ca = client_ca;
 cleanup:
     return err;
@@ -632,6 +672,8 @@ const command_rec tls_conf_cmds[] = {
         "Set which cache to use for TLS sessions."),
     AP_INIT_FLAG("TLSProxyEngine", tls_conf_set_proxy_engine, NULL, RSRC_CONF|PROXY_CONF,
         "Enable TLS encryption of outgoing connections in this location/server."),
+    AP_INIT_TAKE1("TLSProxyCA", tls_conf_set_proxy_ca, NULL, RSRC_CONF|PROXY_CONF,
+        "Set the trust anchors for certificates from proxied backend servers from a PEM file."),
 #if TLS_CLIENT_CERTS
     AP_INIT_TAKE1("TLSClientCA", tls_conf_set_client_ca, NULL, RSRC_CONF,
         "Set the trust anchors for client certificates from a PEM file."),

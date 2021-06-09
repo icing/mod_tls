@@ -1,3 +1,7 @@
+ * Added test for TLSProxy connections without any special flavour
+   except providing a CA PEM file for trusted root.
+ * loading of native trust anchors disabled since rustls crashes on MacOS for this.
+   Issue opened at <https://github.com/kornelski/rust-security-framework/issues/136>.
  * Adding support for new ssl/proxy interworking PR in apache trunk.
 
 v0.7.1

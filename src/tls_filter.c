@@ -172,8 +172,8 @@ cleanup:
         if (!errors_expected) {
             const char *err_descr = "";
             rv = tls_core_error(fctx->c, rr, &err_descr);
-            ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, fctx->c, APLOGNO()
-                         "read_tls_to_rustls: [%d] %s", (int)rr, err_descr);
+            ap_log_cerror(APLOG_MARK, APLOG_WARNING, rv, fctx->c, APLOGNO()
+                         "processing TLS data: [%d] %s", (int)rr, err_descr);
         }
     }
     else if (APR_STATUS_IS_EOF(rv) && passed > 0) {
@@ -260,6 +260,9 @@ static apr_status_t filter_do_pre_handshake(
     tls_filter_ctx_t *fctx)
 {
     apr_status_t rv = APR_SUCCESS;
+
+    /* This phase does nothing for outgoing connections */
+    if (fctx->cc->outgoing) goto cleanup;
 
     if (rustls_connection_is_handshaking(fctx->cc->rustls_connection)) {
         apr_bucket_brigade *bb_tmp;
