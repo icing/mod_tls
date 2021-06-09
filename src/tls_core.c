@@ -359,10 +359,9 @@ cleanup:
 }
 
 static apr_status_t server_conf_setup(
-    apr_pool_t *p, apr_pool_t *ptemp, tls_conf_server_t *sc, tls_cert_reg_t *cert_reg)
+    apr_pool_t *p, apr_pool_t *ptemp, tls_conf_server_t *sc, tls_conf_global_t *gc)
 {
     rustls_server_config_builder *builder = NULL;
-    rustls_root_cert_store *ca_store = NULL;
     apr_array_header_t *cert_specs;
     rustls_result rr = RUSTLS_RESULT_OK;
     apr_status_t rv = APR_SUCCESS;
@@ -381,13 +380,13 @@ static apr_status_t server_conf_setup(
 
         if (sc->client_auth == TLS_CLIENT_AUTH_REQUIRED) {
             const rustls_client_cert_verifier *verifier;
-            rv = tls_cert_client_verifiers_get(sc->global->verifiers, sc->client_ca, &verifier);
+            rv = tls_cert_client_verifiers_get(gc->verifiers, sc->client_ca, &verifier);
             if (APR_SUCCESS != rv) goto cleanup;
             builder = rustls_server_config_builder_with_client_verifier(verifier);
         }
         else {
             const rustls_client_cert_verifier_optional *verifier;
-            rv = tls_cert_client_verifiers_get_optional(sc->global->verifiers, sc->client_ca, &verifier);
+            rv = tls_cert_client_verifiers_get_optional(gc->verifiers, sc->client_ca, &verifier);
             if (APR_SUCCESS != rv) goto cleanup;
             builder = rustls_server_config_builder_with_client_verifier_optional(verifier);
         }
@@ -402,7 +401,7 @@ static apr_status_t server_conf_setup(
 
     cert_specs = complete_cert_specs(ptemp, sc);
     sc->certified_keys = apr_array_make(p, 3, sizeof(rustls_certified_key *));
-    rv = load_certified_keys(sc, sc->server, cert_specs, cert_reg);
+    rv = load_certified_keys(sc, sc->server, cert_specs, gc->cert_reg);
     if (APR_SUCCESS != rv) goto cleanup;
     ap_log_error(APLOG_MARK, APLOG_TRACE1, rv, sc->server,
                  "init server: %s with %d certificates loaded",
@@ -466,13 +465,58 @@ static apr_status_t server_conf_setup(
 
 cleanup:
     if (builder) rustls_server_config_builder_free(builder);
-    if (ca_store) rustls_root_cert_store_free(ca_store);
     if (RUSTLS_RESULT_OK != rr) {
         const char *err_descr;
         rv = tls_util_rustls_error(ptemp, rr, &err_descr);
         ap_log_error(APLOG_MARK, APLOG_ERR, rv, sc->server, APLOGNO()
                      "Failed to configure server %s: [%d] %s",
                      sc->server->server_hostname, (int)rr, err_descr);
+        goto cleanup;
+    }
+    return rv;
+}
+
+static apr_status_t proxy_conf_setup(
+    apr_pool_t *p, apr_pool_t *ptemp, tls_conf_proxy_t *pc, tls_conf_global_t *gc)
+{
+    rustls_client_config_builder *builder;
+    rustls_root_cert_store *ca_store = NULL;
+    rustls_result rr = RUSTLS_RESULT_OK;
+    apr_status_t rv = APR_SUCCESS;
+
+    (void)p; (void)ptemp;
+    ap_assert(pc->defined_in);
+
+    builder = rustls_client_config_builder_new();
+    if (pc->proxy_ca && strcasecmp(pc->proxy_ca, "default")) {
+        ap_log_error(APLOG_MARK, APLOG_TRACE2, rv, pc->defined_in,
+                     "proxy: loading roots in %s from %s",
+                     pc->defined_in->server_hostname, pc->proxy_ca);
+        rv = tls_cert_root_stores_get(gc->stores, pc->proxy_ca, &ca_store);
+        if (APR_SUCCESS != rv) goto cleanup;
+        rr = rustls_client_config_builder_use_roots(builder, ca_store);
+        if (RUSTLS_RESULT_OK != rr) goto cleanup;
+    }
+    else {
+        ap_log_error(APLOG_MARK, APLOG_TRACE2, rv, pc->defined_in,
+                     "proxy: using local roots in %s",
+                     pc->defined_in->server_hostname);
+        /* crashes on MacOS, see <https://github.com/kornelski/rust-security-framework/issues/136>
+        rr = rustls_client_config_builder_load_native_roots(builder);
+        if (RUSTLS_RESULT_OK != rr) goto cleanup;
+        */
+    }
+    pc->rustls_config = rustls_client_config_builder_build(builder);
+    builder = NULL;
+
+cleanup:
+    if (builder) rustls_client_config_builder_free(builder);
+    if (RUSTLS_RESULT_OK != rr) {
+        const char *err_descr;
+        rv = tls_util_rustls_error(ptemp, rr, &err_descr);
+        ap_log_error(APLOG_MARK, APLOG_ERR, rv, pc->defined_in, APLOGNO()
+                     "Failed to configure proxy %s: [%d] %s",
+                     pc->defined_in->server_hostname, (int)rr, err_descr);
         goto cleanup;
     }
     return rv;
@@ -486,7 +530,7 @@ static const rustls_certified_key *extract_client_hello_values(
     size_t i, len;
     unsigned short n;
 
-    ap_log_cerror(APLOG_MARK, APLOG_TRACE2, 0, c, "extractr client hello values");
+    ap_log_cerror(APLOG_MARK, APLOG_TRACE2, 0, c, "extract client hello values");
     if (!cc) goto cleanup;
     cc->client_hello_seen = 1;
     if (hello->sni_name.len > 0) {
@@ -555,7 +599,7 @@ static apr_status_t init_incoming(apr_pool_t *p, apr_pool_t *ptemp, server_rec *
     server_rec *s;
     apr_status_t rv = APR_ENOMEM;
 
-    ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, base_server, "tls_core_init");
+    ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, base_server, "tls_core_init incoming");
     apr_pool_cleanup_register(p, base_server, tls_core_free,
                               apr_pool_cleanup_null);
 
@@ -588,7 +632,7 @@ static apr_status_t init_incoming(apr_pool_t *p, apr_pool_t *ptemp, server_rec *
         rv = tls_conf_server_apply_defaults(sc, p);
         if (APR_SUCCESS != rv) goto cleanup;
         if (sc->enabled != TLS_FLAG_TRUE) continue;
-        rv = server_conf_setup(p, ptemp, sc, gc->cert_reg);
+        rv = server_conf_setup(p, ptemp, sc, gc);
         if (APR_SUCCESS != rv) {
             ap_log_error(APLOG_MARK, APLOG_ERR, rv, s, "server setup failed: %s",
                 s->server_hostname);
@@ -596,13 +640,7 @@ static apr_status_t init_incoming(apr_pool_t *p, apr_pool_t *ptemp, server_rec *
         }
     }
 
-    /* register all loaded certificates for OCSP stapling */
-    rv = tls_ocsp_prime_certs(gc, p, base_server);
-    if (APR_SUCCESS != rv) goto cleanup;
-
 cleanup:
-    if (gc->verifiers) tls_cert_verifiers_clear(gc->verifiers);
-    if (gc->stores) tls_cert_root_stores_clear(gc->stores);
     if (APR_SUCCESS != rv) {
         ap_log_error(APLOG_MARK, APLOG_ERR, rv, base_server, "error during post_config");
     }
@@ -614,11 +652,14 @@ static apr_status_t init_outgoing(apr_pool_t *p, apr_pool_t *ptemp, server_rec *
     tls_conf_server_t *sc = tls_conf_server_get(base_server);
     tls_conf_global_t *gc = sc->global;
     tls_conf_dir_t *dc;
+    tls_conf_proxy_t *pc;
     server_rec *s;
     apr_status_t rv = APR_SUCCESS;
+    int i;
 
     (void)p; (void)ptemp;
     (void)gc;
+    ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, base_server, "tls_core_init outgoing");
     ap_assert(gc->mod_proxy_post_config_done);
     /* Collect all proxy'ing default server dir configs.
      * All <Proxy> section dir_configs should already be there - if there were any. */
@@ -627,12 +668,18 @@ static apr_status_t init_outgoing(apr_pool_t *p, apr_pool_t *ptemp, server_rec *
         rv = tls_conf_dir_apply_defaults(dc, p);
         if (APR_SUCCESS != rv) goto cleanup;
         if (dc->proxy_enabled != TLS_FLAG_TRUE) continue;
-        APR_ARRAY_PUSH(gc->proxy_dir_configs, tls_conf_dir_t*) = dc;
+        dc->proxy_config = tls_conf_proxy_make(p, dc, s);
+        ap_log_error(APLOG_MARK, APLOG_TRACE3, 0, s, "%s: adding proxy_conf to globals",
+            s->server_hostname);
+        APR_ARRAY_PUSH(gc->proxy_configs, tls_conf_proxy_t*) = dc->proxy_config;
     }
-    /* Now gc->proxy_dir_configs contains all configurations we need to possibly
+    /* Now gc->proxy_configs contains all configurations we need to possibly
      * act on for outgoing connections. */
-    /* TODO: read certs, CAfiles, prepare rustls_client_configs */
-    
+    for (i = 0; i < gc->proxy_configs->nelts; ++i) {
+        pc = APR_ARRAY_IDX(gc->proxy_configs, i, tls_conf_proxy_t*);
+        rv = proxy_conf_setup(p, ptemp, pc, gc);
+    }
+
 cleanup:
     return rv;
 }
@@ -654,9 +701,17 @@ apr_status_t tls_core_init(apr_pool_t *p, apr_pool_t *ptemp, server_rec *base_se
 
         rv = init_outgoing(p, ptemp, base_server);
         if (APR_SUCCESS != rv) goto cleanup;
+        gc->status = TLS_CONF_ST_OUTGOING_DONE;
+    }
+    if (TLS_CONF_ST_OUTGOING_DONE == gc->status) {
+        /* register all loaded certificates for OCSP stapling */
+        rv = tls_ocsp_prime_certs(gc, p, base_server);
+        if (APR_SUCCESS != rv) goto cleanup;
+
+        if (gc->verifiers) tls_cert_verifiers_clear(gc->verifiers);
+        if (gc->stores) tls_cert_root_stores_clear(gc->stores);
         gc->status = TLS_CONF_ST_DONE;
     }
-
 cleanup:
     return rv;
 }
@@ -720,6 +775,7 @@ void tls_core_conn_bind(conn_rec *c, ap_conf_vector_t *dir_conf)
 int tls_core_conn_init(conn_rec *c)
 {
     tls_conf_server_t *sc = tls_conf_server_get(c->base_server);
+    const rustls_client_config* config = NULL;
     tls_conf_conn_t *cc;
     rustls_result rr = RUSTLS_RESULT_OK;
 
@@ -744,19 +800,50 @@ int tls_core_conn_init(conn_rec *c)
     }
 
     if (TLS_CONN_ST_IS_ENABLED(cc) && !cc->rustls_connection) {
-        /* Use a generic rustls_connection with its defaults, which we feed
-         * the first TLS bytes from the client. Its Hello message will trigger
-         * our callback where we can inspect the (possibly) supplied SNI and
-         * select another server.
-         */
-        rr = rustls_server_connection_new(sc->global->rustls_hello_config, &cc->rustls_connection);
-        if (RUSTLS_RESULT_OK != rr) goto cleanup;
+        if (cc->outgoing) {
+            tls_conf_proxy_t *pc;
+            rustls_client_config_builder *builder;
+            const char *hostname;
+
+            ap_assert(cc->dc);
+            pc = cc->dc->proxy_config;
+            ap_assert(pc);
+            ap_assert(pc->rustls_config);
+            builder = rustls_client_config_builder_from_config(pc->rustls_config);
+            hostname = apr_table_get(c->notes, "proxy-request-hostname");
+            if (hostname) {
+                rustls_client_config_builder_set_enable_sni(builder, true);
+                ap_log_error(APLOG_MARK, APLOG_TRACE1, 0, c->base_server,
+                    "tls_core_conn_init: create outgoing to %s from proxy defined in %s"
+                    " using CA %s",
+                    hostname, pc->defined_in->server_hostname, pc->proxy_ca);
+            }
+            else {
+                hostname = "unknown.proxy.local";
+                rustls_client_config_builder_set_enable_sni(builder, false);
+                ap_log_error(APLOG_MARK, APLOG_TRACE1, 0, c->base_server,
+                    "tls_core_conn_init: create outgoing without hostname provided");
+            }
+            config = rustls_client_config_builder_build(builder);
+            rr = rustls_client_connection_new(config, hostname, &cc->rustls_connection);
+            if (RUSTLS_RESULT_OK != rr) goto cleanup;
+        }
+        else {
+            /* Use a generic rustls_connection with its defaults, which we feed
+             * the first TLS bytes from the client. Its Hello message will trigger
+             * our callback where we can inspect the (possibly) supplied SNI and
+             * select another server.
+             */
+            rr = rustls_server_connection_new(sc->global->rustls_hello_config, &cc->rustls_connection);
+            if (RUSTLS_RESULT_OK != rr) goto cleanup;
+            /* we might refuse requests on this connection, e.g. ACME challenge */
+            cc->service_unavailable = sc->service_unavailable;
+        }
         rustls_connection_set_userdata(cc->rustls_connection, c);
-        /* we might refuse requests on this connection, e.g. ACME challenge */
-        cc->service_unavailable = sc->service_unavailable;
     }
 
 cleanup:
+    if (config != NULL) rustls_client_config_free(config);
     if (RUSTLS_RESULT_OK != rr) {
         const char *err_descr = NULL;
         apr_status_t rv = tls_util_rustls_error(c->pool, rr, &err_descr);
@@ -1079,13 +1166,21 @@ int tls_core_setup_outgoing(conn_rec *c)
     tls_conf_conn_t *cc;
     int rv = DECLINED;
 
+    ap_log_cerror(APLOG_MARK, APLOG_TRACE2, 0, c,
+                 "tls_core_setup_outgoing called");
 #if AP_MODULE_MAGIC_AT_LEAST(20210531, 0)
     if (!c->outgoing) goto cleanup;
 #endif
     cc = cc_get_or_make(c);
-    if (cc->state == TLS_CONN_ST_DISABLED) goto cleanup;
+    if (cc->state == TLS_CONN_ST_DISABLED) {
+        ap_log_cerror(APLOG_MARK, APLOG_TRACE2, 0, c,
+                     "tls_core_setup_outgoing: already disabled");
+        goto cleanup;
+    }
     if (TLS_CONN_ST_IS_ENABLED(cc)) {
         /* we already handle it, allow repeated calls */
+        ap_log_cerror(APLOG_MARK, APLOG_TRACE2, 0, c,
+                     "tls_core_setup_outgoing: already enabled");
         rv = OK; goto cleanup;
     }
     cc->outgoing = 1;
@@ -1096,6 +1191,8 @@ int tls_core_setup_outgoing(conn_rec *c)
     }
     if (cc->dc->proxy_enabled != TLS_FLAG_TRUE) {
         cc->state = TLS_CONN_ST_DISABLED;
+        ap_log_cerror(APLOG_MARK, APLOG_TRACE2, 0, c,
+                     "tls_core_setup_outgoing: TLSProxyEngine not configured");
         goto cleanup;
     }
     /* we handle this connection */
@@ -1103,5 +1200,7 @@ int tls_core_setup_outgoing(conn_rec *c)
     rv = OK;
 
 cleanup:
+    ap_log_cerror(APLOG_MARK, APLOG_TRACE2, 0, c,
+                 "tls_core_setup_outgoing returns %s", rv == OK? "OK" : "DECLINED");
     return rv;
 }
