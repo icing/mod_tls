@@ -467,12 +467,20 @@ const char *tls_proto_get_cipher_names(
     return apr_array_pstrcat(pool, names, ':');
 }
 
-apr_status_t tls_proto_post_config(apr_pool_t *pool, apr_pool_t *ptemp, server_rec *s)
+apr_status_t tls_proto_pre_config(apr_pool_t *pool, apr_pool_t *ptemp)
 {
     (void)pool;
+    (void)ptemp;
+    return APR_SUCCESS;
+}
+
+apr_status_t tls_proto_post_config(apr_pool_t *pool, apr_pool_t *ptemp, server_rec *s)
+{
+    tls_conf_server_t *sc = tls_conf_server_get(s);
+    tls_proto_conf_t *conf = sc->global->proto;
+
+    (void)pool;
     if (APLOGdebug(s)) {
-        tls_conf_server_t *sc = tls_conf_server_get(s);
-        tls_proto_conf_t *conf = sc->global->proto;
         ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, s, APLOGNO()
                      "tls ciphers supported: %s",
                      tls_proto_get_cipher_names(conf, conf->supported_cipher_ids, ptemp));

@@ -498,13 +498,10 @@ static apr_status_t proxy_conf_setup(
         if (RUSTLS_RESULT_OK != rr) goto cleanup;
     }
     else {
-        ap_log_error(APLOG_MARK, APLOG_TRACE2, rv, pc->defined_in,
-                     "proxy: using local roots in %s",
+        ap_log_error(APLOG_MARK, APLOG_WARNING, rv, pc->defined_in,
+                     "proxy: there is no TLSProxyCA configured in %s which means "
+                     "the certificates of remote servers contacted from here will not be trusted.",
                      pc->defined_in->server_hostname);
-        /* crashes on MacOS, see <https://github.com/kornelski/rust-security-framework/issues/136>
-        rr = rustls_client_config_builder_load_native_roots(builder);
-        if (RUSTLS_RESULT_OK != rr) goto cleanup;
-        */
     }
     pc->rustls_config = rustls_client_config_builder_build(builder);
     builder = NULL;

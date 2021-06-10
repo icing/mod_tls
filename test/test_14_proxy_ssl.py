@@ -18,7 +18,7 @@ class TestProxySSL:
         # add vhosts a+b and a ssl proxy from a to b
         conf.add_vhosts(domains=[cls.env.domain_a, cls.env.domain_b], extras={
             'base': f"""
-            LogLevel proxy:trace1 proxy_http:trace1 ssl:trace1
+            LogLevel proxy:trace1 proxy_http:trace1 ssl:trace1 proxy_http2:trace1
             <Proxy https://127.0.0.1:{cls.env.https_port}/>
                 SSLProxyEngine on
                 SSLProxyVerify require
@@ -28,10 +28,18 @@ class TestProxySSL:
             <Proxy https://localhost:{cls.env.https_port}/>
                 ProxyPreserveHost on
             </Proxy>
+            <Proxy h2://127.0.0.1:{cls.env.https_port}/>
+                SSLProxyEngine on
+                SSLProxyVerify require
+                SSLProxyCACertificateFile {cls.env.CA.cert_file}
+                ProxyPreserveHost on
+            </Proxy>
             """,
             cls.env.domain_b: f"""
+            Protocols h2 http/1.1
             ProxyPass /proxy-ssl/ https://127.0.0.1:{cls.env.https_port}/
             ProxyPass /proxy-local/ https://localhost:{cls.env.https_port}/
+            ProxyPass /proxy-h2-ssl/ h2://127.0.0.1:{cls.env.https_port}/
             TLSOptions +StdEnvVars
             """,
         })
@@ -54,6 +62,11 @@ class TestProxySSL:
         # does not work, since SSLProxy* not configured
         data = self.env.https_get_json(self.env.domain_b, "/proxy-local/index.json")
         assert data == None
+
+    def test_14_proxy_ssl_h2_get(self):
+        r = self.env.https_get(self.env.domain_b, "/proxy-h2-ssl/index.json")
+        assert r.exit_code == 0
+        assert r.json == {'domain': self.env.domain_b}
 
     @pytest.mark.parametrize("name, value", [
         ("SERVER_NAME", "b.mod-tls.test"),
