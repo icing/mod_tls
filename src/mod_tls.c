@@ -24,6 +24,7 @@
 #include "tls_conf.h"
 #include "tls_core.h"
 #include "tls_cache.h"
+#include "tls_proto.h"
 #include "tls_filter.h"
 #include "tls_var.h"
 #include "tls_version.h"
@@ -57,6 +58,7 @@ static const char* crustls_version(apr_pool_t *p)
 
 static int tls_pre_config(apr_pool_t *pconf, apr_pool_t *plog, apr_pool_t *ptemp)
 {
+    tls_proto_pre_config(pconf, ptemp);
     tls_cache_pre_config(pconf, plog, ptemp);
     return OK;
 }

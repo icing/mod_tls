@@ -34,12 +34,19 @@ struct tls_proto_conf_t {
     apr_hash_t *known_ciphers_by_id; /* hash by id of known tls_cipher_t* */
     apr_hash_t *rustls_ciphers_by_id; /* hash by id of rustls rustls_supported_ciphersuite* */
     apr_array_header_t *supported_cipher_ids; /* cipher ids (apr_uint16_t) supported by rustls */
+    const rustls_root_cert_store *native_roots;
 };
 
 /**
  * Create and populate the protocol configuration.
  */
 tls_proto_conf_t *tls_proto_init(apr_pool_t *p, server_rec *s);
+
+/**
+ * Called during pre-config phase to start intialization
+ * of the tls protocol configuration.
+ */
+apr_status_t tls_proto_pre_config(apr_pool_t *pool, apr_pool_t *ptemp);
 
 /**
  * Called during post-config phase to conclude the intialization
