@@ -37,6 +37,7 @@ class TestProxyTLS:
             Protocols h2 http/1.1
             ProxyPass /proxy-tls/ https://127.0.0.1:{cls.env.https_port}/
             ProxyPass /proxy-local/ https://localhost:{cls.env.https_port}/
+            ProxyPass /proxy-h2-tls/ h2://127.0.0.1:{cls.env.https_port}/
             TLSOptions +StdEnvVars
             """,
         })
@@ -60,9 +61,9 @@ class TestProxyTLS:
         data = self.env.https_get_json(self.env.domain_b, "/proxy-local/index.json")
         assert data == None
 
-    @pytest.mark.skip(reason="ALPN for proxy connections not implemented yet")
-    def test_15_proxy_ssl_h2_get(self):
-        r = self.env.https_get(self.env.domain_b, "/proxy-h2-ssl/index.json")
+    @pytest.mark.skip(reason="implementation if ALPN incomplete")
+    def test_15_proxy_tls_h2_get(self):
+        r = self.env.https_get(self.env.domain_b, "/proxy-h2-tls/index.json")
         assert r.exit_code == 0
         assert r.json == {'domain': self.env.domain_b}
 

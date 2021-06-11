@@ -769,12 +769,106 @@ void tls_core_conn_bind(conn_rec *c, ap_conf_vector_t *dir_conf)
 }
 
 
+static apr_status_t init_outgoing_connection(conn_rec *c)
+{
+    tls_conf_conn_t *cc = tls_conf_conn_get(c);
+    tls_conf_proxy_t *pc;
+    rustls_client_config_builder *builder;
+    const char *hostname = NULL, *alpn_note = NULL;
+    const rustls_client_config* config = NULL;
+    rustls_result rr = RUSTLS_RESULT_OK;
+    apr_status_t rv = APR_SUCCESS;
+
+    ap_assert(cc->outgoing);
+    ap_assert(cc->dc);
+    pc = cc->dc->proxy_config;
+    ap_assert(pc);
+    ap_assert(pc->rustls_config);
+
+    hostname = apr_table_get(c->notes, "proxy-request-hostname");
+    alpn_note = apr_table_get(c->notes, "proxy-request-alpn-protos");
+    ap_log_error(APLOG_MARK, APLOG_TRACE1, 0, c->base_server,
+        "setup_outgoing: to %s [ALPN: %s] from configration in %s"
+        " using CA %s", hostname, alpn_note, pc->defined_in->server_hostname, pc->proxy_ca);
+
+    builder = rustls_client_config_builder_from_config(pc->rustls_config);
+    if (hostname) {
+        rustls_client_config_builder_set_enable_sni(builder, true);
+    }
+    else {
+        hostname = "unknown.proxy.local";
+        rustls_client_config_builder_set_enable_sni(builder, false);
+    }
+
+    if (alpn_note) {
+        apr_array_header_t *alpn_proposed = NULL;
+        char *p, *last;
+        apr_size_t len;
+
+        alpn_proposed = apr_array_make(c->pool, 3, sizeof(const char*));
+        p = apr_pstrdup(c->pool, alpn_note);
+        while ((p = apr_strtok(p, ", ", &last))) {
+            len = (apr_size_t)(last - p - (*last? 1 : 0));
+            if (len > 255) {
+                ap_log_cerror(APLOG_MARK, APLOG_ERR, 0, c, APLOGNO()
+                              "ALPN proxy protocol identifier too long: %s", p);
+                rv = APR_EGENERAL;
+                goto cleanup;
+            }
+            APR_ARRAY_PUSH(alpn_proposed, const char*) = apr_pstrndup(c->pool, p, len);
+            p = NULL;
+        }
+        if (alpn_proposed->nelts > 0) {
+            apr_array_header_t *rustls_protocols;
+            const char* proto;
+            rustls_slice_bytes bytes;
+            int i;
+
+            rustls_protocols = apr_array_make(c->pool, alpn_proposed->nelts, sizeof(rustls_slice_bytes));
+            for (i = 0; i < alpn_proposed->nelts; ++i) {
+                proto = APR_ARRAY_IDX(alpn_proposed, i, const char*);
+                bytes.data = (const unsigned char*)proto;
+                bytes.len = strlen(proto);
+                APR_ARRAY_PUSH(rustls_protocols, rustls_slice_bytes) = bytes;
+            }
+
+            rr = rustls_client_config_builder_set_protocols(builder,
+                (rustls_slice_bytes*)rustls_protocols->elts, (size_t)rustls_protocols->nelts);
+            if (RUSTLS_RESULT_OK != rr) goto cleanup;
+
+            ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, c->base_server,
+                "setup_outgoing: to %s, added %d ALPN protocols from %s",
+                hostname, rustls_protocols->nelts, alpn_note);
+        }
+    }
+
+    config = rustls_client_config_builder_build(builder);
+    rr = rustls_client_connection_new(config, hostname, &cc->rustls_connection);
+    if (RUSTLS_RESULT_OK != rr) goto cleanup;
+    rustls_connection_set_userdata(cc->rustls_connection, c);
+
+cleanup:
+    if (config != NULL) rustls_client_config_free(config);
+    if (RUSTLS_RESULT_OK != rr) {
+        const char *err_descr = NULL;
+        rv = tls_util_rustls_error(c->pool, rr, &err_descr);
+        ap_log_error(APLOG_MARK, APLOG_ERR, rv, cc->server, APLOGNO()
+                     "Failed to init pre_session for outgoing %s to %s: [%d] %s",
+                     cc->server->server_hostname, hostname, (int)rr, err_descr);
+        c->aborted = 1;
+        cc->state = TLS_CONN_ST_DISABLED;
+        goto cleanup;
+    }
+    return rv;
+}
+
 int tls_core_conn_init(conn_rec *c)
 {
     tls_conf_server_t *sc = tls_conf_server_get(c->base_server);
     const rustls_client_config* config = NULL;
     tls_conf_conn_t *cc;
     rustls_result rr = RUSTLS_RESULT_OK;
+    apr_status_t rv = APR_SUCCESS;
 
     cc = cc_get_or_make(c);
     if (cc->state == TLS_CONN_ST_INIT) {
@@ -798,32 +892,8 @@ int tls_core_conn_init(conn_rec *c)
 
     if (TLS_CONN_ST_IS_ENABLED(cc) && !cc->rustls_connection) {
         if (cc->outgoing) {
-            tls_conf_proxy_t *pc;
-            rustls_client_config_builder *builder;
-            const char *hostname;
-
-            ap_assert(cc->dc);
-            pc = cc->dc->proxy_config;
-            ap_assert(pc);
-            ap_assert(pc->rustls_config);
-            builder = rustls_client_config_builder_from_config(pc->rustls_config);
-            hostname = apr_table_get(c->notes, "proxy-request-hostname");
-            if (hostname) {
-                rustls_client_config_builder_set_enable_sni(builder, true);
-                ap_log_error(APLOG_MARK, APLOG_TRACE1, 0, c->base_server,
-                    "tls_core_conn_init: create outgoing to %s from proxy defined in %s"
-                    " using CA %s",
-                    hostname, pc->defined_in->server_hostname, pc->proxy_ca);
-            }
-            else {
-                hostname = "unknown.proxy.local";
-                rustls_client_config_builder_set_enable_sni(builder, false);
-                ap_log_error(APLOG_MARK, APLOG_TRACE1, 0, c->base_server,
-                    "tls_core_conn_init: create outgoing without hostname provided");
-            }
-            config = rustls_client_config_builder_build(builder);
-            rr = rustls_client_connection_new(config, hostname, &cc->rustls_connection);
-            if (RUSTLS_RESULT_OK != rr) goto cleanup;
+            rv = init_outgoing_connection(c);
+            if (APR_SUCCESS != rv) goto cleanup;
         }
         else {
             /* Use a generic rustls_connection with its defaults, which we feed
@@ -843,7 +913,7 @@ cleanup:
     if (config != NULL) rustls_client_config_free(config);
     if (RUSTLS_RESULT_OK != rr) {
         const char *err_descr = NULL;
-        apr_status_t rv = tls_util_rustls_error(c->pool, rr, &err_descr);
+        rv = tls_util_rustls_error(c->pool, rr, &err_descr);
         ap_log_error(APLOG_MARK, APLOG_ERR, rv, sc->server, APLOGNO()
                      "Failed to init pre_session for server %s: [%d] %s",
                      sc->server->server_hostname, (int)rr, err_descr);
@@ -851,7 +921,7 @@ cleanup:
         cc->state = TLS_CONN_ST_DISABLED;
         goto cleanup;
     }
-    return TLS_CONN_ST_IS_ENABLED(cc)? OK : DECLINED;
+    return ((APR_SUCCESS == rv) && TLS_CONN_ST_IS_ENABLED(cc))? OK : DECLINED;
 }
 
 static int find_vhost(void *sni_hostname, conn_rec *c, server_rec *s)
