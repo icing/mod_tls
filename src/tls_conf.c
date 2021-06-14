@@ -135,6 +135,7 @@ void *tls_conf_create_dir(apr_pool_t *pool, char *dir)
     conf = apr_pcalloc(pool, sizeof(*conf));
     conf->std_env_vars = TLS_FLAG_UNSET;
     conf->proxy_enabled = TLS_FLAG_UNSET;
+    conf->proxy_protocol_min = TLS_FLAG_UNSET;
     return conf;
 }
 
@@ -154,6 +155,7 @@ static void dir_assign_merge(
     local.export_cert_vars = MERGE_INT(base, add, export_cert_vars);
     local.proxy_enabled = MERGE_INT(base, add, proxy_enabled);
     local.proxy_ca = add->proxy_ca? add->proxy_ca : base->proxy_ca;
+    local.proxy_protocol_min = MERGE_INT(base, add, proxy_protocol_min);
     if (local.proxy_enabled == TLS_FLAG_TRUE) {
         if (add->proxy_config) {
             local.proxy_config = same_proxy_settings(&local, add)? add->proxy_config : NULL;
@@ -207,6 +209,7 @@ tls_conf_proxy_t *tls_conf_proxy_make(
     tls_conf_proxy_t *pc = apr_pcalloc(p, sizeof(*pc));
     pc->defined_in = s;
     pc->proxy_ca = dc->proxy_ca;
+    pc->proxy_protocol_min = dc->proxy_protocol_min;
     return pc;
 }
 
@@ -489,25 +492,20 @@ static const char *tls_conf_set_strict_sni(
     return NULL;
 }
 
-static const char *tls_conf_set_protocol(
-    cmd_parms *cmd, void *dc, const char *v)
+static const char *get_min_protocol(
+    cmd_parms *cmd, const char *v, int *pmin)
 {
     tls_conf_server_t *sc = tls_conf_server_get(cmd->server);
     const char *err = NULL;
 
-    (void)dc;
-    if (cmd->path) {
-        err = "TLS protocol versions cannot be set inside a directory context";
-        goto cleanup;
-    }
     if (!apr_strnatcasecmp("default", v)) {
-        sc->tls_protocol_min = 0;
+        *pmin = 0;
     }
     else if (*v && v[strlen(v)-1] == '+') {
         char *name = apr_pstrdup(cmd->pool, v);
         name[strlen(name)-1] = '\0';
-        sc->tls_protocol_min = tls_proto_get_version_by_name(sc->global->proto, name);
-        if (!sc->tls_protocol_min) {
+        *pmin = tls_proto_get_version_by_name(sc->global->proto, name);
+        if (!*pmin) {
             err = apr_pstrcat(cmd->pool, cmd->cmd->name,
                 ": unrecognized protocol version specifier (try TLSv1.2+ or TLSv1.3+): '", v, "'", NULL);
             goto cleanup;
@@ -520,6 +518,14 @@ static const char *tls_conf_set_protocol(
     }
 cleanup:
     return err;
+}
+
+static const char *tls_conf_set_protocol(
+    cmd_parms *cmd, void *dc, const char *v)
+{
+    tls_conf_server_t *sc = tls_conf_server_get(cmd->server);
+    (void)dc;
+    return get_min_protocol(cmd, v, &sc->tls_protocol_min);
 }
 
 static const char *tls_conf_set_options(
@@ -601,6 +607,13 @@ cleanup:
     return err;
 }
 
+static const char *tls_conf_set_proxy_protocol(
+    cmd_parms *cmd, void *dir_conf, const char *v)
+{
+    tls_conf_dir_t *dc = dir_conf;
+    return get_min_protocol(cmd, v, &dc->proxy_protocol_min);
+}
+
 #if TLS_CLIENT_CERTS
 
 static const char *tls_conf_set_client_ca(
@@ -664,7 +677,7 @@ const command_rec tls_conf_cmds[] = {
         "Specify an adress+port where the module shall handle incoming TLS connections."),
     AP_INIT_TAKE_ARGV("TLSOptions", tls_conf_set_options, NULL, OR_OPTIONS,
         "En-/disables optional features in the module."),
-    AP_INIT_TAKE1("TLSProtocols", tls_conf_set_protocol, NULL, RSRC_CONF,
+    AP_INIT_TAKE1("TLSProtocol", tls_conf_set_protocol, NULL, RSRC_CONF,
         "Set the minimum TLS protocol version to use."),
     AP_INIT_TAKE1("TLSStrictSNI", tls_conf_set_strict_sni, NULL, RSRC_CONF,
         "Set strictness of client server name (SNI) check against hosts, default on."),
@@ -674,6 +687,8 @@ const command_rec tls_conf_cmds[] = {
         "Enable TLS encryption of outgoing connections in this location/server."),
     AP_INIT_TAKE1("TLSProxyCA", tls_conf_set_proxy_ca, NULL, RSRC_CONF|PROXY_CONF,
         "Set the trust anchors for certificates from proxied backend servers from a PEM file."),
+    AP_INIT_TAKE1("TLSProxyProtocol", tls_conf_set_proxy_protocol, NULL, RSRC_CONF,
+        "Set the minimum TLS protocol version to use for proxy connections."),
 #if TLS_CLIENT_CERTS
     AP_INIT_TAKE1("TLSClientCA", tls_conf_set_client_ca, NULL, RSRC_CONF,
         "Set the trust anchors for client certificates from a PEM file."),

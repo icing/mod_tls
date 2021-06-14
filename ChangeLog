@@ -1,3 +1,10 @@
+ * Added `TLSProxyProtocl` to set the minimum TLS version to use in proxy connections.
+ * Renamed `TLSProtocls` to `TLSProtocol` to less confusing when migrating from mod_ssl.
+ * All TLS filters trigger initialization and handshake processing on demand
+   when invoked, in both input and output handling.
+ * The whole setup of the rustls connection handling is delayed until I/O
+   filters are called. This allows for last minute changes in connection notes.
+   This way, ALPN signalling to the backend can be done for mod_proxy_http2.
  * Added test for TLSProxy connections without any special flavour
    except providing a CA PEM file for trusted root.
  * loading of native trust anchors disabled since rustls crashes on MacOS for this.

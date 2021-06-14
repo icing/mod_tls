@@ -39,10 +39,18 @@ struct tls_filter_ctx_t {
 void tls_filter_register(apr_pool_t *pool);
 
 /**
- * Initialize all internal data structure needed for handling TLS in-/output
- * on a given connection.
+ * Initialize the pre_connection state. Install all filters.
+ *
+ * @return OK if TLS on connection is enabled, DECLINED otherwise
  */
-int tls_filter_conn_init(conn_rec *c);
+int tls_filter_pre_conn_init(conn_rec *c);
+
+/**
+ * Initialize the connection for use, perform the TLS handshake.
+ *
+ * Any failure will lead to the connection becoming aborted.
+ */
+void tls_filter_conn_init(conn_rec *c);
 
 /*
  * <https://tools.ietf.org/html/rfc8449> says:
