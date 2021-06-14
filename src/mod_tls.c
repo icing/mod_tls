@@ -211,34 +211,21 @@ static void tls_init_child(apr_pool_t *p, server_rec *s)
 
 static int hook_pre_connection(conn_rec *c, void *csd)
 {
-    int rv = DECLINED;
-
     (void)csd; /* mpm specific socket data, not used */
 
     /* are we on a primary connection? */
-    if (c->master) goto cleanup;
+    if (c->master) return DECLINED;
 
-    /* Configure settings for the base server. */
-    rv = tls_core_conn_init(c);
-    if (OK != rv) goto cleanup;
-
-    /* Install our input/output filters for handling TLS/application data */
-    rv = tls_filter_conn_init(c);
-
-cleanup:
-    return rv;
+    /* Decide connection TLS stats and install our
+     * input/output filters for handling TLS/application data
+     * if enabled.
+     */
+    return tls_filter_pre_conn_init(c);
 }
 
 static int hook_connection(conn_rec* c)
 {
-    tls_conf_conn_t *cc = tls_conf_conn_get(c);
-
-    if (cc && (TLS_CONN_ST_PRE_HANDSHAKE == cc->state)) {
-        /* Send the initialization signal down the filter chain. */
-        apr_bucket_brigade* temp = apr_brigade_create(c->pool, c->bucket_alloc);
-        ap_get_brigade(c->input_filters, temp, AP_MODE_INIT, APR_BLOCK_READ, 0);
-        apr_brigade_destroy(temp);
-    }
+    tls_filter_conn_init(c);
     /* we do *not* take over. we are not processing requests. */
     return DECLINED;
 }

@@ -84,7 +84,7 @@ class TestConf:
 
     def test_02_conf_proto_wrong(self):
         conf = TlsTestConf(env=self.env)
-        conf.add("TLSProtocols wrong")
+        conf.add("TLSProtocol wrong")
         conf.write()
         assert self.env.apache_fail() == 0
 
@@ -96,7 +96,7 @@ class TestConf:
     ])
     def test_02_conf_proto_valid(self, proto):
         conf = TlsTestConf(env=self.env)
-        conf.add("TLSProtocols {proto}".format(proto=proto))
+        conf.add("TLSProtocol {proto}".format(proto=proto))
         conf.write()
         assert self.env.apache_restart() == 0
 

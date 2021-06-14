@@ -507,6 +507,35 @@ static apr_status_t proxy_conf_setup(
                      "the certificates of remote servers contacted from here will not be trusted.",
                      pc->defined_in->server_hostname);
     }
+
+    if (pc->proxy_protocol_min > 0) {
+        apr_array_header_t *tls_versions;
+
+        ap_log_error(APLOG_MARK, APLOG_TRACE1, rv, pc->defined_in,
+                     "init server: set proxy protocol min version %04x", pc->proxy_protocol_min);
+        tls_versions = tls_proto_create_versions_plus(
+            gc->proto, (apr_uint16_t)pc->proxy_protocol_min, ptemp);
+        if (tls_versions->nelts > 0) {
+            rr = rustls_client_config_builder_set_versions(builder,
+                (const apr_uint16_t*)tls_versions->elts, (apr_size_t)tls_versions->nelts);
+            if (RUSTLS_RESULT_OK != rr) goto cleanup;
+            if (pc->proxy_protocol_min != APR_ARRAY_IDX(tls_versions, 0, apr_uint16_t)) {
+                ap_log_error(APLOG_MARK, APLOG_WARNING, 0, pc->defined_in, APLOGNO()
+                             "Init: the minimum proxy protocol version configured for %s (%04x) "
+                             "is not supported and version %04x was selected instead.",
+                             pc->defined_in->server_hostname, pc->proxy_protocol_min,
+                             APR_ARRAY_IDX(tls_versions, 0, apr_uint16_t));
+            }
+        }
+        else {
+            ap_log_error(APLOG_MARK, APLOG_ERR, 0, pc->defined_in, APLOGNO()
+                         "Unable to configure the proxy protocol version for %s: "
+                          "neither the configured minimum version (%04x), nor any higher one is "
+                         "available.", pc->defined_in->server_hostname, pc->proxy_protocol_min);
+            rv = APR_ENOTIMPL; goto cleanup;
+        }
+    }
+
     pc->rustls_config = rustls_client_config_builder_build(builder);
     builder = NULL;
 
@@ -873,13 +902,10 @@ cleanup:
     return rv;
 }
 
-int tls_core_conn_init(conn_rec *c)
+int tls_core_pre_conn_init(conn_rec *c)
 {
     tls_conf_server_t *sc = tls_conf_server_get(c->base_server);
-    const rustls_client_config* config = NULL;
     tls_conf_conn_t *cc;
-    rustls_result rr = RUSTLS_RESULT_OK;
-    apr_status_t rv = APR_SUCCESS;
 
     cc = cc_get_or_make(c);
     if (cc->state == TLS_CONN_ST_INIT) {
@@ -889,7 +915,7 @@ int tls_core_conn_init(conn_rec *c)
                 !c->outgoing &&
 #endif
                 sc->enabled == TLS_FLAG_TRUE;
-        cc->state = enabled? TLS_CONN_ST_PRE_HANDSHAKE : TLS_CONN_ST_DISABLED;
+        cc->state = enabled? TLS_CONN_ST_CLIENT_HELLO : TLS_CONN_ST_DISABLED;
         ap_log_error(APLOG_MARK, APLOG_TRACE3, 0, c->base_server,
             "tls_core_conn_init: %s for tls: %s",
             enabled? "enabled" : "disabled", c->base_server->server_hostname);
@@ -901,7 +927,19 @@ int tls_core_conn_init(conn_rec *c)
         goto cleanup;
     }
 
-    if (TLS_CONN_ST_IS_ENABLED(cc) && !cc->rustls_connection) {
+cleanup:
+    return TLS_CONN_ST_IS_ENABLED(cc)? OK : DECLINED;
+}
+
+apr_status_t tls_core_conn_init(conn_rec *c)
+{
+    tls_conf_server_t *sc = tls_conf_server_get(c->base_server);
+    tls_conf_conn_t *cc;
+    rustls_result rr = RUSTLS_RESULT_OK;
+    apr_status_t rv = APR_SUCCESS;
+
+    cc = tls_conf_conn_get(c);
+    if (cc && TLS_CONN_ST_IS_ENABLED(cc) && !cc->rustls_connection) {
         if (cc->outgoing) {
             rv = init_outgoing_connection(c);
             if (APR_SUCCESS != rv) goto cleanup;
@@ -921,18 +959,17 @@ int tls_core_conn_init(conn_rec *c)
     }
 
 cleanup:
-    if (config != NULL) rustls_client_config_free(config);
     if (RUSTLS_RESULT_OK != rr) {
         const char *err_descr = NULL;
         rv = tls_util_rustls_error(c->pool, rr, &err_descr);
         ap_log_error(APLOG_MARK, APLOG_ERR, rv, sc->server, APLOGNO()
-                     "Failed to init pre_session for server %s: [%d] %s",
+                     "Failed to init TLS connection for server %s: [%d] %s",
                      sc->server->server_hostname, (int)rr, err_descr);
         c->aborted = 1;
         cc->state = TLS_CONN_ST_DISABLED;
         goto cleanup;
     }
-    return ((APR_SUCCESS == rv) && TLS_CONN_ST_IS_ENABLED(cc))? OK : DECLINED;
+    return rv;
 }
 
 static int find_vhost(void *sni_hostname, conn_rec *c, server_rec *s)
@@ -1274,7 +1311,7 @@ int tls_core_setup_outgoing(conn_rec *c)
         goto cleanup;
     }
     /* we handle this connection */
-    cc->state = TLS_CONN_ST_PRE_HANDSHAKE;
+    cc->state = TLS_CONN_ST_CLIENT_HELLO;
     rv = OK;
 
 cleanup:

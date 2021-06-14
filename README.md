@@ -369,7 +369,7 @@ There are two way to name a TLS protocol version in `mod_tls`:
 In `mod_tls` one configures the minimum TLS version to use by mentioning that version with an added `+`. Having a host only support v1.3 (and higher) would be achieved through:
 
 ```
-TLSProtocols TLSv1.3+
+TLSProtocol TLSv1.3+
 ```
 
 ### Cipher Names
@@ -395,7 +395,7 @@ will log a `WARNING`, because you seem to want something that `rustls` is unable
 
 You may suppress any known cipher without any warning or error. Either `rustls` does not support it anyway, or `mod_tls` will disable it, the outcome is the same.
 
-If you suppress all ciphers supported for a TLS protocol version, that version is de-facto disabled. The only way this currently *could* make sense is if you wanted a server that *only* speaks TLSv1.2. This is not really recommended, but the world is a large place. So now, you know what happens if you do it. (Btw: if you want a server no longer supporting v1.2, you should configure `TLSProtocols TLSv1.3+` and not mess with 1.2 ciphers at all). 
+If you suppress all ciphers supported for a TLS protocol version, that version is de-facto disabled. The only way this currently *could* make sense is if you wanted a server that *only* speaks TLSv1.2. This is not really recommended, but the world is a large place. So now, you know what happens if you do it. (Btw: if you want a server no longer supporting v1.2, you should configure `TLSProtocol TLSv1.3+` and not mess with 1.2 ciphers at all). 
 
 ### Variables
 
@@ -495,6 +495,26 @@ The `Defaults` value can be used to reset any options that are inherited from ot
   ...
 </Location>
 ```
+
+### `TLSProxyEngine`
+
+`TLSProxyEngine on|off` is analog to `SSLProxyEngine`.
+
+This can be used in a server/virtual host or `<Proxy>` section to enable the module for
+outgoing connections using `mod_proxy`.
+
+### `TLSProxyCA`
+
+`TLSProxyCA file.pem` sets the root certificates to validate the backend server with.
+
+
+### `TLSProxyProtocol`
+
+`TLSProxyProtocol version+` specifies the minimum version of the TLS protocol to use in proxy connections. 
+
+The default is `v1.2+`. Settings this to `v1.3+` would disable TLSv1.2.
+
+
 
 <!---
 ### `TLSStrictSNI`

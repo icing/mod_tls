@@ -22,12 +22,12 @@ class TestProto:
         conf = TlsTestConf(env=cls.env)
         conf.add_vhosts(domains=[cls.env.domain_a, cls.env.domain_b], extras={
             'base': "LogLevel tls:debug",
-            cls.env.domain_a: "TLSProtocols TLSv1.3+",
+            cls.env.domain_a: "TLSProtocol TLSv1.3+",
             cls.env.domain_b: """
             # the commonly used name
-            TLSProtocols TLSv1.2+
+            TLSProtocol TLSv1.2+
             # the numeric one (yes, this is 1.2)
-            TLSProtocols TLSv0x0303+
+            TLSProtocol TLSv0x0303+
             """,
         })
         conf.write()

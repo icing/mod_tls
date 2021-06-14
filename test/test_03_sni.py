@@ -61,10 +61,10 @@ class TestSni:
         conf = TlsTestConf(env=self.env)
         conf.add_vhosts(domains=[self.domain_a, self.domain_b], extras={
             self.domain_a: """
-    TLSProtocols TLSv1.2+
+    TLSProtocol TLSv1.2+
             """,
             self.domain_b: """
-        TLSProtocols TLSv1.3+
+        TLSProtocol TLSv1.3+
                 """
         })
         conf.write()

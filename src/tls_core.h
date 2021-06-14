@@ -12,14 +12,14 @@
 typedef enum {
     TLS_CONN_ST_INIT,             /* being initialized */
     TLS_CONN_ST_DISABLED,         /* TLS is disabled here */
-    TLS_CONN_ST_PRE_HANDSHAKE,    /* TLS is enabled, prep handshake */
+    TLS_CONN_ST_CLIENT_HELLO,    /* TLS is enabled, prep handshake */
     TLS_CONN_ST_HANDSHAKE,        /* TLS is enabled, handshake ongonig */
     TLS_CONN_ST_TRAFFIC,          /* TLS is enabled, handshake done */
     TLS_CONN_ST_NOTIFIED,         /* TLS is enabled, notification to end sent */
     TLS_CONN_ST_DONE,             /* TLS is enabled, TLS has shut down */
 } tls_conn_state_t;
 
-#define TLS_CONN_ST_IS_ENABLED(cc)  (cc && cc->state >= TLS_CONN_ST_PRE_HANDSHAKE)
+#define TLS_CONN_ST_IS_ENABLED(cc)  (cc && cc->state >= TLS_CONN_ST_CLIENT_HELLO)
 
 struct tls_filter_ctx_t;
 
@@ -106,11 +106,17 @@ void tls_core_conn_bind(conn_rec *c, ap_conf_vector_t *dir_conf);
 void tls_core_conn_disable(conn_rec *c);
 
 /**
- * Initialize the module for the new connection.
- * @param c a new connection
- * @return OK if TLS has been enabled, DECLINED otherwise
+ * Initialiaze the tls_conf_connt_t for the connection
+ * and decide if TLS is enabled or not.
+ * @return OK if enabled, DECLINED otherwise
  */
-int tls_core_conn_init(conn_rec *c);
+int tls_core_pre_conn_init(conn_rec *c);
+
+/**
+ * Initialize the module for a TLS enabled connection.
+ * @param c a new connection
+ */
+apr_status_t tls_core_conn_init(conn_rec *c);
 
 /**
  * Called when the ClientHello has been received and values from it

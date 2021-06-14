@@ -20,6 +20,7 @@ class TestProxyTLS:
         conf.add_vhosts(domains=[cls.env.domain_a, cls.env.domain_b], extras={
             'base': f"""
             LogLevel proxy:trace1 proxy_http:trace1
+            TLSProxyProtocol TLSv1.3+
             <Proxy https://127.0.0.1:{cls.env.https_port}/>
                 TLSProxyEngine on
                 TLSProxyCA {cls.env.CA.cert_file}
@@ -62,7 +63,6 @@ class TestProxyTLS:
         data = self.env.https_get_json(self.env.domain_b, "/proxy-local/index.json")
         assert data == None
 
-    @pytest.mark.skip(reason="implementation if ALPN incomplete")
     def test_15_proxy_tls_h2_get(self):
         r = self.env.https_get(self.env.domain_b, "/proxy-h2-tls/index.json")
         assert r.exit_code == 0
@@ -70,6 +70,7 @@ class TestProxyTLS:
 
     @pytest.mark.parametrize("name, value", [
         ("SERVER_NAME", "b.mod-tls.test"),
+        ("SSL_PROTOCOL", "TLSv1.3"),
         ("SSL_SESSION_RESUMED", "Initial"),
         ("SSL_SECURE_RENEG", "false"),
         ("SSL_COMPRESS_METHOD", "NULL"),
