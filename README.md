@@ -515,6 +515,18 @@ outgoing connections using `mod_proxy`.
 The default is `v1.2+`. Settings this to `v1.3+` would disable TLSv1.2.
 
 
+### `TLSProxyCipherPrefer`
+
+`TLSProxyCipherPrefer cipher(-list)` defines ciphers that are preferred for a proxy connection. 
+
+This will not disable any ciphers supported by `rustls`. If you specify a cipher that is completely unknown, the configuration will fail. If you specify a cipher that is known but not supported by `rustls`, a warning will be logged but the server will continue.
+
+### `TLSProxyCipherSuppress`
+
+`TLSProxyCipherSuppress cipher(-list)` defines ciphers that are not used for a proxy connection. 
+
+This will not disable any unmentioned ciphers supported by `rustls`. If you specify a cipher that is completely unknown, the configuration will fail. If you specify a cipher that is known but not supported by `rustls`, a warning will be logged but the server will continue.
+
 
 <!---
 ### `TLSStrictSNI`

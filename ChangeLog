@@ -1,3 +1,4 @@
+ * Added `TLSProxyCiphersPrefer` and `TLSProxyCiphersSuppress` for proxy connections.
  * Added `TLSProxyProtocl` to set the minimum TLS version to use in proxy connections.
  * Renamed `TLSProtocls` to `TLSProtocol` to less confusing when migrating from mod_ssl.
  * All TLS filters trigger initialization and handshake processing on demand

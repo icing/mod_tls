@@ -171,9 +171,14 @@ static void add_file_specs(
     }
 }
 
-static apr_status_t set_ciphers(
-    apr_pool_t *pool, tls_conf_server_t *sc,
-    rustls_server_config_builder *builder)
+static apr_status_t calc_ciphers(
+    apr_pool_t *pool,
+    server_rec *s,
+    tls_conf_global_t *gc,
+    const char *proxy,
+    apr_array_header_t *pref_ciphers,
+    apr_array_header_t *supp_ciphers,
+    const apr_array_header_t **pciphers)
 {
     apr_array_header_t *ordered_ciphers;
     const apr_array_header_t *ciphers;
@@ -185,29 +190,28 @@ static apr_status_t set_ciphers(
 
 
     /* remove all suppressed ciphers from the ones supported by rustls */
-    ciphers = tls_util_array_uint16_remove(pool,
-        sc->global->proto->supported_cipher_ids, sc->tls_supp_ciphers);
+    ciphers = tls_util_array_uint16_remove(pool, gc->proto->supported_cipher_ids, supp_ciphers);
     ordered_ciphers = NULL;
     /* if preferred ciphers are actually still present in allowed_ciphers, put
      * them into `ciphers` in this order */
-    for (i = 0; i < sc->tls_pref_ciphers->nelts; ++i) {
-        id = APR_ARRAY_IDX(sc->tls_pref_ciphers, i, apr_uint16_t);
-        ap_log_error(APLOG_MARK, APLOG_TRACE4, rv, sc->server,
+    for (i = 0; i < pref_ciphers->nelts; ++i) {
+        id = APR_ARRAY_IDX(pref_ciphers, i, apr_uint16_t);
+        ap_log_error(APLOG_MARK, APLOG_TRACE4, rv, s,
                      "checking preferred cipher %s: %d",
-                     sc->server->server_hostname, id);
+                     s->server_hostname, id);
         if (tls_util_array_uint16_contains(ciphers, id)) {
-            ap_log_error(APLOG_MARK, APLOG_TRACE4, rv, sc->server,
+            ap_log_error(APLOG_MARK, APLOG_TRACE4, rv, s,
                          "checking preferred cipher %s: %d is known",
-                         sc->server->server_hostname, id);
+                         s->server_hostname, id);
             if (ordered_ciphers == NULL) {
                 ordered_ciphers = apr_array_make(pool, ciphers->nelts, sizeof(apr_uint16_t));
             }
             APR_ARRAY_PUSH(ordered_ciphers, apr_uint16_t) = id;
         }
-        else if (!tls_proto_is_cipher_supported(sc->global->proto, id)) {
-            ap_log_error(APLOG_MARK, APLOG_TRACE4, rv, sc->server,
+        else if (!tls_proto_is_cipher_supported(gc->proto, id)) {
+            ap_log_error(APLOG_MARK, APLOG_TRACE4, rv, s,
                          "checking preferred cipher %s: %d is unsupported",
-                         sc->server->server_hostname, id);
+                         s->server_hostname, id);
             if (!unsupported) unsupported = apr_array_make(pool, 5, sizeof(apr_uint16_t));
             APR_ARRAY_PUSH(unsupported, apr_uint16_t) = id;
         }
@@ -224,7 +228,43 @@ static apr_status_t set_ciphers(
         ciphers = ordered_ciphers;
     }
 
-    if (ciphers != sc->global->proto->supported_cipher_ids) {
+    if (ciphers == gc->proto->supported_cipher_ids) {
+        ciphers = NULL;
+    }
+
+    if (unsupported && unsupported->nelts) {
+        ap_log_error(APLOG_MARK, APLOG_WARNING, rv, s, APLOGNO()
+                     "Server '%s' has TLS%sCiphersPrefer configured that are not "
+                     "supported by rustls. These will not have an effect: %s",
+                     s->server_hostname, proxy,
+                     tls_proto_get_cipher_names(gc->proto, unsupported, pool));
+    }
+
+    if (RUSTLS_RESULT_OK != rr) {
+        const char *err_descr;
+        rv = tls_util_rustls_error(pool, rr, &err_descr);
+        ap_log_error(APLOG_MARK, APLOG_ERR, rv, s, APLOGNO()
+                     "Failed to configure ciphers %s: [%d] %s",
+                     s->server_hostname, (int)rr, err_descr);
+    }
+    *pciphers = (APR_SUCCESS == rv)? ciphers : NULL;
+    return rv;
+}
+
+static apr_status_t set_server_ciphers(
+    apr_pool_t *pool, tls_conf_server_t *sc,
+    rustls_server_config_builder *builder)
+{
+    const apr_array_header_t *ciphers;
+    rustls_result rr = RUSTLS_RESULT_OK;
+    apr_status_t rv = APR_SUCCESS;
+
+    rv = calc_ciphers(pool, sc->server, sc->global,
+        "", sc->tls_pref_ciphers, sc->tls_supp_ciphers,
+        &ciphers);
+    if (APR_SUCCESS != rv) goto cleanup;
+
+    if (ciphers) {
         apr_array_header_t *suites = tls_proto_get_rustls_suites(
             sc->global->proto, ciphers, pool);
         /* this changed the default rustls ciphers, configure it. */
@@ -239,14 +279,6 @@ static apr_status_t set_ciphers(
             (const rustls_supported_ciphersuite* const*)suites->elts,
             (apr_size_t)suites->nelts);
         if (RUSTLS_RESULT_OK != rr) goto cleanup;
-    }
-
-    if (unsupported && unsupported->nelts) {
-        ap_log_error(APLOG_MARK, APLOG_WARNING, rv, sc->server, APLOGNO()
-                     "Server '%s' has TLSCiphersPrefer configured that are not "
-                     "supported by rustls. These will not have an effect: %s",
-                     sc->server->server_hostname,
-                     tls_proto_get_cipher_names(sc->global->proto, unsupported, pool));
     }
 
 cleanup:
@@ -437,7 +469,7 @@ static apr_status_t server_conf_setup(
         }
     }
 
-    rv = set_ciphers(ptemp, sc, builder);
+    rv = set_server_ciphers(ptemp, sc, builder);
     if (APR_SUCCESS != rv) goto cleanup;
 
     rr = rustls_server_config_builder_set_ignore_client_order(
@@ -472,6 +504,47 @@ cleanup:
                      "Failed to configure server %s: [%d] %s",
                      sc->server->server_hostname, (int)rr, err_descr);
         goto cleanup;
+    }
+    return rv;
+}
+
+static apr_status_t set_proxy_ciphers(
+    apr_pool_t *pool, tls_conf_proxy_t *pc,
+    tls_conf_global_t *gc, rustls_client_config_builder *builder)
+{
+    const apr_array_header_t *ciphers;
+    rustls_result rr = RUSTLS_RESULT_OK;
+    apr_status_t rv = APR_SUCCESS;
+
+    rv = calc_ciphers(pool, pc->defined_in, gc,
+        "", pc->proxy_pref_ciphers, pc->proxy_supp_ciphers,
+        &ciphers);
+    if (APR_SUCCESS != rv) goto cleanup;
+
+    if (ciphers) {
+        apr_array_header_t *suites = tls_proto_get_rustls_suites(
+            gc->proto, ciphers, pool);
+        /* this changed the default rustls ciphers, configure it. */
+        if (APLOGtrace2(pc->defined_in)) {
+            tls_proto_conf_t *conf = gc->proto;
+            ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, pc->defined_in,
+                         "tls proxy ciphers configured[%s]: %s",
+                         pc->defined_in->server_hostname,
+                         tls_proto_get_cipher_names(conf, ciphers, pool));
+        }
+        rr = rustls_client_config_builder_set_ciphersuites(builder,
+            (const rustls_supported_ciphersuite* const*)suites->elts,
+            (apr_size_t)suites->nelts);
+        if (RUSTLS_RESULT_OK != rr) goto cleanup;
+    }
+
+cleanup:
+    if (RUSTLS_RESULT_OK != rr) {
+        const char *err_descr;
+        rv = tls_util_rustls_error(pool, rr, &err_descr);
+        ap_log_error(APLOG_MARK, APLOG_ERR, rv, pc->defined_in, APLOGNO()
+                     "Failed to configure proxy ciphers %s: [%d] %s",
+                     pc->defined_in->server_hostname, (int)rr, err_descr);
     }
     return rv;
 }
@@ -531,6 +604,9 @@ static apr_status_t proxy_conf_setup(
             rv = APR_ENOTIMPL; goto cleanup;
         }
     }
+
+    rv = set_proxy_ciphers(ptemp, pc, gc, builder);
+    if (APR_SUCCESS != rv) goto cleanup;
 
     pc->rustls_config = rustls_client_config_builder_build(builder);
     builder = NULL;
