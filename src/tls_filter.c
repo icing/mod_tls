@@ -12,6 +12,7 @@
 #include <httpd.h>
 #include <http_connection.h>
 #include <http_core.h>
+#include <http_request.h>
 #include <http_log.h>
 #include <ap_socache.h>
 
@@ -36,28 +37,6 @@ static rustls_io_result tls_read_callback(
     memcpy(buf, d->data, len);
     *out_n = len;
     return 0;
-}
-
-static apr_status_t write_tls_brigade(apr_bucket_brigade *bb, void *userdata)
-{
-    tls_filter_ctx_t *fctx = userdata;
-    apr_status_t rv = APR_SUCCESS;
-    apr_off_t len;
-
-    assert(bb == fctx->fout_tls_bb);
-    if (!APR_BRIGADE_EMPTY(fctx->fout_tls_bb)) {
-        apr_brigade_length(fctx->fout_tls_bb, 0, &len);
-        rv = ap_pass_brigade(fctx->fout_ctx->next, fctx->fout_tls_bb);
-        fctx->fout_bytes_in_tls_bb = 0;
-        ap_log_error(APLOG_MARK, APLOG_TRACE2, rv, fctx->cc->server,
-            "brigade_tls_from_rustls, passed %ld bytes to network", (long)len);
-
-        if (APR_SUCCESS == rv && fctx->c->aborted) {
-            rv = APR_ECONNRESET;
-        }
-        apr_brigade_cleanup(fctx->fout_tls_bb);
-    }
-    return rv;
 }
 
 static rustls_io_result tls_write_callback(
@@ -199,10 +178,11 @@ static apr_status_t brigade_tls_from_rustls(
     tls_filter_ctx_t *fctx)
 {
     apr_status_t rv = APR_SUCCESS;
-    size_t dlen;
-    int os_err;
 
     if (rustls_connection_wants_write(fctx->cc->rustls_connection)) {
+        size_t dlen;
+        int os_err;
+
         do {
             os_err = rustls_connection_write_tls(
                 fctx->cc->rustls_connection, tls_write_callback, fctx, &dlen);
@@ -212,30 +192,16 @@ static apr_status_t brigade_tls_from_rustls(
             }
         }
         while (rustls_connection_wants_write(fctx->cc->rustls_connection));
-        fctx->fout_bytes_in_rustls = 0;
         ap_log_cerror(APLOG_MARK, APLOG_TRACE3, rv, fctx->c,
             "brigade_tls_from_rustls, %ld bytes ready for network", (long)fctx->fout_bytes_in_tls_bb);
+        fctx->fout_bytes_in_rustls = 0;
     }
 cleanup:
     return rv;
 }
 
 static apr_status_t write_all_tls_from_rustls(
-    tls_filter_ctx_t *fctx, int flush)
-{
-    apr_status_t rv;
-
-    rv = brigade_tls_from_rustls(fctx);
-    if (APR_SUCCESS != rv) goto cleanup;
-    if (flush) {
-        apr_bucket *b;
-        b = apr_bucket_flush_create(fctx->fout_tls_bb->bucket_alloc);
-        APR_BRIGADE_INSERT_TAIL(fctx->fout_tls_bb, b);
-    }
-    rv = write_tls_brigade(fctx->fout_tls_bb, fctx);
-cleanup:
-    return rv;
-}
+    tls_filter_ctx_t *fctx, int flush);
 
 static apr_status_t filter_abort(
     tls_filter_ctx_t *fctx)
@@ -568,43 +534,60 @@ cleanup:
     return rv;
 }
 
+static int fout_plain_buf_empty(tls_filter_ctx_t *fctx)
+{
+    return fctx->fout_buf_plain_len == 0;
+}
+
 static apr_status_t fout_plain_buf_to_rustls(
-    tls_filter_ctx_t *fctx)
+    tls_filter_ctx_t *fctx, apr_size_t *ppassed)
 {
     rustls_result rr = RUSTLS_RESULT_OK;
     apr_status_t rv = APR_SUCCESS;
+    apr_size_t wlen = 0;
 
-    if (fctx->fout_buf_plain_len > 0) {
-        apr_size_t wlen;
+    if (!fout_plain_buf_empty(fctx)) {
+        const unsigned char *start, *end;
+        apr_size_t chunk;
 
-        rr = rustls_connection_write(fctx->cc->rustls_connection,
-            (unsigned char*)fctx->fout_buf_plain, fctx->fout_buf_plain_len, &wlen);
-        if (rr != RUSTLS_RESULT_OK) goto cleanup;
-        fctx->fout_bytes_in_rustls += (apr_off_t)wlen;
+        start = (const unsigned char*)fctx->fout_buf_plain;
+        end = (const unsigned char*)fctx->fout_buf_plain + fctx->fout_buf_plain_len;
+        while (start < end) {
+            /* check if we have reached the limit of data in rustls and
+             * get it out into our tls_brigade if so. */
+            if (fctx->fout_bytes_in_rustls >= fctx->fout_max_in_rustls) {
+                rv = brigade_tls_from_rustls(fctx);
+                if (APR_SUCCESS != rv) goto cleanup;
+            }
+
+            chunk = (apr_size_t)(end - start);
+            if (chunk > TLS_PREF_PLAIN_CHUNK_SIZE) {
+                chunk = TLS_PREF_PLAIN_CHUNK_SIZE;
+            }
+
+            rr = rustls_connection_write(fctx->cc->rustls_connection, start, chunk, &wlen);
+            if (rr != RUSTLS_RESULT_OK) goto cleanup;
+            fctx->fout_bytes_in_rustls += (apr_off_t)wlen;
+            start += wlen;
+            if (wlen == 0) {
+                fctx->fout_buf_plain_len = (apr_size_t)(end - start);
+                memmove(fctx->fout_buf_plain, start, fctx->fout_buf_plain_len);
+                ap_log_cerror(APLOG_MARK, APLOG_WARNING, 0, fctx->c,
+                             "fout_plain_buf_to_rustls: not wholly written to rustls"
+                             ", moved %ld bytes to start of buffer", (long)fctx->fout_buf_plain_len);
+                rv = APR_EAGAIN;
+                ap_log_cerror(APLOG_MARK, APLOG_ERR, 0, fctx->c, APLOGNO()
+                             "fout_plain_buf_to_rustls: not read by rustls at all");
+                goto cleanup;
+            }
+        }
         ap_log_cerror(APLOG_MARK, APLOG_TRACE2, 0, fctx->c,
-                     "fout_plain_buf_to_rustls: %ld plain bytes written to rustls (%ld accepted)",
-                     (long)fctx->fout_buf_plain_len, (long)wlen);
-        if (wlen >= fctx->fout_buf_plain_len) {
-            fctx->fout_buf_plain_len = 0;
-        }
-        else if (wlen == 0) {
-            rv = APR_EAGAIN;
-            ap_log_cerror(APLOG_MARK, APLOG_ERR, 0, fctx->c, APLOGNO()
-                         "fout_plain_buf_to_rustls: not read by rustls at all");
-            goto cleanup;
-        }
-        else {
-            /* move the remaining data to the start of the buffer. We
-             * could optimize this more, but this should rarely ever happen, or? */
-            fctx->fout_buf_plain_len -= wlen;
-            memmove(fctx->fout_buf_plain, fctx->fout_buf_plain + wlen,
-                fctx->fout_buf_plain_len);
-            ap_log_cerror(APLOG_MARK, APLOG_TRACE2, 0, fctx->c,
-                         "fout_plain_buf_to_rustls: not wholly written to rustls"
-                         ", moved %ld bytes to start of buffer", (long)fctx->fout_buf_plain_len);
-        }
+                     "fout_plain_buf_to_rustls: %ld plain bytes written to rustls",
+                     (long)fctx->fout_buf_plain_len);
+        fctx->fout_buf_plain_len = 0;
     }
 cleanup:
+    *ppassed = wlen;
     if (rr != RUSTLS_RESULT_OK) {
         const char *err_descr = "";
         rv = tls_core_error(fctx->c, rr, &err_descr);
@@ -614,103 +597,129 @@ cleanup:
     return rv;
 }
 
-static apr_status_t fout_plain_buf_append(
-    tls_filter_ctx_t *fctx, apr_bucket *b, apr_size_t *plen)
+static apr_status_t fout_plain_to_rustls(
+    tls_filter_ctx_t *fctx, apr_bucket *b, int flush)
 {
     const char *data;
-    apr_size_t dlen, wlen = 0, buf_remain;
+    apr_size_t dlen, wlen, buf_remain;
     rustls_result rr = RUSTLS_RESULT_OK;
     apr_status_t rv = APR_SUCCESS;
 
-    dlen = b->length;
-    ap_assert((apr_size_t)-1 != dlen); /* should have been read already */
-    buf_remain = fctx->fout_buf_plain_size - fctx->fout_buf_plain_len;
-    if (buf_remain == 0) {
-        rv = fout_plain_buf_to_rustls(fctx);
-        if (APR_SUCCESS != rv) goto cleanup;
+    if (b) {
+        /* if our buffer is full, write it to rustls */
         buf_remain = fctx->fout_buf_plain_size - fctx->fout_buf_plain_len;
-        ap_assert(buf_remain > 0);
-    }
-    /* size the bucket to the remaining space in our buffer */
-    if (dlen > buf_remain) {
-        apr_bucket_split(b, buf_remain);
-        dlen = b->length;
-    }
+        if (buf_remain == 0) {
+            rv = fout_plain_buf_to_rustls(fctx, &wlen);
+            if (APR_SUCCESS != rv) goto cleanup;
+            buf_remain = fctx->fout_buf_plain_size - fctx->fout_buf_plain_len;
+            ap_assert(buf_remain > 0);
+        }
 
-    if (APR_BUCKET_IS_FILE(b)) {
-        /* A file bucket is a most wonderous thing. Since the dawn of time,
-         * it has been subject to many optimizations for efficient handling
-         * of large data in the server:
-         * - unless one reads from it, it will just consist of a file handle
-         *   and the offset+length information.
-         * - a apr_bucket_read() will transform itself to a bucket holding
-         *   some 8000 bytes of data (APR_BUCKET_BUFF_SIZE), plus a following
-         *   bucket that continues to hold the file handle and updated offsets/length
-         *   information.
-         *   Using standard bucket brigade handling, one would send 8000 bytes
-         *   chunks to the network and that is fine for many occasions.
-         * - to have improved performance, the http: network handler takes
-         *   the file handle directly and uses sendfile() when the OS supports it.
-         * - But there is not sendfile() for TLS (netflix did some experiments).
-         * So.
-         * rustls willl try to collect max length traffic data into ont TLS
-         * message, but it can only work with what we gave it. If we give it buffers
-         * that fit what it wants to assemble already, its work is much easier.
-         *
-         * We can read file buckets in large chunks than APR_BUCKET_BUFF_SIZE,
-         * with a bit of knowledge about how they work.
-         */
-        apr_bucket_file *f = (apr_bucket_file *)b->data;
-        apr_file_t *fd = f->fd;
-        apr_off_t offset = b->start;
+        /* Resolve any indeterminate bucket to a "real" one by reading it. */
+        if ((apr_size_t)-1 == b->length) {
+            rv = apr_bucket_read(b, &data, &dlen, APR_BLOCK_READ);
+            if (APR_STATUS_IS_EOF(rv)) {
+                apr_bucket_delete(b);
+                b = NULL;
+            }
+            else if (APR_SUCCESS != rv) goto cleanup;
+        }
 
-        ap_assert(dlen <= buf_remain);
-        rv = apr_file_seek(fd, APR_SET, &offset);
-        if (APR_SUCCESS != rv) goto cleanup;
-        rv = apr_file_read(fd, (void*)(fctx->fout_buf_plain + fctx->fout_buf_plain_len), &dlen);
-        if (APR_SUCCESS != rv && !APR_STATUS_IS_EOF(rv)) goto cleanup;
-        fctx->fout_buf_plain_len += dlen;
-        wlen = dlen;
-        apr_bucket_delete(b);
-    }
-    else {
-        rv = apr_bucket_read(b, &data, &dlen, APR_BLOCK_READ);
-        if (APR_SUCCESS != rv) goto cleanup;
-        if (fctx->fout_buf_plain_len == 0 &&
-            (dlen >= fctx->fout_buf_plain_size || dlen > TLS_PREF_WRITE_SIZE)) {
-            /* The data in the bucket is at least as large as our output buffer.
-             * There is no need to copy it to the buffer, only to write the buffer
-             * afterwards. Instead, write the data directly to rustls.
-             */
-            rr = rustls_connection_write(fctx->cc->rustls_connection,
-                (unsigned char*)data, dlen, &wlen);
-            if (rr != RUSTLS_RESULT_OK) goto cleanup;
-            fctx->fout_bytes_in_rustls += (apr_off_t)wlen;
-            if (wlen >= dlen) {
+        if (b && b->length == 0) {
+            apr_bucket_delete(b);
+        }
+        else if (b) {
+            /* buffer is empty, bucket is large, write it to rustls directly */
+            if (b->length > buf_remain) {
+                apr_bucket_split(b, buf_remain);
+            }
+            dlen = b->length;
+
+            if (APR_BUCKET_IS_FILE(b)) {
+                /* A file bucket is a most wonderous thing. Since the dawn of time,
+                 * it has been subject to many optimizations for efficient handling
+                 * of large data in the server:
+                 * - unless one reads from it, it will just consist of a file handle
+                 *   and the offset+length information.
+                 * - a apr_bucket_read() will transform itself to a bucket holding
+                 *   some 8000 bytes of data (APR_BUCKET_BUFF_SIZE), plus a following
+                 *   bucket that continues to hold the file handle and updated offsets/length
+                 *   information.
+                 *   Using standard bucket brigade handling, one would send 8000 bytes
+                 *   chunks to the network and that is fine for many occasions.
+                 * - to have improved performance, the http: network handler takes
+                 *   the file handle directly and uses sendfile() when the OS supports it.
+                 * - But there is not sendfile() for TLS (netflix did some experiments).
+                 * So.
+                 * rustls will try to collect max length traffic data into ont TLS
+                 * message, but it can only work with what we gave it. If we give it buffers
+                 * that fit what it wants to assemble already, its work is much easier.
+                 *
+                 * We can read file buckets in large chunks than APR_BUCKET_BUFF_SIZE,
+                 * with a bit of knowledge about how they work.
+                 */
+                apr_bucket_file *f = (apr_bucket_file *)b->data;
+                apr_file_t *fd = f->fd;
+                apr_off_t offset = b->start;
+
+                ap_assert(dlen <= buf_remain);
+                rv = apr_file_seek(fd, APR_SET, &offset);
+                if (APR_SUCCESS != rv) goto cleanup;
+                rv = apr_file_read(fd, (void*)(fctx->fout_buf_plain + fctx->fout_buf_plain_len), &dlen);
+                if (APR_SUCCESS != rv && !APR_STATUS_IS_EOF(rv)) goto cleanup;
+                fctx->fout_buf_plain_len += dlen;
                 apr_bucket_delete(b);
             }
             else {
-                b->start += (apr_off_t)wlen;
-                b->length -= wlen;
+                rv = apr_bucket_read(b, &data, &dlen, APR_BLOCK_READ);
+                if (APR_SUCCESS != rv) goto cleanup;
+                ap_assert(dlen <= buf_remain);
+                memcpy(fctx->fout_buf_plain + fctx->fout_buf_plain_len, data, dlen);
+                fctx->fout_buf_plain_len += dlen;
+                apr_bucket_delete(b);
             }
-        }
-        else {
-            ap_assert(dlen <= buf_remain);
-            memcpy(fctx->fout_buf_plain + fctx->fout_buf_plain_len, data, dlen);
-            fctx->fout_buf_plain_len += dlen;
-            wlen = dlen;
-            apr_bucket_delete(b);
         }
     }
 
+    if (flush) {
+        rv = fout_plain_buf_to_rustls(fctx, &wlen);
+        if (APR_SUCCESS != rv) goto cleanup;
+    }
+
 cleanup:
-    *plen = wlen;
     if (rr != RUSTLS_RESULT_OK) {
         const char *err_descr = "";
         rv = tls_core_error(fctx->c, rr, &err_descr);
         ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, fctx->c, APLOGNO()
                      "write_bucket_to_rustls: [%d] %s", (int)rr, err_descr);
     }
+    return rv;
+}
+
+static apr_status_t write_all_tls_from_rustls(
+    tls_filter_ctx_t *fctx, int flush)
+{
+    apr_status_t rv;
+
+    if (flush) {
+        apr_bucket *b;
+
+        rv = fout_plain_to_rustls(fctx, NULL, 1);
+        if (APR_SUCCESS != rv) goto cleanup;
+        rv = brigade_tls_from_rustls(fctx);
+        if (APR_SUCCESS != rv) goto cleanup;
+        b = apr_bucket_flush_create(fctx->fout_tls_bb->bucket_alloc);
+        APR_BRIGADE_INSERT_TAIL(fctx->fout_tls_bb, b);
+    }
+    if (!APR_BRIGADE_EMPTY(fctx->fout_tls_bb)) {
+        rv = ap_pass_brigade(fctx->fout_ctx->next, fctx->fout_tls_bb);
+        if (APR_SUCCESS == rv && fctx->c->aborted) {
+            rv = APR_ECONNRESET;
+        }
+        fctx->fout_bytes_in_tls_bb = 0;
+        apr_brigade_cleanup(fctx->fout_tls_bb);
+    }
+cleanup:
     return rv;
 }
 
@@ -732,8 +741,6 @@ static apr_status_t filter_conn_output(
     tls_filter_ctx_t *fctx = f->ctx;
     apr_status_t rv = APR_SUCCESS;
     rustls_result rr = RUSTLS_RESULT_OK;
-    apr_off_t passed = 0;
-    apr_size_t wlen;
     int flush = 0;
 
     if (f->c->aborted) {
@@ -749,14 +756,16 @@ static apr_status_t filter_conn_output(
     if (fctx->cc->state == TLS_CONN_ST_DONE) {
         /* have done everything, just pass through */
         ap_log_cerror(APLOG_MARK, APLOG_TRACE4, 0, fctx->c,
-            "tls_filter_conn_output: ssl done conn");
+            "tls_filter_conn_output: tls session is already done");
         rv = ap_pass_brigade(f->next, bb);
         goto cleanup;
     }
 
     ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, fctx->cc->server,
         "tls_filter_conn_output, server=%s", fctx->cc->server->server_hostname);
-    tls_util_bb_log(fctx->c, APLOG_TRACE3, "filter_conn_output", bb);
+    if (APLOGctrace5(fctx->c)) {
+        tls_util_bb_log(fctx->c, APLOG_TRACE5, "filter_conn_output", bb);
+    }
 
     while (!APR_BRIGADE_EMPTY(bb)) {
         apr_bucket *b = APR_BRIGADE_FIRST(bb);
@@ -769,39 +778,25 @@ static apr_status_t filter_conn_output(
              * Then we can append this meta bucket and keep the order
              * of data.
              */
+            flush = 1;
+            if (!fout_plain_buf_empty(fctx)) {
+                rv = fout_plain_to_rustls(fctx, NULL, 1);
+                if (APR_SUCCESS != rv) goto cleanup;
+                rv = brigade_tls_from_rustls(fctx);
+                if (APR_SUCCESS != rv) goto cleanup;
+            }
+            APR_BUCKET_REMOVE(b);
+            APR_BRIGADE_INSERT_TAIL(fctx->fout_tls_bb, b);
+
             if (AP_BUCKET_IS_EOC(b)) {
                 rustls_connection_send_close_notify(fctx->cc->rustls_connection);
                 fctx->cc->state = TLS_CONN_ST_NOTIFIED;
             }
-            else if (APR_BUCKET_IS_FLUSH(b)) {
-                flush = 1;
-            }
-
-            rv = fout_plain_buf_to_rustls(fctx);
-            if (APR_SUCCESS != rv) goto cleanup;
-            rv = brigade_tls_from_rustls(fctx);
-            if (APR_SUCCESS != rv) goto cleanup;
-
-            APR_BUCKET_REMOVE(b);
-            APR_BRIGADE_INSERT_TAIL(fctx->fout_tls_bb, b);
+            flush = 1;
         }
         else {
-            /* Resolve any indeterminate bucket to a "real" one by reading it. */
-            if ((apr_size_t)-1 == b->length) {
-                const char *data;
-                apr_size_t dlen;
-
-                rv = apr_bucket_read(b, &data, &dlen, APR_BLOCK_READ);
-                if (APR_STATUS_IS_EOF(rv)) {
-                    apr_bucket_delete(b);
-                    continue;
-                }
-                else if (APR_SUCCESS != rv) goto cleanup;
-
-            }
-            rv = fout_plain_buf_append(fctx, b, &wlen);
+            rv = fout_plain_to_rustls(fctx, b, 0);
             if (APR_SUCCESS != rv) goto cleanup;
-            passed += (apr_off_t)wlen;
         }
 
         /* did we w supply 'enough' plain bytes to rustls? If so,
@@ -813,18 +808,15 @@ static apr_status_t filter_conn_output(
             rv = brigade_tls_from_rustls(fctx);
             if (APR_SUCCESS != rv) goto cleanup;
         }
-        if (fctx->fout_bytes_in_tls_bb >= fctx->fout_max_in_rustls) {
-            rv = write_all_tls_from_rustls(fctx, flush);
+        if (fctx->fout_bytes_in_tls_bb >= fctx->fout_auto_flush_size) {
+            rv = write_all_tls_from_rustls(fctx, 1);
             if (APR_SUCCESS != rv) goto cleanup;
-            flush = 0;
         }
     }
 
-    rv = fout_plain_buf_to_rustls(fctx);
-    if (APR_SUCCESS != rv) goto cleanup;
-    if (passed > 0) {
-        tls_util_bb_log(fctx->c, APLOG_TRACE3, "filter_conn_output, processed plain", bb);
-        tls_util_bb_log(fctx->c, APLOG_TRACE3, "filter_conn_output, tls", fctx->fout_tls_bb);
+    if (APLOGctrace5(fctx->c)) {
+        tls_util_bb_log(fctx->c, APLOG_TRACE5, "filter_conn_output, processed plain", bb);
+        tls_util_bb_log(fctx->c, APLOG_TRACE5, "filter_conn_output, tls", fctx->fout_tls_bb);
     }
     /* write everything still in rustls outgoing buffers to the network */
     rv = write_all_tls_from_rustls(fctx, flush);
@@ -838,7 +830,7 @@ cleanup:
     }
     else {
         ap_log_cerror(APLOG_MARK, APLOG_TRACE2, rv, fctx->c,
-                     "tls_filter_conn_output: passed %ld bytes", (long)passed);
+                     "tls_filter_conn_output: done");
     }
     return rv;
 }
@@ -880,7 +872,7 @@ int tls_filter_pre_conn_init(conn_rec *c)
     fctx->fin_plain_bb = apr_brigade_create(c->pool, c->bucket_alloc);
     fctx->fout_ctx = ap_add_output_filter(TLS_FILTER_RAW, fctx, NULL, c);
     fctx->fout_tls_bb = apr_brigade_create(c->pool, c->bucket_alloc);
-    fctx->fout_buf_plain_size = 2 * TLS_PREF_WRITE_SIZE;
+    fctx->fout_buf_plain_size = 4 * TLS_PREF_PLAIN_CHUNK_SIZE;
     fctx->fout_buf_plain = apr_pcalloc(c->pool, fctx->fout_buf_plain_size);
     fctx->fout_buf_plain_len = 0;
 
@@ -898,8 +890,9 @@ int tls_filter_pre_conn_init(conn_rec *c)
      *    one TLS message and we have plain bytes to forward to the protocol
      *    handler.
      */
-    fctx->fout_max_in_rustls = 2 * 2 * TLS_PREF_WRITE_SIZE; /* 2 times the buffer */
-    fctx->fin_max_in_rustls = 2 * TLS_PREF_TLS_WRITE_SIZE;
+    fctx->fout_max_in_rustls = 4 * TLS_PREF_PLAIN_CHUNK_SIZE;
+    fctx->fin_max_in_rustls = 4 * TLS_REC_MAX_SIZE;
+    fctx->fout_auto_flush_size = 4 * TLS_REC_MAX_SIZE;
 
     return OK;
 }
