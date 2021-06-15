@@ -20,7 +20,6 @@ struct tls_filter_ctx_t {
     apr_bucket_brigade *fin_tls_buffer_bb; /* TLS encrypted, incoming network data buffering */
     apr_bucket_brigade *fin_plain_bb;    /* decrypted, incoming traffic data */
     apr_off_t fin_bytes_in_rustls;       /* # of input TLS bytes in rustls_connection */
-    apr_off_t fin_max_in_rustls;         /* how much tls we like to read into rustls */
     apr_read_type_e fin_block;           /* Do we block on input reads or not? */
 
     ap_filter_t *fout_ctx;               /* Apache's entry into the output filter chain */
@@ -30,7 +29,10 @@ struct tls_filter_ctx_t {
     apr_bucket_brigade *fout_tls_bb;     /* TLS encrypted, outgoing network data */
     apr_off_t fout_bytes_in_rustls;      /* # of output plain bytes in rustls_connection */
     apr_off_t fout_bytes_in_tls_bb;      /* # of output tls bytes in our brigade */
+
+    apr_off_t fin_max_in_rustls;         /* how much tls we like to read into rustls */
     apr_off_t fout_max_in_rustls;        /* how much plain bytes we like to give to rustls */
+    apr_off_t fout_auto_flush_size;      /* on much outoing TLS data we flush to network */
 };
 
 /**
@@ -61,7 +63,7 @@ void tls_filter_conn_init(conn_rec *c);
  * Maybe future TLS versions will raise that value, but for now these limits stand.
  * Given the choice, we would like rustls to provide traffic data in those chunks.
  */
-#define TLS_PREF_WRITE_SIZE       (16384)
+#define TLS_PREF_PLAIN_CHUNK_SIZE       (16384)
 
 /*
  * When retrieving TLS chunks for rustls, or providing it a buffer
@@ -73,11 +75,6 @@ void tls_filter_conn_init(conn_rec *c);
  * we define something which should be "large enough", but not overly so.
  */
 #define TLS_REC_EXTRA             (1024)
-#define TLS_PREF_TLS_WRITE_SIZE   (TLS_PREF_WRITE_SIZE + TLS_REC_EXTRA)
-
-/* The size of TLS outgoing data we are comfortable to collect in
- * a single heap bucket to pass on to the network.
- */
-#define TLS_MAX_BUCKET_SIZE       (4 * TLS_PREF_TLS_WRITE_SIZE)
+#define TLS_REC_MAX_SIZE   (TLS_PREF_PLAIN_CHUNK_SIZE + TLS_REC_EXTRA)
 
 #endif /* tls_filter_h */

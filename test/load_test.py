@@ -233,7 +233,7 @@ class SingleFileLoadTest(LoadTestCase):
 
     def __init__(self, env: TlsTestEnv, server: str,
                  clients: int, requests: int, resource_kb: int,
-                 ssl_module: str = 'mod_tls', http_version: int = 2,
+                 ssl_module: str = 'mod_tls', protocol: str = 'h2',
                  threads: int = None):
         self.env = env
         self.domain_a = self.env.domain_a
@@ -242,7 +242,7 @@ class SingleFileLoadTest(LoadTestCase):
         self._requests = requests
         self._resource_kb = resource_kb
         self._ssl_module = ssl_module
-        self._http_version = http_version
+        self._protocol = protocol
         self._threads = threads if threads is not None else min(multiprocessing.cpu_count()/2, self._clients)
 
     @staticmethod
@@ -252,7 +252,7 @@ class SingleFileLoadTest(LoadTestCase):
             server=scenario['server'],
             clients=scenario['clients'], requests=scenario['requests'],
             ssl_module=scenario['module'], resource_kb=scenario['rsize'],
-            http_version=scenario['http']
+            protocol=scenario['protocol'] if 'protocol' in scenario else 'h2'
         )
 
     def _setup(self) -> str:
@@ -284,13 +284,8 @@ class SingleFileLoadTest(LoadTestCase):
             if os.path.isfile(log_file):
                 os.remove(log_file)
             monitor = H2LoadMonitor(log_file, expected=self._requests,
-                                    title="{module}/h{http_version}/{conn}c/{kb}MB[{mode}]".format(
-                                        mode=mode,
-                                        conn=self._clients,
-                                        module=self._ssl_module,
-                                        kb=(self._resource_kb / 1024),
-                                        http_version=self._http_version
-                                    ))
+                                    title=f"{self._ssl_module}/{self._protocol}/"\
+                                          f"{self._clients}c/{self._resource_kb / 1024}MB[{mode}]")
             monitor.start()
             args = [
                 'h2load',
@@ -300,10 +295,12 @@ class SingleFileLoadTest(LoadTestCase):
                 '--log-file={0}'.format(log_file),
                 '--connect-to=localhost:{0}'.format(self.env.https_port)
             ]
-            if self._http_version == 1:
+            if self._protocol == 'h1' or self._protocol == 'http/1.1':
                 args.append('--h1')
+            elif self._protocol == 'h2':
+                args.extend(['-m', "1"])
             else:
-                args.extend(['-m', "6"])
+                raise Exception(f"unknown protocol: {self._protocol}");
             r = self.env.run(args + [
                 'https://{0}:{1}{2}'.format(self.domain_a, self.env.https_port, path)
             ])
@@ -337,7 +334,7 @@ class MultiFileLoadTest(LoadTestCase):
     def __init__(self, env: TlsTestEnv, server: str,
                  clients: int, requests: int, file_count: int,
                  file_sizes: List[int],
-                 ssl_module: str = 'mod_tls', http_version: int = 2,
+                 ssl_module: str = 'mod_tls', protocol: str = 'h2',
                  threads: int = None, ):
         self.env = env
         self.domain_a = self.env.domain_a
@@ -347,7 +344,7 @@ class MultiFileLoadTest(LoadTestCase):
         self._file_count = file_count
         self._file_sizes = file_sizes
         self._ssl_module = ssl_module
-        self._http_version = http_version
+        self._protocol = protocol
         self._threads = threads if threads is not None else \
             min(multiprocessing.cpu_count()/2, self._clients)
         self._url_file = "{gen_dir}/h2load-urls.txt".format(gen_dir=self.env.gen_dir)
@@ -359,7 +356,7 @@ class MultiFileLoadTest(LoadTestCase):
             server=scenario['server'],
             clients=scenario['clients'], requests=scenario['requests'],
             file_sizes=scenario['file_sizes'], file_count=scenario['file_count'],
-            ssl_module=scenario['module'], http_version=scenario['http']
+            ssl_module=scenario['module'], protocol=scenario['protocol']
         )
 
     def _setup(self, cls):
@@ -403,13 +400,8 @@ class MultiFileLoadTest(LoadTestCase):
             if os.path.isfile(log_file):
                 os.remove(log_file)
             monitor = H2LoadMonitor(log_file, expected=self._requests,
-                                    title="{module}/h{http_version}//{files}f/{conn}c[{mode}]".format(
-                                        mode=mode,
-                                        conn=self._clients,
-                                        module=self._ssl_module,
-                                        files=(self._file_count / 1024),
-                                        http_version=self._http_version
-                                    ))
+                                    title=f"{self._ssl_module}/{self._protocol}/"\
+                                          f"{self._file_count / 1024}f/{self._clients}c[{mode}]")
             monitor.start()
             args = [
                 'h2load',
@@ -419,10 +411,12 @@ class MultiFileLoadTest(LoadTestCase):
                 '--log-file={0}'.format(log_file),
                 '--connect-to=localhost:{0}'.format(self.env.https_port)
             ]
-            if self._http_version == 1:
+            if self._protocol == 'h1' or self._protocol == 'http/1.1':
                 args.append('--h1')
-            else:
+            elif self._protocol == 'h2':
                 args.extend(['-m', "6"])
+            else:
+                raise Exception(f"unknown protocol: {self._protocol}");
             r = self.env.run(args + [
                 '--base-uri=https://{0}:{1}/'.format(
                     self.domain_a, self.env.https_port)
@@ -458,7 +452,7 @@ class ConnectionLoadTest(LoadTestCase):
     def __init__(self, env: TlsTestEnv, server: str,
                  clients: int, requests: int, duration: timedelta,
                  file_count: int, file_sizes: List[int], cooldown: timedelta,
-                 ssl_module: str = 'mod_tls', http_version: int = 2):
+                 ssl_module: str = 'mod_tls', protocol: str = 'h2'):
         self.env = env
         self.domain_a = self.env.domain_a
         self._server = server
@@ -468,7 +462,7 @@ class ConnectionLoadTest(LoadTestCase):
         self._file_count = file_count
         self._file_sizes = file_sizes
         self._ssl_module = ssl_module
-        self._http_version = http_version
+        self._protocol = protocol
         self._url_file = "{gen_dir}/h2load-urls.txt".format(gen_dir=self.env.gen_dir)
         self._cd = cooldown
 
@@ -480,7 +474,7 @@ class ConnectionLoadTest(LoadTestCase):
             clients=scenario['clients'], requests=scenario['requests'],
             duration=scenario['duration'], cooldown=scenario['cooldown'],
             file_sizes=scenario['file_sizes'], file_count=scenario['file_count'],
-            ssl_module=scenario['module'], http_version=scenario['http']
+            ssl_module=scenario['module'], protocol=scenario['protocol']
         )
 
     def _setup(self):
@@ -524,13 +518,8 @@ class ConnectionLoadTest(LoadTestCase):
             if os.path.isfile(log_file):
                 os.remove(log_file)
             monitor = H2LoadMonitor(log_file, expected=0,
-                                    title="{module}/h{http_version}/{clients}c/{secs}s".format(
-                                        mode=mode,
-                                        clients=self._clients,
-                                        module=self._ssl_module,
-                                        secs=self._duration.total_seconds(),
-                                        http_version=self._http_version
-                                    ))
+                                    title=f"{self._ssl_module}/{self._protocol}/"\
+                                          f"{self._clients}c/{self._duration.total_seconds()}s")
             monitor.start()
             args = [
                 'h2load',
@@ -540,10 +529,12 @@ class ConnectionLoadTest(LoadTestCase):
                 '--log-file={0}'.format(log_file),
                 '--connect-to=localhost:{0}'.format(self.env.https_port)
             ]
-            if self._http_version == 1:
+            if self._protocol == 'h1' or self._protocol == 'http/1.1':
                 args.append('--h1')
-            else:
+            elif self._protocol == 'h2':
                 args.extend(['-m', "1"])
+            else:
+                raise Exception(f"unknown protocol: {self._protocol}")
             args += [
                 '--base-uri=https://{0}:{1}/'.format(
                     self.domain_a, self.env.https_port)
@@ -609,6 +600,8 @@ class LoadTest:
             """)
         parser.add_argument("-m", "--module", type=str, default=None,
                             help="which module to test, defaults to all")
+        parser.add_argument("-p", "--protocol", type=str, default=None,
+                            help="which protocols to test, defaults to all")
         parser.add_argument("-v", "--verbose", action='count', default=0,
                             help="log more output on stderr")
         parser.add_argument("names", nargs='*', help="Name(s) of scenarios to run")
@@ -635,12 +628,12 @@ class LoadTest:
                 "server": server_config,
                 "clients": 0,
                 "row0_title": "module protocol",
-                "row_title": "{module} h{http}",
+                "row_title": "{module} {protocol}",
                 "rows": [
-                    {"module": "mod_ssl", "http": 1},
-                    {"module": "mod_tls", "http": 1},
-                    {"module": "mod_ssl", "http": 2},
-                    {"module": "mod_tls", "http": 2},
+                    {"module": "mod_ssl", "protocol": 'h1'},
+                    {"module": "mod_tls", "protocol": 'h1'},
+                    {"module": "mod_ssl", "protocol": 'h2'},
+                    {"module": "mod_tls", "protocol": 'h2'},
                 ],
                 "col_title": "{rsize}KB",
                 "columns": [],
@@ -653,12 +646,12 @@ class LoadTest:
                 "file_sizes": [1, 2, 3, 4, 5, 10, 20, 30, 40, 50, 100, 10000],
                 "requests": 10000,
                 "row0_title": "module protocol",
-                "row_title": "{module} h{http}",
+                "row_title": "{module} {protocol}",
                 "rows": [
-                    {"module": "mod_ssl", "http": 1},
-                    {"module": "mod_tls", "http": 1},
-                    {"module": "mod_ssl", "http": 2},
-                    {"module": "mod_tls", "http": 2},
+                    {"module": "mod_ssl", "protocol": 'h1'},
+                    {"module": "mod_tls", "protocol": 'h1'},
+                    {"module": "mod_ssl", "protocol": 'h2'},
+                    {"module": "mod_tls", "protocol": 'h2'},
                 ],
                 "col_title": "{clients}c",
                 "columns": [],
@@ -674,12 +667,12 @@ class LoadTest:
                 "requests": 1,
                 "clients": 1,
                 "row0_title": "module protocol",
-                "row_title": "{module} h{http}",
+                "row_title": "{module} {http}",
                 "rows": [
-                    {"module": "mod_ssl", "http": 1},
-                    {"module": "mod_tls", "http": 1},
-                    {"module": "mod_ssl", "http": 2},
-                    {"module": "mod_tls", "http": 2},
+                    {"module": "mod_ssl", "protocol": 'h1'},
+                    {"module": "mod_tls", "protocol": 'h1'},
+                    {"module": "mod_ssl", "protocol": 'h2'},
+                    {"module": "mod_tls", "protocol": 'h2'},
                 ],
                 "col_title": "{clients}c",
                 "columns": [],
@@ -796,6 +789,8 @@ class LoadTest:
                 cls.print_table(table)
                 for row in scenario['rows']:
                     if args.module is not None and row['module'] != args.module:
+                        continue
+                    if args.protocol is not None and row['protocol'] != args.protocol:
                         continue
                     row_line = [scenario['row_title'].format(**row)]
                     table.append(row_line)
