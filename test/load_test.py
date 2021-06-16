@@ -298,7 +298,7 @@ class SingleFileLoadTest(LoadTestCase):
             if self._protocol == 'h1' or self._protocol == 'http/1.1':
                 args.append('--h1')
             elif self._protocol == 'h2':
-                args.extend(['-m', "1"])
+                args.extend(['-m', "6"])
             else:
                 raise Exception(f"unknown protocol: {self._protocol}");
             r = self.env.run(args + [
@@ -532,7 +532,7 @@ class ConnectionLoadTest(LoadTestCase):
             if self._protocol == 'h1' or self._protocol == 'http/1.1':
                 args.append('--h1')
             elif self._protocol == 'h2':
-                args.extend(['-m', "1"])
+                args.extend(['-m', "6"])
             else:
                 raise Exception(f"unknown protocol: {self._protocol}")
             args += [
