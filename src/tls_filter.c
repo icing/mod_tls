@@ -39,22 +39,6 @@ static rustls_io_result tls_read_callback(
     return 0;
 }
 
-static rustls_io_result tls_write_callback(
-    void *userdata, const unsigned char *buf, size_t n, size_t *out_n)
-{
-    tls_filter_ctx_t *fctx = userdata;
-    apr_status_t rv;
-
-    rv = apr_brigade_write(fctx->fout_tls_bb, NULL, NULL, (const char*)buf, n);
-    ap_log_error(APLOG_MARK, APLOG_TRACE4, rv, fctx->cc->server,
-        "tls_write_callback, added %ld bytes to fctx->fout_tls_bb", (long)n);
-    if (APR_SUCCESS == rv) {
-        fctx->fout_bytes_in_tls_bb += (apr_off_t)n;
-        *out_n = n;
-    }
-    return APR_TO_OS_ERROR(rv);
-}
-
 /**
  * Provide TLS encrypted data to the rustls server_session in <fctx->cc->rustls_connection>.
  *
@@ -69,7 +53,7 @@ static rustls_io_result tls_write_callback(
  * function to handle the added data before leaving.
  */
 static apr_status_t read_tls_to_rustls(
-    tls_filter_ctx_t *fctx, apr_off_t len, apr_read_type_e block, int errors_expected)
+    tls_filter_ctx_t *fctx, apr_size_t len, apr_read_type_e block, int errors_expected)
 {
     tls_data_t d;
     apr_size_t rlen;
@@ -82,13 +66,13 @@ static apr_status_t read_tls_to_rustls(
         ap_log_error(APLOG_MARK, APLOG_TRACE2, rv, fctx->cc->server,
             "read_tls_to_rustls, get data from network, block=%d", block);
         rv = ap_get_brigade(fctx->fin_ctx->next, fctx->fin_tls_bb,
-            AP_MODE_READBYTES, block, len);
+                            AP_MODE_READBYTES, block, (apr_off_t)len);
         if (APR_SUCCESS != rv) {
             goto cleanup;
         }
     }
 
-    while (!APR_BRIGADE_EMPTY(fctx->fin_tls_bb) && passed < len) {
+    while (!APR_BRIGADE_EMPTY(fctx->fin_tls_bb) && passed < (apr_off_t)len) {
         apr_bucket *b = APR_BRIGADE_FIRST(fctx->fin_tls_bb);
 
         if (APR_BUCKET_IS_EOS(b)) {
@@ -168,39 +152,22 @@ cleanup:
     return rv;
 }
 
-/**
- * Read TLS encrypted data from <fctx->cc->rustls_connection> and pass it down
- * Apache's filter chain to the network.
- *
- * For now, we always FLUSH the data, since that is what we need during handshakes.
- */
-static apr_status_t brigade_tls_from_rustls(
-    tls_filter_ctx_t *fctx)
+static apr_status_t fout_pass_tls_to_net(tls_filter_ctx_t *fctx)
 {
     apr_status_t rv = APR_SUCCESS;
 
-    if (rustls_connection_wants_write(fctx->cc->rustls_connection)) {
-        size_t dlen;
-        int os_err;
-
-        do {
-            os_err = rustls_connection_write_tls(
-                fctx->cc->rustls_connection, tls_write_callback, fctx, &dlen);
-            if (os_err) {
-                rv = APR_FROM_OS_ERROR(os_err);
-                goto cleanup;
-            }
+    if (!APR_BRIGADE_EMPTY(fctx->fout_tls_bb)) {
+        rv = ap_pass_brigade(fctx->fout_ctx->next, fctx->fout_tls_bb);
+        if (APR_SUCCESS == rv && fctx->c->aborted) {
+            rv = APR_ECONNRESET;
         }
-        while (rustls_connection_wants_write(fctx->cc->rustls_connection));
-        ap_log_cerror(APLOG_MARK, APLOG_TRACE3, rv, fctx->c,
-            "brigade_tls_from_rustls, %ld bytes ready for network", (long)fctx->fout_bytes_in_tls_bb);
-        fctx->fout_bytes_in_rustls = 0;
+        fctx->fout_bytes_in_tls_bb = 0;
+        apr_brigade_cleanup(fctx->fout_tls_bb);
     }
-cleanup:
     return rv;
 }
 
-static apr_status_t write_all_tls_from_rustls(
+static apr_status_t fout_pass_all_to_net(
     tls_filter_ctx_t *fctx, int flush);
 
 static apr_status_t filter_abort(
@@ -210,7 +177,7 @@ static apr_status_t filter_abort(
 
     if (fctx->cc->state != TLS_CONN_ST_DONE) {
         rustls_connection_send_close_notify(fctx->cc->rustls_connection);
-        rv = write_all_tls_from_rustls(fctx, 1);
+        rv = fout_pass_all_to_net(fctx, 1);
         ap_log_cerror(APLOG_MARK, APLOG_TRACE2, rv, fctx->c, "filter_abort, flushed output");
         fctx->c->aborted = 1;
         fctx->cc->state = TLS_CONN_ST_DONE;
@@ -279,7 +246,7 @@ static apr_status_t filter_send_client_hello(tls_filter_ctx_t *fctx)
     if (rustls_connection_is_handshaking(fctx->cc->rustls_connection)) {
         while (rustls_connection_wants_write(fctx->cc->rustls_connection)) {
             /* write flushed, so it really gets out */
-            rv = write_all_tls_from_rustls(fctx, 1);
+            rv = fout_pass_all_to_net(fctx, 1);
             if (APR_SUCCESS != rv) goto cleanup;
         }
     }
@@ -304,7 +271,7 @@ static apr_status_t filter_do_handshake(
     if (rustls_connection_is_handshaking(fctx->cc->rustls_connection)) {
         do {
             if (rustls_connection_wants_write(fctx->cc->rustls_connection)) {
-                rv = write_all_tls_from_rustls(fctx, 1);
+                rv = fout_pass_all_to_net(fctx, 1);
                 if (APR_SUCCESS != rv) goto cleanup;
             }
             else if (rustls_connection_wants_read(fctx->cc->rustls_connection)) {
@@ -318,7 +285,7 @@ static apr_status_t filter_do_handshake(
          * processed everything into its buffers. Not when the buffers have been
          * send to the other side. */
         if (rustls_connection_wants_write(fctx->cc->rustls_connection)) {
-            rv = write_all_tls_from_rustls(fctx, 1);
+            rv = fout_pass_all_to_net(fctx, 1);
             if (APR_SUCCESS != rv) goto cleanup;
         }
     }
@@ -501,7 +468,7 @@ static apr_status_t filter_conn_input(
         rv = APR_ENOTIMPL; goto cleanup;
     }
 
-    write_all_tls_from_rustls(fctx, 0);
+    fout_pass_all_to_net(fctx, 0);
 
 cleanup:
     if (NULL != in_buf) free(in_buf);
@@ -534,87 +501,144 @@ cleanup:
     return rv;
 }
 
-static int fout_plain_buf_empty(tls_filter_ctx_t *fctx)
+static rustls_io_result tls_write_callback(
+    void *userdata, const unsigned char *buf, size_t n, size_t *out_n)
 {
-    return fctx->fout_buf_plain_len == 0;
+    tls_filter_ctx_t *fctx = userdata;
+    apr_status_t rv;
+
+    if ((apr_off_t)n + fctx->fout_bytes_in_tls_bb >= (apr_off_t)fctx->fout_auto_flush_size) {
+        apr_bucket *b = apr_bucket_transient_create((const char*)buf, n, fctx->fout_tls_bb->bucket_alloc);
+        APR_BRIGADE_INSERT_TAIL(fctx->fout_tls_bb, b);
+        fctx->fout_bytes_in_tls_bb += (apr_off_t)n;
+        rv = fout_pass_tls_to_net(fctx);
+        *out_n = n;
+    }
+    else {
+        rv = apr_brigade_write(fctx->fout_tls_bb, NULL, NULL, (const char*)buf, n);
+        if (APR_SUCCESS != rv) goto cleanup;
+        fctx->fout_bytes_in_tls_bb += (apr_off_t)n;
+        *out_n = n;
+    }
+cleanup:
+    ap_log_error(APLOG_MARK, APLOG_TRACE5, rv, fctx->cc->server,
+        "tls_write_callback: %ld bytes", (long)n);
+    return APR_TO_OS_ERROR(rv);
 }
 
-static apr_status_t fout_plain_buf_to_rustls(
-    tls_filter_ctx_t *fctx, apr_size_t *ppassed)
+/**
+ * Read TLS encrypted data from <fctx->cc->rustls_connection> and pass it down
+ * Apache's filter chain to the network.
+ *
+ * For now, we always FLUSH the data, since that is what we need during handshakes.
+ */
+static apr_status_t fout_pass_rustls_to_tls(tls_filter_ctx_t *fctx)
 {
-    rustls_result rr = RUSTLS_RESULT_OK;
     apr_status_t rv = APR_SUCCESS;
-    apr_size_t wlen = 0;
 
-    if (!fout_plain_buf_empty(fctx)) {
-        const unsigned char *start, *end;
-        apr_size_t chunk;
+    if (rustls_connection_wants_write(fctx->cc->rustls_connection)) {
+        size_t dlen;
+        int os_err;
 
-        start = (const unsigned char*)fctx->fout_buf_plain;
-        end = (const unsigned char*)fctx->fout_buf_plain + fctx->fout_buf_plain_len;
-        while (start < end) {
-            /* check if we have reached the limit of data in rustls and
-             * get it out into our tls_brigade if so. */
-            if (fctx->fout_bytes_in_rustls >= fctx->fout_max_in_rustls) {
-                rv = brigade_tls_from_rustls(fctx);
-                if (APR_SUCCESS != rv) goto cleanup;
-            }
-
-            chunk = (apr_size_t)(end - start);
-            if (chunk > TLS_PREF_PLAIN_CHUNK_SIZE) {
-                chunk = TLS_PREF_PLAIN_CHUNK_SIZE;
-            }
-
-            rr = rustls_connection_write(fctx->cc->rustls_connection, start, chunk, &wlen);
-            if (rr != RUSTLS_RESULT_OK) goto cleanup;
-            fctx->fout_bytes_in_rustls += (apr_off_t)wlen;
-            start += wlen;
-            if (wlen == 0) {
-                fctx->fout_buf_plain_len = (apr_size_t)(end - start);
-                memmove(fctx->fout_buf_plain, start, fctx->fout_buf_plain_len);
-                ap_log_cerror(APLOG_MARK, APLOG_WARNING, 0, fctx->c,
-                             "fout_plain_buf_to_rustls: not wholly written to rustls"
-                             ", moved %ld bytes to start of buffer", (long)fctx->fout_buf_plain_len);
-                rv = APR_EAGAIN;
-                ap_log_cerror(APLOG_MARK, APLOG_ERR, 0, fctx->c, APLOGNO()
-                             "fout_plain_buf_to_rustls: not read by rustls at all");
+        do {
+            os_err = rustls_connection_write_tls(
+                fctx->cc->rustls_connection, tls_write_callback, fctx, &dlen);
+            if (os_err) {
+                rv = APR_FROM_OS_ERROR(os_err);
                 goto cleanup;
             }
         }
-        ap_log_cerror(APLOG_MARK, APLOG_TRACE2, 0, fctx->c,
-                     "fout_plain_buf_to_rustls: %ld plain bytes written to rustls",
-                     (long)fctx->fout_buf_plain_len);
-        fctx->fout_buf_plain_len = 0;
+        while (rustls_connection_wants_write(fctx->cc->rustls_connection));
+        ap_log_cerror(APLOG_MARK, APLOG_TRACE3, rv, fctx->c,
+            "fout_pass_rustls_to_tls, %ld bytes ready for network", (long)fctx->fout_bytes_in_tls_bb);
+        fctx->fout_bytes_in_rustls = 0;
     }
 cleanup:
-    *ppassed = wlen;
+    return rv;
+}
+
+static apr_status_t fout_pass_buf_to_rustls(
+    tls_filter_ctx_t *fctx, const char *buf, apr_size_t len)
+{
+    apr_status_t rv = APR_SUCCESS;
+    rustls_result rr = RUSTLS_RESULT_OK;
+    apr_size_t written;
+
+    while (len) {
+        /* check if we will exceed the limit of data in rustls.
+         * rustls does not guarantuee that it will accept all data, so we
+         * iterate and flush when needed. */
+        if (fctx->fout_bytes_in_rustls + (apr_off_t)len > (apr_off_t)fctx->fout_max_in_rustls) {
+            rv = fout_pass_rustls_to_tls(fctx);
+            if (APR_SUCCESS != rv) goto cleanup;
+        }
+
+        rr = rustls_connection_write(fctx->cc->rustls_connection,
+                                     (const unsigned char*)buf, len, &written);
+        if (rr != RUSTLS_RESULT_OK) goto cleanup;
+        ap_assert(written <= len);
+        fctx->fout_bytes_in_rustls += (apr_off_t)written;
+        buf += written;
+        len -= written;
+        if (written == 0) {
+            rv = APR_EAGAIN;
+            ap_log_cerror(APLOG_MARK, APLOG_ERR, 0, fctx->c, APLOGNO()
+                         "fout_pass_buf_to_rustls: not read by rustls at all");
+            goto cleanup;
+        }
+    }
+cleanup:
     if (rr != RUSTLS_RESULT_OK) {
         const char *err_descr = "";
         rv = tls_core_error(fctx->c, rr, &err_descr);
         ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, fctx->c, APLOGNO()
-                     "fout_plain_buf_to_rustls to rustls: [%d] %s", (int)rr, err_descr);
+                     "fout_pass_buf_to_tls to rustls: [%d] %s", (int)rr, err_descr);
     }
     return rv;
 }
 
-static apr_status_t fout_plain_to_rustls(
-    tls_filter_ctx_t *fctx, apr_bucket *b, int flush)
+static apr_status_t fout_pass_all_to_tls(tls_filter_ctx_t *fctx)
 {
-    const char *data;
-    apr_size_t dlen, wlen, buf_remain;
-    rustls_result rr = RUSTLS_RESULT_OK;
     apr_status_t rv = APR_SUCCESS;
 
-    if (b) {
-        /* if our buffer is full, write it to rustls */
-        buf_remain = fctx->fout_buf_plain_size - fctx->fout_buf_plain_len;
-        if (buf_remain == 0) {
-            rv = fout_plain_buf_to_rustls(fctx, &wlen);
-            if (APR_SUCCESS != rv) goto cleanup;
-            buf_remain = fctx->fout_buf_plain_size - fctx->fout_buf_plain_len;
-            ap_assert(buf_remain > 0);
-        }
+    if (fctx->fout_buf_plain_len) {
+        rv = fout_pass_buf_to_rustls(fctx, fctx->fout_buf_plain, fctx->fout_buf_plain_len);
+        ap_log_cerror(APLOG_MARK, APLOG_TRACE2, rv, fctx->c,
+                     "fout_pass_all_to_tls: %ld plain bytes written to rustls",
+                     (long)fctx->fout_buf_plain_len);
+        if (APR_SUCCESS != rv) goto cleanup;
+        fctx->fout_buf_plain_len = 0;
+    }
 
+    rv = fout_pass_rustls_to_tls(fctx);
+cleanup:
+    return rv;
+}
+
+static apr_status_t fout_pass_all_to_net(tls_filter_ctx_t *fctx, int flush)
+{
+    apr_status_t rv;
+
+    rv = fout_pass_all_to_tls(fctx);
+    if (APR_SUCCESS != rv) goto cleanup;
+    if (flush) {
+        apr_bucket *b = apr_bucket_flush_create(fctx->fout_tls_bb->bucket_alloc);
+        APR_BRIGADE_INSERT_TAIL(fctx->fout_tls_bb, b);
+    }
+    rv = fout_pass_tls_to_net(fctx);
+cleanup:
+    return rv;
+}
+
+static apr_status_t fout_append_plain(tls_filter_ctx_t *fctx, apr_bucket *b)
+{
+    const char *data;
+    apr_size_t dlen, buf_remain;
+    rustls_result rr = RUSTLS_RESULT_OK;
+    apr_status_t rv = APR_SUCCESS;
+    int flush = 0;
+
+    if (b) {
         /* Resolve any indeterminate bucket to a "real" one by reading it. */
         if ((apr_size_t)-1 == b->length) {
             rv = apr_bucket_read(b, &data, &dlen, APR_BLOCK_READ);
@@ -624,12 +648,39 @@ static apr_status_t fout_plain_to_rustls(
             }
             else if (APR_SUCCESS != rv) goto cleanup;
         }
-
-        if (b && b->length == 0) {
+        /* Now `b` is the bucket that we need to append and consume */
+        if (APR_BUCKET_IS_METADATA(b)) {
+            /* outgoing buckets:
+             *   [PLAINDATA META PLAINDATA META META]
+             * need to become:
+             *   [TLSDATA META TLSDATA META META]
+             * because we need to send the meta buckets down the
+             * network filters. */
+            rv = fout_pass_all_to_tls(fctx);
+            if (APR_SUCCESS != rv) goto cleanup;
+            APR_BUCKET_REMOVE(b);
+            APR_BRIGADE_INSERT_TAIL(fctx->fout_tls_bb, b);
+            if (AP_BUCKET_IS_EOC(b)) {
+                rustls_connection_send_close_notify(fctx->cc->rustls_connection);
+                fctx->cc->state = TLS_CONN_ST_NOTIFIED;
+                rv = fout_pass_rustls_to_tls(fctx);
+                if (APR_SUCCESS != rv) goto cleanup;
+            }
+            flush = 1;
+        }
+        else if (b && b->length == 0) {
             apr_bucket_delete(b);
         }
-        else if (b) {
-            /* buffer is empty, bucket is large, write it to rustls directly */
+        else {
+            /* if our buffer is full, convert it to tls */
+            buf_remain = fctx->fout_buf_plain_size - fctx->fout_buf_plain_len;
+            if (buf_remain == 0) {
+                rv = fout_pass_all_to_tls(fctx);
+                if (APR_SUCCESS != rv) goto cleanup;
+                buf_remain = fctx->fout_buf_plain_size - fctx->fout_buf_plain_len;
+                ap_assert(buf_remain > 0);
+            }
+
             if (b->length > buf_remain) {
                 apr_bucket_split(b, buf_remain);
             }
@@ -670,9 +721,17 @@ static apr_status_t fout_plain_to_rustls(
                 fctx->fout_buf_plain_len += dlen;
                 apr_bucket_delete(b);
             }
+            else if (fctx->fout_buf_plain_len == 0 && dlen > 1024) {
+                rv = apr_bucket_read(b, &data, &dlen, APR_BLOCK_READ);
+                if (APR_SUCCESS != rv) goto cleanup;
+                rv = fout_pass_buf_to_rustls(fctx, data, dlen);
+                if (APR_SUCCESS != rv) goto cleanup;
+                apr_bucket_delete(b);
+            }
             else {
                 rv = apr_bucket_read(b, &data, &dlen, APR_BLOCK_READ);
                 if (APR_SUCCESS != rv) goto cleanup;
+                /*if (dlen > TLS_PREF_PLAIN_CHUNK_SIZE)*/
                 ap_assert(dlen <= buf_remain);
                 memcpy(fctx->fout_buf_plain + fctx->fout_buf_plain_len, data, dlen);
                 fctx->fout_buf_plain_len += dlen;
@@ -682,7 +741,7 @@ static apr_status_t fout_plain_to_rustls(
     }
 
     if (flush) {
-        rv = fout_plain_buf_to_rustls(fctx, &wlen);
+        rv = fout_pass_all_to_net(fctx, 0);
         if (APR_SUCCESS != rv) goto cleanup;
     }
 
@@ -693,33 +752,6 @@ cleanup:
         ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, fctx->c, APLOGNO()
                      "write_bucket_to_rustls: [%d] %s", (int)rr, err_descr);
     }
-    return rv;
-}
-
-static apr_status_t write_all_tls_from_rustls(
-    tls_filter_ctx_t *fctx, int flush)
-{
-    apr_status_t rv;
-
-    if (flush) {
-        apr_bucket *b;
-
-        rv = fout_plain_to_rustls(fctx, NULL, 1);
-        if (APR_SUCCESS != rv) goto cleanup;
-        rv = brigade_tls_from_rustls(fctx);
-        if (APR_SUCCESS != rv) goto cleanup;
-        b = apr_bucket_flush_create(fctx->fout_tls_bb->bucket_alloc);
-        APR_BRIGADE_INSERT_TAIL(fctx->fout_tls_bb, b);
-    }
-    if (!APR_BRIGADE_EMPTY(fctx->fout_tls_bb)) {
-        rv = ap_pass_brigade(fctx->fout_ctx->next, fctx->fout_tls_bb);
-        if (APR_SUCCESS == rv && fctx->c->aborted) {
-            rv = APR_ECONNRESET;
-        }
-        fctx->fout_bytes_in_tls_bb = 0;
-        apr_brigade_cleanup(fctx->fout_tls_bb);
-    }
-cleanup:
     return rv;
 }
 
@@ -741,7 +773,6 @@ static apr_status_t filter_conn_output(
     tls_filter_ctx_t *fctx = f->ctx;
     apr_status_t rv = APR_SUCCESS;
     rustls_result rr = RUSTLS_RESULT_OK;
-    int flush = 0;
 
     if (f->c->aborted) {
         ap_log_cerror(APLOG_MARK, APLOG_TRACE4, 0, fctx->c,
@@ -768,58 +799,14 @@ static apr_status_t filter_conn_output(
     }
 
     while (!APR_BRIGADE_EMPTY(bb)) {
-        apr_bucket *b = APR_BRIGADE_FIRST(bb);
-
-        if (APR_BUCKET_IS_METADATA(b)) {
-            /* we need to pass the meta data buckets down to the network,
-             * as they may have meaning there (EOS for example).
-             * Everything we have buffered needs to go to rustls and
-             * from there to our fout_tls_bb bucket brigade.
-             * Then we can append this meta bucket and keep the order
-             * of data.
-             */
-            flush = 1;
-            if (!fout_plain_buf_empty(fctx)) {
-                rv = fout_plain_to_rustls(fctx, NULL, 1);
-                if (APR_SUCCESS != rv) goto cleanup;
-                rv = brigade_tls_from_rustls(fctx);
-                if (APR_SUCCESS != rv) goto cleanup;
-            }
-            APR_BUCKET_REMOVE(b);
-            APR_BRIGADE_INSERT_TAIL(fctx->fout_tls_bb, b);
-
-            if (AP_BUCKET_IS_EOC(b)) {
-                rustls_connection_send_close_notify(fctx->cc->rustls_connection);
-                fctx->cc->state = TLS_CONN_ST_NOTIFIED;
-            }
-            flush = 1;
-        }
-        else {
-            rv = fout_plain_to_rustls(fctx, b, 0);
-            if (APR_SUCCESS != rv) goto cleanup;
-        }
-
-        /* did we w supply 'enough' plain bytes to rustls? If so,
-         * get the tls from rustls into our fout_tls_bb brigade.
-         * If the brigade now holds 'enough' bytes, pass them to
-         * the network.
-         */
-        if (fctx->fout_bytes_in_rustls >= fctx->fout_max_in_rustls) {
-            rv = brigade_tls_from_rustls(fctx);
-            if (APR_SUCCESS != rv) goto cleanup;
-        }
-        if (fctx->fout_bytes_in_tls_bb >= fctx->fout_auto_flush_size) {
-            rv = write_all_tls_from_rustls(fctx, 1);
-            if (APR_SUCCESS != rv) goto cleanup;
-        }
+        rv = fout_append_plain(fctx, APR_BRIGADE_FIRST(bb));
+        if (APR_SUCCESS != rv) goto cleanup;
     }
 
     if (APLOGctrace5(fctx->c)) {
         tls_util_bb_log(fctx->c, APLOG_TRACE5, "filter_conn_output, processed plain", bb);
         tls_util_bb_log(fctx->c, APLOG_TRACE5, "filter_conn_output, tls", fctx->fout_tls_bb);
     }
-    /* write everything still in rustls outgoing buffers to the network */
-    rv = write_all_tls_from_rustls(fctx, flush);
 
 cleanup:
     if (rr != RUSTLS_RESULT_OK) {
@@ -872,7 +859,7 @@ int tls_filter_pre_conn_init(conn_rec *c)
     fctx->fin_plain_bb = apr_brigade_create(c->pool, c->bucket_alloc);
     fctx->fout_ctx = ap_add_output_filter(TLS_FILTER_RAW, fctx, NULL, c);
     fctx->fout_tls_bb = apr_brigade_create(c->pool, c->bucket_alloc);
-    fctx->fout_buf_plain_size = 4 * TLS_PREF_PLAIN_CHUNK_SIZE;
+    fctx->fout_buf_plain_size = 8 * TLS_PREF_PLAIN_CHUNK_SIZE;
     fctx->fout_buf_plain = apr_pcalloc(c->pool, fctx->fout_buf_plain_size);
     fctx->fout_buf_plain_len = 0;
 
@@ -892,7 +879,7 @@ int tls_filter_pre_conn_init(conn_rec *c)
      */
     fctx->fout_max_in_rustls = 4 * TLS_PREF_PLAIN_CHUNK_SIZE;
     fctx->fin_max_in_rustls = 4 * TLS_REC_MAX_SIZE;
-    fctx->fout_auto_flush_size = 4 * TLS_REC_MAX_SIZE;
+    fctx->fout_auto_flush_size = 2 * TLS_REC_MAX_SIZE;
 
     return OK;
 }
