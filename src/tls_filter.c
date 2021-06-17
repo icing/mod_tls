@@ -526,6 +526,30 @@ cleanup:
     return APR_TO_OS_ERROR(rv);
 }
 
+static rustls_io_result tls_write_vectored_callback(
+    void *userdata, const rustls_slice_bytes *slices, size_t count, size_t *out_n)
+{
+    tls_filter_ctx_t *fctx = userdata;
+    const rustls_slice_bytes *slice;
+    apr_status_t rv;
+    size_t i, n = 0;
+    apr_bucket *b;
+
+    for (i = 0; i < count; ++i) {
+        slice = &slices[i];
+        b = apr_bucket_transient_create((const char*)slice->data, slice->len, fctx->fout_tls_bb->bucket_alloc);
+        APR_BRIGADE_INSERT_TAIL(fctx->fout_tls_bb, b);
+        n += slice->len;
+        fctx->fout_bytes_in_tls_bb += (apr_off_t)slice->len;
+    }
+    rv = fout_pass_tls_to_net(fctx);
+    *out_n = n;
+    ap_log_error(APLOG_MARK, APLOG_TRACE5, rv, fctx->cc->server,
+        "tls_write_vectored_callback: %ld bytes in %d slices", (long)n, (int)count);
+    return APR_TO_OS_ERROR(rv);
+}
+
+#define TLS_WRITE_VECTORED      1
 /**
  * Read TLS encrypted data from <fctx->cc->rustls_connection> and pass it down
  * Apache's filter chain to the network.
@@ -540,18 +564,31 @@ static apr_status_t fout_pass_rustls_to_tls(tls_filter_ctx_t *fctx)
         size_t dlen;
         int os_err;
 
-        do {
-            os_err = rustls_connection_write_tls(
-                fctx->cc->rustls_connection, tls_write_callback, fctx, &dlen);
-            if (os_err) {
-                rv = APR_FROM_OS_ERROR(os_err);
-                goto cleanup;
+        if (TLS_WRITE_VECTORED) {
+            do {
+                os_err = rustls_connection_write_tls_vectored(
+                    fctx->cc->rustls_connection, tls_write_vectored_callback, fctx, &dlen);
+                if (os_err) {
+                    rv = APR_FROM_OS_ERROR(os_err);
+                    goto cleanup;
+                }
             }
+            while (rustls_connection_wants_write(fctx->cc->rustls_connection));
         }
-        while (rustls_connection_wants_write(fctx->cc->rustls_connection));
-        ap_log_cerror(APLOG_MARK, APLOG_TRACE3, rv, fctx->c,
-            "fout_pass_rustls_to_tls, %ld bytes ready for network", (long)fctx->fout_bytes_in_tls_bb);
-        fctx->fout_bytes_in_rustls = 0;
+        else {
+            do {
+                os_err = rustls_connection_write_tls(
+                    fctx->cc->rustls_connection, tls_write_callback, fctx, &dlen);
+                if (os_err) {
+                    rv = APR_FROM_OS_ERROR(os_err);
+                    goto cleanup;
+                }
+            }
+            while (rustls_connection_wants_write(fctx->cc->rustls_connection));
+            ap_log_cerror(APLOG_MARK, APLOG_TRACE3, rv, fctx->c,
+                "fout_pass_rustls_to_tls, %ld bytes ready for network", (long)fctx->fout_bytes_in_tls_bb);
+            fctx->fout_bytes_in_rustls = 0;
+        }
     }
 cleanup:
     return rv;
