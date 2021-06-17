@@ -8,6 +8,7 @@ from test_env import TlsTestEnv
 from test_conf import TlsTestConf
 
 
+@pytest.mark.skip(reason="need new client funcs in crustls")
 class TestProxyTLS:
 
     env = TlsTestEnv()

@@ -494,7 +494,11 @@ static apr_status_t proxy_conf_setup(
                      pc->defined_in->server_hostname, pc->proxy_ca);
         rv = tls_cert_root_stores_get(gc->stores, pc->proxy_ca, &ca_store);
         if (APR_SUCCESS != rv) goto cleanup;
+#if TLS_CRUSTLS_EXT_CLIENT
         rr = rustls_client_config_builder_use_roots(builder, ca_store);
+#else
+        rr = RUSTLS_RESULT_INVALID_PARAMETER;
+#endif
         if (RUSTLS_RESULT_OK != rr) goto cleanup;
     }
     else {
@@ -510,7 +514,9 @@ static apr_status_t proxy_conf_setup(
     builder = NULL;
 
 cleanup:
+#if TLS_CRUSTLS_EXT_CLIENT
     if (builder) rustls_client_config_builder_free(builder);
+#endif
     if (RUSTLS_RESULT_OK != rr) {
         const char *err_descr;
         rv = tls_util_rustls_error(ptemp, rr, &err_descr);
@@ -809,6 +815,7 @@ int tls_core_conn_init(conn_rec *c)
             pc = cc->dc->proxy_config;
             ap_assert(pc);
             ap_assert(pc->rustls_config);
+#if TLS_CRUSTLS_EXT_CLIENT
             builder = rustls_client_config_builder_from_config(pc->rustls_config);
             hostname = apr_table_get(c->notes, "proxy-request-hostname");
             if (hostname) {
@@ -826,6 +833,10 @@ int tls_core_conn_init(conn_rec *c)
             }
             config = rustls_client_config_builder_build(builder);
             rr = rustls_client_connection_new(config, hostname, &cc->rustls_connection);
+#else
+            (void)builder; (void)hostname;
+            rr = RUSTLS_RESULT_INVALID_PARAMETER;
+#endif
             if (RUSTLS_RESULT_OK != rr) goto cleanup;
         }
         else {
