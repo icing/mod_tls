@@ -97,14 +97,3 @@ class TestProxyTLS:
         assert r.exit_code == 0, r.stderr
         assert r.json == { name: value }, r.stdout
 
-    @pytest.mark.parametrize("name, pattern", [
-        ("SSL_VERSION_INTERFACE", r'mod_tls/\d+\.\d+\.\d+'),
-        ("SSL_VERSION_LIBRARY", r'crustls/\d+\.\d+\.\d+/rustls/\d+\.\d+\.\d+'),
-    ])
-    def test_15_proxy_tls_vars_match(self, name: str, pattern: str):
-        r = self.env.https_get(self.env.domain_b, f"/proxy-tls/vars.py?name={name}")
-        assert r.exit_code == 0, r.stderr
-        assert name in r.json
-        assert re.match(pattern, r.json[name]), r.json
-
-
