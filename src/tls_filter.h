@@ -31,7 +31,8 @@ struct tls_filter_ctx_t {
     apr_off_t fout_bytes_in_tls_bb;      /* # of output tls bytes in our brigade */
 
     apr_size_t fin_max_in_rustls;         /* how much tls we like to read into rustls */
-    apr_size_t fout_max_in_rustls;        /* how much plain bytes we like to give to rustls */
+    apr_size_t fout_max_in_rustls;        /* how much plain bytes we like in rustls */
+    apr_size_t fout_max_bucket_size;      /* how large bucket chunks we handle before splitting */
     apr_size_t fout_auto_flush_size;      /* on much outoing TLS data we flush to network */
 };
 
