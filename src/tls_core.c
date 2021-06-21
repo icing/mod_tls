@@ -1243,10 +1243,11 @@ int tls_core_request_check(request_rec *r)
      * - with vhosts configured and no SNI from the client, deny access.
      * - are servers compatible for connection sharing?
      */
-    ap_log_rerror(APLOG_MARK, APLOG_TRACE2, 0, r,
+    if (!TLS_CONN_ST_IS_ENABLED(cc)) goto cleanup;
+    
+    ap_log_rerror(APLOG_MARK, APLOG_TRACE3, 0, r,
                  "tls_core_request_check[%s, %d]: %s", r->hostname,
                  cc? cc->service_unavailable : 2, r->the_request);
-    if (!TLS_CONN_ST_IS_ENABLED(cc)) goto cleanup;
     if (cc->service_unavailable) {
         rv = HTTP_SERVICE_UNAVAILABLE; goto cleanup;
     }
