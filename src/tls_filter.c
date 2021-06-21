@@ -644,7 +644,7 @@ static apr_status_t fout_append_plain(tls_filter_ctx_t *fctx, apr_bucket *b)
             rv = apr_bucket_read(b, &data, &dlen, APR_BLOCK_READ);
             if (APR_STATUS_IS_EOF(rv)) {
                 apr_bucket_delete(b);
-                b = NULL;
+                goto maybe_flush;
             }
             else if (APR_SUCCESS != rv) goto cleanup;
         }
@@ -668,7 +668,7 @@ static apr_status_t fout_append_plain(tls_filter_ctx_t *fctx, apr_bucket *b)
             }
             flush = 1;
         }
-        else if (b && b->length == 0) {
+        else if (b->length == 0) {
             apr_bucket_delete(b);
         }
         else {
@@ -740,6 +740,7 @@ static apr_status_t fout_append_plain(tls_filter_ctx_t *fctx, apr_bucket *b)
         }
     }
 
+maybe_flush:
     if (flush) {
         rv = fout_pass_all_to_net(fctx, 0);
         if (APR_SUCCESS != rv) goto cleanup;
