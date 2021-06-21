@@ -509,13 +509,13 @@ static apr_status_t proxy_conf_setup(
     }
 
     if (pc->proxy_protocol_min > 0) {
+#if TLS_CRUSTLS_EXT_CLIENT
         apr_array_header_t *tls_versions;
 
         ap_log_error(APLOG_MARK, APLOG_TRACE1, rv, pc->defined_in,
                      "init server: set proxy protocol min version %04x", pc->proxy_protocol_min);
         tls_versions = tls_proto_create_versions_plus(
             gc->proto, (apr_uint16_t)pc->proxy_protocol_min, ptemp);
-#if TLS_CRUSTLS_EXT_CLIENT
         if (tls_versions->nelts > 0) {
             rr = rustls_client_config_builder_set_versions(builder,
                 (const apr_uint16_t*)tls_versions->elts, (apr_size_t)tls_versions->nelts);
