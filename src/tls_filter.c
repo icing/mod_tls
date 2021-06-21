@@ -484,6 +484,10 @@ cleanup:
         ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, fctx->c, APLOGNO()
                      "tls_filter_conn_input: [%d] %s", (int)rr, err_descr);
     }
+    else if (APR_STATUS_IS_EAGAIN(rv)) {
+        ap_log_cerror(APLOG_MARK, APLOG_TRACE4, rv, fctx->c,
+                     "tls_filter_conn_input: no data available");
+    }
     else if (APR_SUCCESS != rv) {
         ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, fctx->c, APLOGNO()
                      "tls_filter_conn_input");
