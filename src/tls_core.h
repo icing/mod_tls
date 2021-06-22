@@ -169,6 +169,4 @@ apr_status_t tls_core_error(conn_rec *c, rustls_result rr, const char **perrstr)
  */
 int tls_core_setup_outgoing(conn_rec *c);
 
-#define TLS_CRUSTLS_EXT_CLIENT      0
-
 #endif /* tls_core_h */

@@ -5,25 +5,18 @@ from threading import Thread
 
 import pytest
 
-from test_env import TlsTestEnv
 from test_conf import TlsTestConf
 
 
 class TestProto:
 
-    env = TlsTestEnv()
-    domain_a = None
-    domain_b = None
-
-    CURL_SUPPORTS_TLS_1_3 = None
-
-    @classmethod
-    def setup_class(cls):
-        conf = TlsTestConf(env=cls.env)
-        conf.add_vhosts(domains=[cls.env.domain_a, cls.env.domain_b], extras={
+    @pytest.fixture(autouse=True, scope='class')
+    def _class_scope(self, env):
+        conf = TlsTestConf(env=env)
+        conf.add_vhosts(domains=[env.domain_a, env.domain_b], extras={
             'base': "LogLevel tls:debug",
-            cls.env.domain_a: "TLSProtocol TLSv1.3+",
-            cls.env.domain_b: """
+            env.domain_a: "TLSProtocol TLSv1.3+",
+            env.domain_b: """
             # the commonly used name
             TLSProtocol TLSv1.2+
             # the numeric one (yes, this is 1.2)
@@ -31,48 +24,49 @@ class TestProto:
             """,
         })
         conf.write()
-        assert cls.env.apache_restart() == 0
+        assert env.apache_restart() == 0
+        yield
+        if env.is_live(timeout=timedelta(milliseconds=100)):
+            assert env.apache_stop() == 0
 
-    @classmethod
-    def teardown_class(cls):
-        if cls.env.is_live(timeout=timedelta(milliseconds=100)):
-            assert cls.env.apache_stop() == 0
-
-    def setup_method(self, _method):
+    @pytest.fixture(autouse=True, scope='function')
+    def _function_scope(self, env):
         pass
 
-    def test_05_proto_1_2(self):
-        r = self.env.https_get(self.env.domain_b, "/index.json",
+    CURL_SUPPORTS_TLS_1_3 = None
+
+    def test_05_proto_1_2(self, env):
+        r = env.https_get(env.domain_b, "/index.json",
                                extra_args=["--tlsv1.2"])
         assert r.exit_code == 0, r.stderr
-        if self.env.curl_supports_tls_1_3():
-            r = self.env.https_get(self.env.domain_b, "/index.json",
+        if env.curl_supports_tls_1_3():
+            r = env.https_get(env.domain_b, "/index.json",
                                    extra_args=["--tlsv1.3"])
             assert r.exit_code == 0, r.stderr
 
-    def test_05_proto_1_3(self):
-        r = self.env.https_get(self.env.domain_a, "/index.json",
+    def test_05_proto_1_3(self, env):
+        r = env.https_get(env.domain_a, "/index.json",
                                extra_args=["--tlsv1.3"])
-        if self.env.curl_supports_tls_1_3():
+        if env.curl_supports_tls_1_3():
             assert r.exit_code == 0, r.stderr
         else:
             assert r.exit_code == 4, r.stderr
 
-    def test_05_proto_close(self):
-        s = socket.create_connection(('localhost', self.env.https_port))
+    def test_05_proto_close(self, env):
+        s = socket.create_connection(('localhost', env.https_port))
         time.sleep(0.1)
         s.close()
 
-    def test_05_proto_ssl_close(self):
-        conf = TlsTestConf(env=self.env)
-        conf.add_ssl_vhosts(domains=[self.env.domain_a, self.env.domain_b], extras={
+    def test_05_proto_ssl_close(self, env):
+        conf = TlsTestConf(env=env)
+        conf.add_ssl_vhosts(domains=[env.domain_a, env.domain_b], extras={
             'base': "LogLevel ssl:debug",
-            self.env.domain_a: "SSLProtocol TLSv1.3",
-            self.env.domain_b: "SSLProtocol TLSv1.2",
+            env.domain_a: "SSLProtocol TLSv1.3",
+            env.domain_b: "SSLProtocol TLSv1.2",
         })
         conf.write()
-        assert self.env.apache_restart() == 0
-        s = socket.create_connection(('localhost', self.env.https_port))
+        assert env.apache_restart() == 0
+        s = socket.create_connection(('localhost', env.https_port))
         time.sleep(0.1)
         s.close()
 

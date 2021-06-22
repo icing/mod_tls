@@ -45,13 +45,10 @@ LogLevel tls:trace4
                  """.format(
                     https=self.env.https_port,
                     domain=domain))
-            for cred in self.env.get_certs_for(domain):
+            for cred in self.env.ca.get_credentials_for_name(domain):
                 cert_file = os.path.relpath(cred.cert_file, self.env.server_dir)
                 pkey_file = os.path.relpath(cred.pkey_file, self.env.server_dir) if cred.pkey_file else ""
-                self.add("  TLSCertificate {cert_file} {pkey_file}".format(
-                    cert_file = cert_file,
-                    pkey_file = pkey_file,
-                ))
+                self.add(f"  TLSCertificate {cert_file} {pkey_file}")
             self.add("""
       {extras}
     </VirtualHost>
@@ -61,41 +58,26 @@ LogLevel tls:trace4
 
     def add_ssl_vhosts(self, domains: List[str], extras: Dict[str, str] = None):
         extras = extras if extras is not None else {}
-        self.add("""
+        self.add(f"""
 LogLevel ssl:trace4
-{extras}
-        """.format(
-            https=self.env.https_port,
-            extras=extras['base'] if 'base' in extras else "",
-        ))
+{extras['base'] if 'base' in extras else ""}
+        """)
         for domain in domains:
-            self.add("""
-    <VirtualHost *:{https}>
+            self.add(f"""
+    <VirtualHost *:{self.env.https_port}>
       ServerName {domain}
       DocumentRoot htdocs/{domain}
       SSLEngine on
-                 """.format(
-                    https=self.env.https_port,
-                    domain=domain))
-            for cred in self.env.get_certs_for(domain):
+                 """)
+            for cred in self.env.ca.get_credentials_for_name(domain):
                 cert_file = os.path.relpath(cred.cert_file, self.env.server_dir)
                 pkey_file = os.path.relpath(cred.pkey_file, self.env.server_dir) if cred.pkey_file else cert_file
-                self.add("  SSLCertificateFile {cert_file}".format(
-                    cert_file = cert_file,
-                ))
-                self.add("  SSLCertificateKeyFile {pkey_file}".format(
-                    pkey_file=pkey_file,
-                ))
-            self.add("""
-      {extras}
+                self.add(f"  SSLCertificateFile {cert_file}")
+                self.add(f"  SSLCertificateKeyFile {pkey_file}")
+            self.add(f"""
+      {extras[domain] if domain in extras else ""}
     </VirtualHost>
-                """.format(
-                    https=self.env.https_port,
-                    domain=domain,
-                    cert_file=cert_file,
-                    pkey_file=pkey_file,
-                    extras=extras[domain] if domain in extras else ""
-                ))
+                """)
 
     def add_md_vhosts(self, domains: List[str], extras: Dict[str, str] = None):
         extras = extras if extras is not None else {}
@@ -111,7 +93,7 @@ LogLevel tls:trace8
             self.add(f"""
     <MDomain {domain}>
                 """)
-            for cred in self.env.get_certs_for(domain):
+            for cred in self.env.ca.get_credentials_for_name(domain):
                 cert_file = os.path.relpath(cred.cert_file, self.env.server_dir)
                 pkey_file = os.path.relpath(cred.pkey_file, self.env.server_dir) if cred.pkey_file else cert_file
                 self.add(f"""
@@ -140,7 +122,7 @@ LogLevel tls:trace8
     MDBaseServer on
     <MDomain {domain}>
                 """)
-        for cred in self.env.get_certs_for(domain):
+        for cred in self.env.ca.get_credentials_for_name(domain):
             cert_file = os.path.relpath(cred.cert_file, self.env.server_dir)
             pkey_file = os.path.relpath(cred.pkey_file, self.env.server_dir) if cred.pkey_file else cert_file
             self.add(f"""

@@ -494,12 +494,7 @@ static apr_status_t proxy_conf_setup(
                      pc->defined_in->server_hostname, pc->proxy_ca);
         rv = tls_cert_root_stores_get(gc->stores, pc->proxy_ca, &ca_store);
         if (APR_SUCCESS != rv) goto cleanup;
-#if TLS_CRUSTLS_EXT_CLIENT
-        rr = rustls_client_config_builder_use_roots(builder, ca_store);
-#else
-        rr = RUSTLS_RESULT_INVALID_PARAMETER;
-#endif
-        if (RUSTLS_RESULT_OK != rr) goto cleanup;
+        rustls_client_config_builder_use_roots(builder, ca_store);
     }
     else {
         ap_log_error(APLOG_MARK, APLOG_WARNING, rv, pc->defined_in,
@@ -509,7 +504,6 @@ static apr_status_t proxy_conf_setup(
     }
 
     if (pc->proxy_protocol_min > 0) {
-#if TLS_CRUSTLS_EXT_CLIENT
         apr_array_header_t *tls_versions;
 
         ap_log_error(APLOG_MARK, APLOG_TRACE1, rv, pc->defined_in,
@@ -535,16 +529,13 @@ static apr_status_t proxy_conf_setup(
                          "available.", pc->defined_in->server_hostname, pc->proxy_protocol_min);
             rv = APR_ENOTIMPL; goto cleanup;
         }
-#endif
     }
 
     pc->rustls_config = rustls_client_config_builder_build(builder);
     builder = NULL;
 
 cleanup:
-#if TLS_CRUSTLS_EXT_CLIENT
     if (builder) rustls_client_config_builder_free(builder);
-#endif
     if (RUSTLS_RESULT_OK != rr) {
         const char *err_descr;
         rv = tls_util_rustls_error(ptemp, rr, &err_descr);
@@ -712,6 +703,7 @@ static apr_status_t init_outgoing(apr_pool_t *p, apr_pool_t *ptemp, server_rec *
     for (i = 0; i < gc->proxy_configs->nelts; ++i) {
         pc = APR_ARRAY_IDX(gc->proxy_configs, i, tls_conf_proxy_t*);
         rv = proxy_conf_setup(p, ptemp, pc, gc);
+        if (APR_SUCCESS != rv) goto cleanup;
     }
 
 cleanup:
@@ -828,7 +820,6 @@ static apr_status_t init_outgoing_connection(conn_rec *c)
         "setup_outgoing: to %s [ALPN: %s] from configration in %s"
         " using CA %s", hostname, alpn_note, pc->defined_in->server_hostname, pc->proxy_ca);
 
-#if TLS_CRUSTLS_EXT_CLIENT
     builder = rustls_client_config_builder_from_config(pc->rustls_config);
     if (hostname) {
         rustls_client_config_builder_set_enable_sni(builder, true);
@@ -882,10 +873,6 @@ static apr_status_t init_outgoing_connection(conn_rec *c)
 
     config = rustls_client_config_builder_build(builder);
     rr = rustls_client_connection_new(config, hostname, &cc->rustls_connection);
-#else
-    (void)builder; (void)hostname;
-    rr = RUSTLS_RESULT_INVALID_PARAMETER;
-#endif
     if (RUSTLS_RESULT_OK != rr) goto cleanup;
     rustls_connection_set_userdata(cc->rustls_connection, c);
 

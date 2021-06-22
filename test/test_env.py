@@ -87,24 +87,6 @@ class TlsTestEnv:
     DOMAIN_A = "a.mod-tls.test"
     DOMAIN_B = "b.mod-tls.test"
 
-    CERT_SPECS = [
-        CertificateSpec(domains=[DOMAIN_A]),
-        CertificateSpec(domains=[DOMAIN_B], key_type='secp256r1', single_file=True),
-        CertificateSpec(domains=[DOMAIN_B], key_type='rsa4096'),
-        CertificateSpec(name="clientsX", sub_specs=[
-            CertificateSpec(name="user1", client=True, single_file=True),
-            CertificateSpec(name="user2", client=True, single_file=True),
-            CertificateSpec(name="user_expired", client=True,
-                            single_file=True, valid_from=timedelta(days=-91),
-                            valid_to=timedelta(days=-1)),
-        ]),
-        CertificateSpec(name="clientsY", sub_specs=[
-            CertificateSpec(name="user1", client=True, single_file=True),
-        ]),
-        CertificateSpec(name="user1", client=True, single_file=True),
-    ]
-    CA = None
-
     # current rustls supported ciphers in their order of preference
     # used to test cipher selection, see test_06_ciphers.py
     RUSTLS_CIPHERS = [
@@ -119,29 +101,13 @@ class TlsTestEnv:
         TlsCipher(0xc02f, "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256", "RSA", 1.2),
     ]
 
-    LOG_FMT_TIGHT = '%(levelname)s: %(message)s'
-
-    @classmethod
-    def init_class(cls, base_dir: str):
-        if cls.CA is None:
-            level = logging.INFO
-            console = logging.StreamHandler()
-            console.setLevel(level)
-            console.setFormatter(logging.Formatter(cls.LOG_FMT_TIGHT))
-            logging.getLogger('').addHandler(console)
-            logging.getLogger('').setLevel(level=level)
-
-            cls.CA = TlsTestCA.create(name="abetterinternet-mod_tls",
-                                      store_dir=os.path.join(base_dir, 'ca'), key_type="rsa4096")
-            cls.CA.issue_certs(cls.CERT_SPECS)
-            cls._initialized = True
-
     def __init__(self):
         our_dir = os.path.dirname(inspect.getfile(TlsTestEnv))
         config = ConfigParser()
         config.read(os.path.join(our_dir, 'test.ini'))
         self._prefix = config.get('global', 'prefix')
         self._gen_dir = os.path.join(our_dir, 'gen')
+        self._ca = None
         self._server_dir = os.path.join(self._gen_dir, 'apache')
         self._server_conf_dir = os.path.join(self._server_dir, "conf")
         self._server_docs_dir = os.path.join(self._server_dir, "htdocs")
@@ -149,6 +115,7 @@ class TlsTestEnv:
         self._mpm_type = os.environ['MPM'] if 'MPM' in os.environ else 'event'
 
         self._apachectl = os.path.join(self._prefix, 'bin', 'apachectl')
+        self._apxs = os.path.join(self._prefix, 'bin', 'apxs')
         self._httpd = os.path.join(self._prefix, 'bin', 'httpd')
         self._http_port = int(config.get('global', 'http_port'))
         self._https_port = int(config.get('global', 'https_port'))
@@ -161,7 +128,7 @@ class TlsTestEnv:
         if self._curl is None or len(self._curl) == 0:
             self._curl = "curl"
         self._openssl = config.get('global', 'openssl_bin')
-        TlsTestEnv.init_class(self._server_dir)
+        self.apache_error_log_clear()
 
     @property
     def prefix(self) -> str:
@@ -212,11 +179,11 @@ class TlsTestEnv:
         return self.DOMAIN_B
 
     @property
-    def ca_cert(self) -> Credentials:
-        return self.CA
+    def ca(self) -> Credentials:
+        return self._ca
 
-    def get_certs_for(self, domain: str) -> List[Credentials]:
-        return self.CA.get_credentials_for_name(domain)
+    def set_ca(self, ca: Credentials):
+        self._ca = ca
 
     @staticmethod
     def run(args: List[str]) -> ExecResult:
@@ -272,6 +239,12 @@ class TlsTestEnv:
                 return True
         log.warning(f"Server still responding after {timeout} sec".format(timeout=timeout))
         return False
+
+    def get_httpd_version(self):
+        p = subprocess.run([self._apxs, "-q", "HTTPD_VERSION"], capture_output=True, text=True)
+        if p.returncode != 0:
+            return "unknown"
+        return p.stdout.strip()
 
     # --------- control apache ---------
 
@@ -354,7 +327,7 @@ class TlsTestEnv:
         args = []
         if extra_args:
             args.extend(extra_args)
-        args.extend(["--cacert", self.ca_cert.cert_file, "--resolve", "{domain}:{port}:127.0.0.1".format(
+        args.extend(["--cacert", self.ca.cert_file, "--resolve", "{domain}:{port}:127.0.0.1".format(
             domain=domain, port=self.https_port
         )])
         if isinstance(paths, str):
@@ -376,7 +349,7 @@ class TlsTestEnv:
         return self.run([self._openssl] + args)
 
     def openssl_client(self, domain, extra_args: List[str] = None) -> ExecResult:
-        args = ["s_client", "-CAfile", self.ca_cert.cert_file, "-servername", domain,
+        args = ["s_client", "-CAfile", self.ca.cert_file, "-servername", domain,
                 "-connect", "localhost:{port}".format(
                     port=self.https_port
                 )]

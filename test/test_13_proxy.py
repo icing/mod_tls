@@ -1,45 +1,35 @@
-import os
-import re
 from datetime import timedelta
 
 import pytest
 
-from test_env import TlsTestEnv
 from test_conf import TlsTestConf
 
 
 class TestProxy:
 
-    env = TlsTestEnv()
-
-    @classmethod
-    def setup_class(cls):
-        conf = TlsTestConf(env=cls.env)
+    @pytest.fixture(autouse=True, scope='class')
+    def _class_scope(self, env):
+        conf = TlsTestConf(env=env)
         # add vhosts a+b and a ssl proxy from a to b
-        conf.add_vhosts(domains=[cls.env.domain_a, cls.env.domain_b], extras={
+        conf.add_vhosts(domains=[env.domain_a, env.domain_b], extras={
             'base': f"""
             LogLevel proxy:trace1 proxy_http:trace1 ssl:trace1
             """,
-            cls.env.domain_b: f"""
+            env.domain_b: f"""
             ProxyPreserveHost on
-            ProxyPass "/proxy/" "http://127.0.0.1:{cls.env.http_port}/"
-            ProxyPassReverse "/proxy/" "http://{cls.env.domain_b}:{cls.env.http_port}" 
+            ProxyPass "/proxy/" "http://127.0.0.1:{env.http_port}/"
+            ProxyPassReverse "/proxy/" "http://{env.domain_b}:{env.http_port}" 
             """,
         })
         conf.write()
-        assert cls.env.apache_restart() == 0
+        assert env.apache_restart() == 0
+        yield
+        if env.is_live(timeout=timedelta(milliseconds=100)):
+            assert env.apache_stop() == 0
 
-    @classmethod
-    def teardown_class(cls):
-        if cls.env.is_live(timeout=timedelta(milliseconds=100)):
-            assert cls.env.apache_stop() == 0
-
-    def setup_method(self, _method):
-        pass
-
-    def test_13_proxy_http_get(self):
-        data = self.env.https_get_json(self.env.domain_b, "/proxy/index.json")
-        assert data == {'domain': self.env.domain_b}
+    def test_13_proxy_http_get(self, env):
+        data = env.https_get_json(env.domain_b, "/proxy/index.json")
+        assert data == {'domain': env.domain_b}
 
     @pytest.mark.parametrize("name, value", [
         ("SERVER_NAME", "b.mod-tls.test"),
@@ -49,7 +39,7 @@ class TestProxy:
         ("SSL_CIPHER_EXPORT", ""),
         ("SSL_CLIENT_VERIFY", ""),
     ])
-    def test_13_proxy_http_vars(self, name: str, value: str):
-        r = self.env.https_get(self.env.domain_b, f"/proxy/vars.py?name={name}")
+    def test_13_proxy_http_vars(self, env, name: str, value: str):
+        r = env.https_get(env.domain_b, f"/proxy/vars.py?name={name}")
         assert r.exit_code == 0, r.stderr
-        assert r.json == { name: value }, r.stdout
+        assert r.json == {name: value}, r.stdout

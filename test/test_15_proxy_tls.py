@@ -1,72 +1,62 @@
-import os
 import re
 from datetime import timedelta
 
 import pytest
 
-from test_env import TlsTestEnv
 from test_conf import TlsTestConf
 
 
-@pytest.mark.skip(reason="need new client funcs in crustls")
 class TestProxyTLS:
 
-    env = TlsTestEnv()
-
-    @classmethod
-    def setup_class(cls):
-        conf = TlsTestConf(env=cls.env)
+    @pytest.fixture(autouse=True, scope='class')
+    def _class_scope(self, env):
+        conf = TlsTestConf(env=env)
         # add vhosts a+b and a ssl proxy from a to b
-        conf.add_vhosts(domains=[cls.env.domain_a, cls.env.domain_b], extras={
+        conf.add_vhosts(domains=[env.domain_a, env.domain_b], extras={
             'base': f"""
             LogLevel proxy:trace1 proxy_http:trace1
             TLSProxyProtocol TLSv1.3+
-            <Proxy https://127.0.0.1:{cls.env.https_port}/>
+            <Proxy https://127.0.0.1:{env.https_port}/>
                 TLSProxyEngine on
-                TLSProxyCA {cls.env.CA.cert_file}
+                TLSProxyCA {env.ca.cert_file}
                 ProxyPreserveHost on
             </Proxy>
-            <Proxy https://localhost:{cls.env.https_port}/>
+            <Proxy https://localhost:{env.https_port}/>
                 ProxyPreserveHost on
             </Proxy>
-            <Proxy h2://127.0.0.1:{cls.env.https_port}/>
+            <Proxy h2://127.0.0.1:{env.https_port}/>
                 TLSProxyEngine on
-                TLSProxyCA {cls.env.CA.cert_file}
+                TLSProxyCA {env.ca.cert_file}
                 ProxyPreserveHost on
             </Proxy>
             """,
-            cls.env.domain_b: f"""
+            env.domain_b: f"""
             Protocols h2 http/1.1
-            ProxyPass /proxy-tls/ https://127.0.0.1:{cls.env.https_port}/
-            ProxyPass /proxy-local/ https://localhost:{cls.env.https_port}/
-            ProxyPass /proxy-h2-tls/ h2://127.0.0.1:{cls.env.https_port}/
+            ProxyPass /proxy-tls/ https://127.0.0.1:{env.https_port}/
+            ProxyPass /proxy-local/ https://localhost:{env.https_port}/
+            ProxyPass /proxy-h2-tls/ h2://127.0.0.1:{env.https_port}/
             TLSOptions +StdEnvVars
             """,
         })
         conf.write()
-        assert cls.env.apache_restart() == 0
+        assert env.apache_restart() == 0
+        yield
+        if env.is_live(timeout=timedelta(milliseconds=100)):
+            assert env.apache_stop() == 0
 
-    @classmethod
-    def teardown_class(cls):
-        if cls.env.is_live(timeout=timedelta(milliseconds=100)):
-            assert cls.env.apache_stop() == 0
+    def test_15_proxy_tls_get(self, env):
+        data = env.https_get_json(env.domain_b, "/proxy-tls/index.json")
+        assert data == {'domain': env.domain_b}
 
-    def setup_method(self, _method):
-        pass
-
-    def test_15_proxy_tls_get(self):
-        data = self.env.https_get_json(self.env.domain_b, "/proxy-tls/index.json")
-        assert data == {'domain': self.env.domain_b}
-
-    def test_15_proxy_tls_get_local(self):
+    def test_15_proxy_tls_get_local(self, env):
         # does not work, since SSLProxy* not configured
-        data = self.env.https_get_json(self.env.domain_b, "/proxy-local/index.json")
-        assert data == None
+        data = env.https_get_json(env.domain_b, "/proxy-local/index.json")
+        assert data is None
 
-    def test_15_proxy_tls_h2_get(self):
-        r = self.env.https_get(self.env.domain_b, "/proxy-h2-tls/index.json")
+    def test_15_proxy_tls_h2_get(self, env):
+        r = env.https_get(env.domain_b, "/proxy-h2-tls/index.json")
         assert r.exit_code == 0
-        assert r.json == {'domain': self.env.domain_b}
+        assert r.json == {'domain': env.domain_b}
 
     @pytest.mark.parametrize("name, value", [
         ("SERVER_NAME", "b.mod-tls.test"),
@@ -77,19 +67,17 @@ class TestProxyTLS:
         ("SSL_CIPHER_EXPORT", "false"),
         ("SSL_CLIENT_VERIFY", "NONE"),
     ])
-    def test_15_proxy_tls_vars_const(self, name: str, value: str):
-        r = self.env.https_get(self.env.domain_b, f"/proxy-tls/vars.py?name={name}")
+    def test_15_proxy_tls_vars_const(self, env, name: str, value: str):
+        r = env.https_get(env.domain_b, f"/proxy-tls/vars.py?name={name}")
         assert r.exit_code == 0, r.stderr
-        assert r.json == { name: value }, r.stdout
+        assert r.json == {name: value}, r.stdout
 
     @pytest.mark.parametrize("name, pattern", [
         ("SSL_VERSION_INTERFACE", r'mod_tls/\d+\.\d+\.\d+'),
         ("SSL_VERSION_LIBRARY", r'crustls/\d+\.\d+\.\d+/rustls/\d+\.\d+\.\d+'),
     ])
-    def test_15_proxy_tls_vars_match(self, name: str, pattern: str):
-        r = self.env.https_get(self.env.domain_b, f"/proxy-tls/vars.py?name={name}")
+    def test_15_proxy_tls_vars_match(self, env, name: str, pattern: str):
+        r = env.https_get(env.domain_b, f"/proxy-tls/vars.py?name={name}")
         assert r.exit_code == 0, r.stderr
         assert name in r.json
         assert re.match(pattern, r.json[name]), r.json
-
-

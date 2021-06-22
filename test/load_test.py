@@ -10,6 +10,7 @@ from threading import Thread
 from tqdm import tqdm  # type: ignore
 from typing import Dict, Iterable, List, Tuple, Optional
 
+from test_cert import TlsTestCA, CertificateSpec
 from test_conf import TlsTestConf
 from test_env import TlsTestEnv, ExecResult
 
@@ -776,6 +777,16 @@ class LoadTest:
             names = args.names if len(args.names) else sorted(scenarios.keys())
 
             env = TlsTestEnv()
+            cert_specs = [
+                CertificateSpec(domains=[env.domain_a]),
+                CertificateSpec(domains=[env.domain_b], key_type='secp256r1', single_file=True),
+                CertificateSpec(domains=[env.domain_b], key_type='rsa4096'),
+            ]
+            ca = TlsTestCA.create_root(name="abetterinternet-mod_tls",
+                                       store_dir=os.path.join(env.server_dir, 'ca'), key_type="rsa4096")
+            ca.issue_certs(cert_specs)
+            env.set_ca(ca)
+            
             for name in names:
                 scenario = scenarios[name]
                 table = [

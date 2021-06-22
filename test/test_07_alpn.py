@@ -1,34 +1,28 @@
 import re
 from datetime import timedelta
 
-from test_env import TlsTestEnv
+import pytest
+
 from test_conf import TlsTestConf
 
 
 class TestAlpn:
 
-    env = TlsTestEnv()
-    domain_a = None
-    domain_b = None
-
-    @classmethod
-    def setup_class(cls):
-        cls.domain_a = cls.env.domain_a
-        cls.domain_b = cls.env.domain_b
-        conf = TlsTestConf(env=cls.env)
-        conf.add_vhosts(domains=[cls.domain_a, cls.domain_b], extras={
-            cls.domain_b: """
-    Protocols h2 http/1.1"""
+    @pytest.fixture(autouse=True, scope='class')
+    def _class_scope(self, env):
+        conf = TlsTestConf(env=env)
+        conf.add_vhosts(domains=[env.domain_a, env.domain_b], extras={
+            env.domain_b: """
+        Protocols h2 http/1.1"""
         })
         conf.write()
-        assert cls.env.apache_restart() == 0
+        assert env.apache_restart() == 0
+        yield
+        if env.is_live(timeout=timedelta(milliseconds=100)):
+            assert env.apache_stop() == 0
 
-    @classmethod
-    def teardown_class(cls):
-        if cls.env.is_live(timeout=timedelta(milliseconds=100)):
-            assert cls.env.apache_stop() == 0
-
-    def setup_method(self, _method):
+    @pytest.fixture(autouse=True, scope='function')
+    def _function_scope(self, env):
         pass
 
     def _get_protocol(self, output: str):
@@ -38,16 +32,16 @@ class TestAlpn:
                 return m.group(1)
         return None
 
-    def test_07_alpn_get_a(self):
+    def test_07_alpn_get_a(self, env):
         # do we see the correct json for the domain_a?
-        r = self.env.https_get(self.domain_a, "/index.json", extra_args=["-vvvvvv"])
+        r = env.https_get(env.domain_a, "/index.json", extra_args=["-vvvvvv"])
         assert r.exit_code == 0, r.stderr
         protocol = self._get_protocol(r.stderr)
         assert protocol == "http/1.1", r.stderr
 
-    def test_07_alpn_get_b(self):
+    def test_07_alpn_get_b(self, env):
         # do we see the correct json for the domain_a?
-        r = self.env.https_get(self.domain_b, "/index.json", extra_args=["-vvvvvv"])
+        r = env.https_get(env.domain_b, "/index.json", extra_args=["-vvvvvv"])
         assert r.exit_code == 0, r.stderr
         protocol = self._get_protocol(r.stderr)
         assert protocol == "h2"

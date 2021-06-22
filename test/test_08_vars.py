@@ -3,20 +3,15 @@ from datetime import timedelta
 
 import pytest
 
-from test_env import TlsTestEnv
 from test_conf import TlsTestConf
 
 
 class TestVars:
 
-    env = TlsTestEnv()
-    domain_a = None
-    domain_b = None
-
-    @classmethod
-    def setup_class(cls):
-        conf = TlsTestConf(env=cls.env)
-        conf.add_vhosts(domains=[cls.env.domain_a, cls.env.domain_b], extras={
+    @pytest.fixture(autouse=True, scope='class')
+    def _class_scope(self, env):
+        conf = TlsTestConf(env=env)
+        conf.add_vhosts(domains=[env.domain_a, env.domain_b], extras={
             'base': """
             LogLevel tls:trace4
             TLSHonorClientOrder off
@@ -24,22 +19,24 @@ class TestVars:
             """,
         })
         conf.write()
-        assert cls.env.apache_restart() == 0
+        assert env.apache_restart() == 0
+        yield
+        if env.is_live(timeout=timedelta(milliseconds=100)):
+            assert env.apache_stop() == 0
 
-    @classmethod
-    def teardown_class(cls):
-        if cls.env.is_live(timeout=timedelta(milliseconds=100)):
-            assert cls.env.apache_stop() == 0
+    @pytest.fixture(autouse=True, scope='function')
+    def _function_scope(self, env):
+        pass
 
-    def test_08_vars_root(self):
+    def test_08_vars_root(self, env):
         # in domain_b root, the StdEnvVars is switch on
-        if self.env.curl_supports_tls_1_3():
+        if env.curl_supports_tls_1_3():
             exp_proto = "TLSv1.3"
             exp_cipher = "TLS_CHACHA20_POLY1305_SHA256"
         else:
             exp_proto = "TLSv1.2"
             exp_cipher = "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256"
-        r = self.env.https_get(self.env.domain_b, "/vars.py")
+        r = env.https_get(env.domain_b, "/vars.py")
         assert r.exit_code == 0, r.stderr
         assert r.json == {
             'https': 'on',
@@ -58,17 +55,17 @@ class TestVars:
         ("SSL_CIPHER_EXPORT", "false"),
         ("SSL_CLIENT_VERIFY", "NONE"),
     ])
-    def test_08_vars_const(self, name: str, value: str):
-        r = self.env.https_get(self.env.domain_b, f"/vars.py?name={name}")
+    def test_08_vars_const(self, env, name: str, value: str):
+        r = env.https_get(env.domain_b, f"/vars.py?name={name}")
         assert r.exit_code == 0, r.stderr
-        assert r.json == { name: value }, r.stdout
+        assert r.json == {name: value}, r.stdout
 
     @pytest.mark.parametrize("name, pattern", [
         ("SSL_VERSION_INTERFACE", r'mod_tls/\d+\.\d+\.\d+'),
         ("SSL_VERSION_LIBRARY", r'crustls/\d+\.\d+\.\d+/rustls/\d+\.\d+\.\d+'),
     ])
-    def test_08_vars_match(self, name: str, pattern: str):
-        r = self.env.https_get(self.env.domain_b, f"/vars.py?name={name}")
+    def test_08_vars_match(self, env, name: str, pattern: str):
+        r = env.https_get(env.domain_b, f"/vars.py?name={name}")
         assert r.exit_code == 0, r.stderr
         assert name in r.json
         assert re.match(pattern, r.json[name]), r.json
