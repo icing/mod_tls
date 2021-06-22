@@ -199,7 +199,8 @@ class LoadTestCase:
     def format_result(self, summary: H2LoadLogSummary) -> str:
         raise NotImplemented
 
-    def setup_base_conf(self, env: TlsTestEnv, worker_count: int = 5000) -> TlsTestConf:
+    @staticmethod
+    def setup_base_conf(env: TlsTestEnv, worker_count: int = 5000) -> TlsTestConf:
         conf = TlsTestConf(env=env)
         # ylavic's formula
         process_count = int(max(10, min(100, int(worker_count / 100))))
@@ -228,16 +229,66 @@ class LoadTestCase:
                     t.update()
         assert env.apache_start() == 0
 
+    @staticmethod
+    def server_setup(env: TlsTestEnv, ssl_module: str):
+        conf = LoadTestCase.setup_base_conf(env=env)
+        extras = {
+            'base': """
+        LogLevel tls:warn
+        LogLevel ssl:warn
+        Protocols h2 http/1.1
+                """
+        }
+        if 'mod_tls' == ssl_module:
+            extras['base'] += f"""
+            ProxyPreserveHost on
+            TLSProxyCA {env.ca.cert_file}
+            <Proxy https://127.0.0.1:{env.https_port}/>
+                TLSProxyEngine on
+            </Proxy>
+            <Proxy h2://127.0.0.1:{env.https_port}/>
+                TLSProxyEngine on
+            </Proxy>
+            """
+            extras[env.domain_a] = f"""
+            Protocols h2 http/1.1
+            ProxyPass /proxy-h1/ https://127.0.0.1:{env.https_port}/
+            ProxyPass /proxy-h2/ h2://127.0.0.1:{env.https_port}/
+            TLSOptions +StdEnvVars 
+            """
+            conf.add_vhosts(domains=[env.domain_a], extras=extras)
+        elif 'mod_ssl' == ssl_module:
+            extras['base'] += f"""
+            ProxyPreserveHost on
+            SSLProxyVerify require
+            SSLProxyCACertificateFile {env.ca.cert_file}
+            <Proxy https://127.0.0.1:{env.https_port}/>
+                SSLProxyEngine on
+            </Proxy>
+            <Proxy h2://127.0.0.1:{env.https_port}/>
+                SSLProxyEngine on
+            </Proxy>
+            """
+            extras[env.domain_a] = f"""
+            Protocols h2 http/1.1
+            ProxyPass /proxy-h1/ https://127.0.0.1:{env.https_port}/
+            ProxyPass /proxy-h2/ h2://127.0.0.1:{env.https_port}/
+            TLSOptions +StdEnvVars 
+            """
+            conf.add_ssl_vhosts(domains=[env.domain_a], extras=extras)
+        else:
+            raise LoadTestException("tests for module: {0}".format(ssl_module))
+        conf.write()
+
 
 class SingleFileLoadTest(LoadTestCase):
 
-    def __init__(self, env: TlsTestEnv, server: str,
+    def __init__(self, env: TlsTestEnv, location: str,
                  clients: int, requests: int, resource_kb: int,
                  ssl_module: str = 'mod_tls', protocol: str = 'h2',
                  threads: int = None):
         self.env = env
-        self.domain_a = self.env.domain_a
-        self._server = server
+        self._location = location
         self._clients = clients
         self._requests = requests
         self._resource_kb = resource_kb
@@ -249,29 +300,19 @@ class SingleFileLoadTest(LoadTestCase):
     def from_scenario(scenario: Dict, env: TlsTestEnv) -> 'SingleFileLoadTest':
         return SingleFileLoadTest(
             env=env,
-            server=scenario['server'],
+            location=scenario['location'],
             clients=scenario['clients'], requests=scenario['requests'],
             ssl_module=scenario['module'], resource_kb=scenario['rsize'],
             protocol=scenario['protocol'] if 'protocol' in scenario else 'h2'
         )
 
     def _setup(self) -> str:
-        conf = self.setup_base_conf(env=self.env)
-        extras = {
-            'base': self._server
-        }
-        if 'mod_tls' == self._ssl_module:
-            conf.add_vhosts(domains=[self.domain_a], extras=extras)
-        elif 'mod_ssl' == self._ssl_module:
-            conf.add_ssl_vhosts(domains=[self.domain_a], extras=extras)
-        else:
-            raise LoadTestException("tests for module: {0}".format(self._ssl_module))
-        conf.write()
-        docs_a = os.path.join(self.env.server_docs_dir, self.domain_a)
+        LoadTestCase.server_setup(env=self.env, ssl_module=self._ssl_module)
+        docs_a = os.path.join(self.env.server_docs_dir, self.env.domain_a)
         fname = "{0}k.txt".format(self._resource_kb)
         mk_text_file(os.path.join(docs_a, fname), 8 * self._resource_kb)
         self.start_server(env=self.env)
-        return "/{0}".format(fname)
+        return fname
 
     def _teardown(self):
         if self.env.is_live(timeout=timedelta(milliseconds=100)):
@@ -302,7 +343,7 @@ class SingleFileLoadTest(LoadTestCase):
             else:
                 raise Exception(f"unknown protocol: {self._protocol}")
             r = self.env.run(args + [
-                'https://{0}:{1}{2}'.format(self.domain_a, self.env.https_port, path)
+                f'https://{self.env.domain_a}:{self.env.https_port}{self._location}{path}'
             ])
             if r.exit_code != 0:
                 raise LoadTestException("h2load returned {0}: {1}".format(r.exit_code, r.stderr))
@@ -331,14 +372,13 @@ class MultiFileLoadTest(LoadTestCase):
 
     SETUP_DONE = False
 
-    def __init__(self, env: TlsTestEnv, server: str,
+    def __init__(self, env: TlsTestEnv, location: str,
                  clients: int, requests: int, file_count: int,
                  file_sizes: List[int],
                  ssl_module: str = 'mod_tls', protocol: str = 'h2',
                  threads: int = None, ):
         self.env = env
-        self.domain_a = self.env.domain_a
-        self._server = server
+        self._location = location
         self._clients = clients
         self._requests = requests
         self._file_count = file_count
@@ -353,27 +393,17 @@ class MultiFileLoadTest(LoadTestCase):
     def from_scenario(scenario: Dict, env: TlsTestEnv) -> 'MultiFileLoadTest':
         return MultiFileLoadTest(
             env=env,
-            server=scenario['server'],
+            location=scenario['location'],
             clients=scenario['clients'], requests=scenario['requests'],
             file_sizes=scenario['file_sizes'], file_count=scenario['file_count'],
             ssl_module=scenario['module'], protocol=scenario['protocol']
         )
 
     def _setup(self, cls):
-        conf = self.setup_base_conf(env=self.env)
-        extras = {
-            'base': self._server
-        }
-        if 'mod_tls' == self._ssl_module:
-            conf.add_vhosts(domains=[self.domain_a], extras=extras)
-        elif 'mod_ssl' == self._ssl_module:
-            conf.add_ssl_vhosts(domains=[self.domain_a], extras=extras)
-        else:
-            raise LoadTestException("tests for module: {0}".format(self._ssl_module))
-        conf.write()
+        LoadTestCase.server_setup(env=self.env, ssl_module=self._ssl_module)
         if not cls.SETUP_DONE:
             with tqdm(desc="setup resources", total=self._file_count, unit="file", leave=False) as t:
-                docs_a = os.path.join(self.env.server_docs_dir, self.domain_a)
+                docs_a = os.path.join(self.env.server_docs_dir, self.env.domain_a)
                 uris = []
                 for i in range(self._file_count):
                     fsize = self._file_sizes[i % len(self._file_sizes)]
@@ -381,7 +411,7 @@ class MultiFileLoadTest(LoadTestCase):
                         raise Exception("file sizes?: {0} {1}".format(i, fsize))
                     fname = "{0}-{1}k.txt".format(i, fsize)
                     mk_text_file(os.path.join(docs_a, fname), 8 * fsize)
-                    uris.append(f"/{fname}")
+                    uris.append(f"{self._location}{fname}")
                     t.update()
                 with open(self._url_file, 'w') as fd:
                     fd.write("\n".join(uris))
@@ -418,8 +448,7 @@ class MultiFileLoadTest(LoadTestCase):
             else:
                 raise Exception(f"unknown protocol: {self._protocol}")
             r = self.env.run(args + [
-                '--base-uri=https://{0}:{1}/'.format(
-                    self.domain_a, self.env.https_port)
+                f'--base-uri=https://{self.env.domain_a}:{self.env.https_port}{self._location}'
             ])
             if r.exit_code != 0:
                 raise LoadTestException("h2load returned {0}: {1}".format(r.exit_code, r.stderr))
@@ -449,13 +478,12 @@ class ConnectionLoadTest(LoadTestCase):
 
     SETUP_DONE = False
 
-    def __init__(self, env: TlsTestEnv, server: str,
+    def __init__(self, env: TlsTestEnv, location: str,
                  clients: int, requests: int, duration: timedelta,
                  file_count: int, file_sizes: List[int], cooldown: timedelta,
                  ssl_module: str = 'mod_tls', protocol: str = 'h2'):
         self.env = env
-        self.domain_a = self.env.domain_a
-        self._server = server
+        self._location = location
         self._clients = clients
         self._requests = requests
         self._duration = duration
@@ -470,7 +498,7 @@ class ConnectionLoadTest(LoadTestCase):
     def from_scenario(scenario: Dict, env: TlsTestEnv) -> 'ConnectionLoadTest':
         return ConnectionLoadTest(
             env=env,
-            server=scenario['server'],
+            location=scenario['location'],
             clients=scenario['clients'], requests=scenario['requests'],
             duration=scenario['duration'], cooldown=scenario['cooldown'],
             file_sizes=scenario['file_sizes'], file_count=scenario['file_count'],
@@ -478,20 +506,10 @@ class ConnectionLoadTest(LoadTestCase):
         )
 
     def _setup(self):
-        conf = self.setup_base_conf(env=self.env)
-        extras = {
-            'base': self._server
-        }
-        if 'mod_tls' == self._ssl_module:
-            conf.add_vhosts(domains=[self.domain_a], extras=extras)
-        elif 'mod_ssl' == self._ssl_module:
-            conf.add_ssl_vhosts(domains=[self.domain_a], extras=extras)
-        else:
-            raise LoadTestException("tests for module: {0}".format(self._ssl_module))
-        conf.write()
+        LoadTestCase.server_setup(env=self.env, ssl_module=self._ssl_module)
         if not ConnectionLoadTest.SETUP_DONE:
             with tqdm(desc="setup resources", total=self._file_count, unit="file", leave=False) as t:
-                docs_a = os.path.join(self.env.server_docs_dir, self.domain_a)
+                docs_a = os.path.join(self.env.server_docs_dir, self.env.domain_a)
                 uris = []
                 for i in range(self._file_count):
                     fsize = self._file_sizes[i % len(self._file_sizes)]
@@ -499,7 +517,7 @@ class ConnectionLoadTest(LoadTestCase):
                         raise Exception("file sizes?: {0} {1}".format(i, fsize))
                     fname = "{0}-{1}k.txt".format(i, fsize)
                     mk_text_file(os.path.join(docs_a, fname), 8 * fsize)
-                    uris.append(f"/{fname}")
+                    uris.append(f"{self._location}{fname}")
                     t.update()
                 with open(self._url_file, 'w') as fd:
                     fd.write("\n".join(uris))
@@ -536,8 +554,7 @@ class ConnectionLoadTest(LoadTestCase):
             else:
                 raise Exception(f"unknown protocol: {self._protocol}")
             args += [
-                '--base-uri=https://{0}:{1}/'.format(
-                    self.domain_a, self.env.https_port)
+                f'--base-uri=https://{self.env.domain_a}:{self.env.https_port}{self._location}'
             ]
             end = datetime.now() + self._duration
             r = None
@@ -617,16 +634,10 @@ class LoadTest:
         try:
             log.debug("starting tests")
 
-            server_config = """
-        LogLevel tls:warn
-        LogLevel ssl:warn
-        Protocols h2 http/1.1
-                """
-
             scenario_sf = {
                 "title": "sizes and throughput (MB/s)",
                 "class": SingleFileLoadTest,
-                "server": server_config,
+                "location": "/",
                 "clients": 0,
                 "row0_title": "module protocol",
                 "row_title": "{module} {protocol}",
@@ -642,7 +653,7 @@ class LoadTest:
             scenario_mf = {
                 "title": "connections and throughput (MB/s)",
                 "class": MultiFileLoadTest,
-                "server": server_config,
+                "location": "/",
                 "file_count": 1024,
                 "file_sizes": [1, 2, 3, 4, 5, 10, 20, 30, 40, 50, 100, 10000],
                 "requests": 10000,
@@ -660,7 +671,7 @@ class LoadTest:
             scenario_conn = {
                 "title": "connections",
                 "class": ConnectionLoadTest,
-                "server": server_config,
+                "location": "/",
                 "duration": timedelta(seconds=10),
                 "cooldown": timedelta(seconds=5),
                 "file_count": 12,
@@ -684,44 +695,72 @@ class LoadTest:
                     "title": "1 conn, 1k-10k requests, *sizes, throughput (MB/s)",
                     "clients": 1,
                     "columns": [
-                        {"requests": 1000, "rsize": 10 * 1024},
-                        {"requests": 3000, "rsize": 1024},
-                        {"requests": 6000, "rsize": 100},
                         {"requests": 10000, "rsize": 10},
+                        {"requests": 6000, "rsize": 100},
+                        {"requests": 3000, "rsize": 1024},
+                        {"requests": 1000, "rsize": 10 * 1024},
                     ],
                 }),
                 "10c-throughput": cls.scenario_with(scenario_sf, {
                     "title": "10 conn, 5k-50k requests, *sizes, throughput (MB/s)",
                     "clients": 10,
                     "columns": [
-                        {"requests": 5000, "rsize": 10 * 1024},
-                        {"requests": 10000, "rsize": 1024},
-                        {"requests": 25000, "rsize": 100},
                         {"requests": 50000, "rsize": 10},
+                        {"requests": 25000, "rsize": 100},
+                        {"requests": 10000, "rsize": 1024},
+                        {"requests": 5000, "rsize": 10 * 1024},
                     ],
                 }),
                 "20c-throughput": cls.scenario_with(scenario_sf, {
                     "title": "20 conn, 5k-50k requests, *sizes, throughput (MB/s)",
                     "clients": 20,
                     "columns": [
-                        {"requests": 5000, "rsize": 10 * 1024},
-                        {"requests": 10000, "rsize": 1024},
-                        {"requests": 25000, "rsize": 100},
                         {"requests": 50000, "rsize": 10},
+                        {"requests": 25000, "rsize": 100},
+                        {"requests": 10000, "rsize": 1024},
+                        {"requests": 5000, "rsize": 10 * 1024},
                     ],
                 }),
                 "50c-throughput": cls.scenario_with(scenario_sf, {
                     "title": "50 conn, 10k-100k requests, *sizes, throughput (MB/s)",
                     "clients": 50,
                     "columns": [
-                        {"requests": 5000, "rsize": 10 * 1024},
-                        {"requests": 10000, "rsize": 1024},
-                        {"requests": 50000, "rsize": 100},
                         {"requests": 100000, "rsize": 10},
+                        {"requests": 50000, "rsize": 100},
+                        {"requests": 10000, "rsize": 1024},
+                        {"requests": 5000, "rsize": 10 * 1024},
                     ],
                 }),
                 "1k-files": cls.scenario_with(scenario_mf, {
                     "title": "1k files, 1k-10MB, *conn, 10k req, (req/s)",
+                    "clients": 1,
+                    "columns": [
+                        {"clients": 1},
+                        {"clients": 2},
+                        {"clients": 4},
+                        {"clients": 8},
+                        {"clients": 16},
+                        {"clients": 32},
+                        {"clients": 64},
+                    ],
+                }),
+                "1k-files-proxy-h1": cls.scenario_with(scenario_mf, {
+                    "location": "/proxy-h1/",
+                    "title": "1k files, h1 proxy, 1k-10MB, *conn, 10k req, (req/s)",
+                    "clients": 1,
+                    "columns": [
+                        {"clients": 1},
+                        {"clients": 2},
+                        {"clients": 4},
+                        {"clients": 8},
+                        {"clients": 16},
+                        {"clients": 32},
+                        {"clients": 64},
+                    ],
+                }),
+                "1k-files-proxy-h2": cls.scenario_with(scenario_mf, {
+                    "location": "/proxy-h2/",
+                    "title": "1k files, h2 proxy, 1k-10MB, *conn, 10k req, (req/s)",
                     "clients": 1,
                     "columns": [
                         {"clients": 1},
