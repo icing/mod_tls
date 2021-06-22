@@ -1,3 +1,5 @@
+ * Fixed a missing flush at the end of a connection that makes sure the connection close
+   is clean and immediate and that short linger times apply.
  * Added `TLSProxyProtocl` to set the minimum TLS version to use in proxy connections.
  * Renamed `TLSProtocls` to `TLSProtocol` to less confusing when migrating from mod_ssl.
  * All TLS filters trigger initialization and handshake processing on demand

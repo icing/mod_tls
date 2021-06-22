@@ -434,7 +434,7 @@ class MultiFileLoadTest(LoadTestCase):
     def run(self) -> H2LoadLogSummary:
         path = self._setup(self.__class__)
         try:
-            # self.run_test(mode="warmup", path=path)
+            self.run_test(mode="warmup", path=path)
             return self.run_test(mode="measure", path=path)
         finally:
             self._teardown()
@@ -668,7 +668,7 @@ class LoadTest:
                 "requests": 1,
                 "clients": 1,
                 "row0_title": "module protocol",
-                "row_title": "{module} {http}",
+                "row_title": "{module} {protocol}",
                 "rows": [
                     {"module": "mod_ssl", "protocol": 'h1'},
                     {"module": "mod_tls", "protocol": 'h1'},

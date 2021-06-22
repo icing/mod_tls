@@ -746,7 +746,7 @@ static apr_status_t fout_append_plain(tls_filter_ctx_t *fctx, apr_bucket *b)
 
 maybe_flush:
     if (flush) {
-        rv = fout_pass_all_to_net(fctx, 0);
+        rv = fout_pass_all_to_net(fctx, 1);
         if (APR_SUCCESS != rv) goto cleanup;
     }
 
