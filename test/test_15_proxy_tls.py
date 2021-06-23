@@ -19,6 +19,9 @@ class TestProxyTLS:
             <Proxy https://127.0.0.1:{env.https_port}/>
                 TLSProxyEngine on
                 TLSProxyCA {env.ca.cert_file}
+                TLSProxyProtocol TLSv1.2+
+                TLSProxyCiphersPrefer TLS13_AES_256_GCM_SHA384
+                TLSProxyCiphersSuppress TLS13_AES_128_GCM_SHA256
                 ProxyPreserveHost on
             </Proxy>
             <Proxy https://localhost:{env.https_port}/>
@@ -27,6 +30,7 @@ class TestProxyTLS:
             <Proxy h2://127.0.0.1:{env.https_port}/>
                 TLSProxyEngine on
                 TLSProxyCA {env.ca.cert_file}
+                TLSProxyCiphersSuppress TLS_AES_256_GCM_SHA384
                 ProxyPreserveHost on
             </Proxy>
             """,
@@ -61,23 +65,25 @@ class TestProxyTLS:
     @pytest.mark.parametrize("name, value", [
         ("SERVER_NAME", "b.mod-tls.test"),
         ("SSL_PROTOCOL", "TLSv1.3"),
+        ("SSL_CIPHER", "TLS_AES_256_GCM_SHA384"),
         ("SSL_SESSION_RESUMED", "Initial"),
         ("SSL_SECURE_RENEG", "false"),
         ("SSL_COMPRESS_METHOD", "NULL"),
         ("SSL_CIPHER_EXPORT", "false"),
         ("SSL_CLIENT_VERIFY", "NONE"),
     ])
-    def test_15_proxy_tls_vars_const(self, env, name: str, value: str):
+    def test_15_proxy_tls_h1_vars(self, env, name: str, value: str):
         r = env.https_get(env.domain_b, f"/proxy-tls/vars.py?name={name}")
         assert r.exit_code == 0, r.stderr
         assert r.json == {name: value}, r.stdout
 
-    @pytest.mark.parametrize("name, pattern", [
-        ("SSL_VERSION_INTERFACE", r'mod_tls/\d+\.\d+\.\d+'),
-        ("SSL_VERSION_LIBRARY", r'crustls/\d+\.\d+\.\d+/rustls/\d+\.\d+\.\d+'),
+    @pytest.mark.parametrize("name, value", [
+        ("SERVER_NAME", "b.mod-tls.test"),
+        ("SSL_PROTOCOL", "TLSv1.3"),
+        ("SSL_CIPHER", "TLS_CHACHA20_POLY1305_SHA256"),
+        ("SSL_SESSION_RESUMED", "Initial"),
     ])
-    def test_15_proxy_tls_vars_match(self, env, name: str, pattern: str):
-        r = env.https_get(env.domain_b, f"/proxy-tls/vars.py?name={name}")
+    def test_15_proxy_tls_h2_vars(self, env, name: str, value: str):
+        r = env.https_get(env.domain_b, f"/proxy-h2-tls/vars.py?name={name}")
         assert r.exit_code == 0, r.stderr
-        assert name in r.json
-        assert re.match(pattern, r.json[name]), r.json
+        assert r.json == {name: value}, r.stdout

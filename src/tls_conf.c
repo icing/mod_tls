@@ -136,6 +136,8 @@ void *tls_conf_create_dir(apr_pool_t *pool, char *dir)
     conf->std_env_vars = TLS_FLAG_UNSET;
     conf->proxy_enabled = TLS_FLAG_UNSET;
     conf->proxy_protocol_min = TLS_FLAG_UNSET;
+    conf->proxy_pref_ciphers = apr_array_make(pool, 3, sizeof(apr_uint16_t));;
+    conf->proxy_supp_ciphers = apr_array_make(pool, 3, sizeof(apr_uint16_t));;
     return conf;
 }
 
@@ -156,6 +158,10 @@ static void dir_assign_merge(
     local.proxy_enabled = MERGE_INT(base, add, proxy_enabled);
     local.proxy_ca = add->proxy_ca? add->proxy_ca : base->proxy_ca;
     local.proxy_protocol_min = MERGE_INT(base, add, proxy_protocol_min);
+    local.proxy_pref_ciphers = add->proxy_pref_ciphers->nelts?
+        add->proxy_pref_ciphers : base->proxy_pref_ciphers;
+    local.proxy_supp_ciphers = add->proxy_supp_ciphers->nelts?
+        add->proxy_supp_ciphers : base->proxy_supp_ciphers;
     if (local.proxy_enabled == TLS_FLAG_TRUE) {
         if (add->proxy_config) {
             local.proxy_config = same_proxy_settings(&local, add)? add->proxy_config : NULL;
@@ -210,6 +216,8 @@ tls_conf_proxy_t *tls_conf_proxy_make(
     pc->defined_in = s;
     pc->proxy_ca = dc->proxy_ca;
     pc->proxy_protocol_min = dc->proxy_protocol_min;
+    pc->proxy_pref_ciphers = dc->proxy_pref_ciphers;
+    pc->proxy_supp_ciphers = dc->proxy_supp_ciphers;
     return pc;
 }
 
@@ -386,24 +394,16 @@ cleanup:
     return err;
 }
 
-static const char *tls_conf_set_preferred_ciphers(
-    cmd_parms *cmd, void *dc, int argc, char *const argv[])
+static const char *parse_ciphers(
+    cmd_parms *cmd,
+    tls_conf_global_t *gc,
+    const char *nop_name,
+    int argc, char *const argv[],
+    apr_array_header_t *ciphers)
 {
-    tls_conf_server_t *sc = tls_conf_server_get(cmd->server);
-    const char *err = NULL;
-    apr_uint16_t cipher;
-
-    (void)dc;
-    if (cmd->path) {
-        err = "ciphers cannot be configured inside a directory context";
-        goto cleanup;
-    }
-    if (!argc) {
-        err = "specify the TLS ciphers to prefer or 'default' for the rustls default ordering.";
-        goto cleanup;
-    }
-    apr_array_clear(sc->tls_pref_ciphers);
-    if (argc > 1 || apr_strnatcasecmp("default", argv[0])) {
+    apr_array_clear(ciphers);
+    if (argc > 1 || apr_strnatcasecmp(nop_name, argv[0])) {
+        apr_uint16_t cipher;
         int i;
 
         for (i = 0; i < argc; ++i) {
@@ -412,17 +412,30 @@ static const char *tls_conf_set_preferred_ciphers(
 
             name = apr_strtok(apr_pstrdup(cmd->pool, value), ":", &last);
             while (name) {
-                if (tls_proto_get_cipher_by_name(sc->global->proto,
-                    name, &cipher) != APR_SUCCESS) {
-                    err = apr_pstrcat(cmd->pool, cmd->cmd->name,
+                if (tls_proto_get_cipher_by_name(gc->proto, name, &cipher) != APR_SUCCESS) {
+                    return apr_pstrcat(cmd->pool, cmd->cmd->name,
                             ": cipher not recognized '", name, "'", NULL);
-                    goto cleanup;
                 }
-                APR_ARRAY_PUSH(sc->tls_pref_ciphers, apr_uint16_t) = cipher;
+                APR_ARRAY_PUSH(ciphers, apr_uint16_t) = cipher;
                 name = apr_strtok(NULL, ":", &last);
             }
         }
     }
+    return NULL;
+}
+
+static const char *tls_conf_set_preferred_ciphers(
+    cmd_parms *cmd, void *dc, int argc, char *const argv[])
+{
+    tls_conf_server_t *sc = tls_conf_server_get(cmd->server);
+    const char *err = NULL;
+
+    (void)dc;
+    if (!argc) {
+        err = "specify the TLS ciphers to prefer or 'default' for the rustls default ordering.";
+        goto cleanup;
+    }
+    err = parse_ciphers(cmd, sc->global, "default", argc, argv, sc->tls_pref_ciphers);
 cleanup:
     return err;
 }
@@ -432,38 +445,13 @@ static const char *tls_conf_set_suppressed_ciphers(
 {
     tls_conf_server_t *sc = tls_conf_server_get(cmd->server);
     const char *err = NULL;
-    apr_uint16_t cipher;
 
     (void)dc;
-    if (cmd->path) {
-        err = "ciphers cannot be configured inside a directory context";
-        goto cleanup;
-    }
     if (!argc) {
         err = "specify the TLS ciphers to never use or 'none'.";
         goto cleanup;
     }
-    apr_array_clear(sc->tls_supp_ciphers);
-    if (argc > 1 || apr_strnatcasecmp("default", argv[0])) {
-        int i;
-
-        for (i = 0; i < argc; ++i) {
-            char *name, *last = NULL;
-            const char *value = argv[i];
-
-            name = apr_strtok(apr_pstrdup(cmd->pool, value), ":", &last);
-            while (name) {
-                if (tls_proto_get_cipher_by_name(sc->global->proto,
-                    name, &cipher) != APR_SUCCESS) {
-                    err = apr_pstrcat(cmd->pool, cmd->cmd->name,
-                            ": cipher not recognized '", name, "'", NULL);
-                    goto cleanup;
-                }
-                *(apr_uint16_t*)apr_array_push(sc->tls_supp_ciphers) = cipher;
-                name = apr_strtok(NULL, ":", &last);
-            }
-        }
-    }
+    err = parse_ciphers(cmd, sc->global, "none", argc, argv, sc->tls_supp_ciphers);
 cleanup:
     return err;
 }
@@ -614,6 +602,38 @@ static const char *tls_conf_set_proxy_protocol(
     return get_min_protocol(cmd, v, &dc->proxy_protocol_min);
 }
 
+static const char *tls_conf_set_proxy_preferred_ciphers(
+    cmd_parms *cmd, void *dir_conf, int argc, char *const argv[])
+{
+    tls_conf_server_t *sc = tls_conf_server_get(cmd->server);
+    tls_conf_dir_t *dc = dir_conf;
+    const char *err = NULL;
+
+    if (!argc) {
+        err = "specify the proxy TLS ciphers to prefer or 'default' for the rustls default ordering.";
+        goto cleanup;
+    }
+    err = parse_ciphers(cmd, sc->global, "default", argc, argv, dc->proxy_pref_ciphers);
+cleanup:
+    return err;
+}
+
+static const char *tls_conf_set_proxy_suppressed_ciphers(
+    cmd_parms *cmd, void *dir_conf, int argc, char *const argv[])
+{
+    tls_conf_server_t *sc = tls_conf_server_get(cmd->server);
+    tls_conf_dir_t *dc = dir_conf;
+    const char *err = NULL;
+
+    if (!argc) {
+        err = "specify the proxy TLS ciphers to never use or 'none'.";
+        goto cleanup;
+    }
+    err = parse_ciphers(cmd, sc->global, "none", argc, argv, dc->proxy_supp_ciphers);
+cleanup:
+    return err;
+}
+
 #if TLS_CLIENT_CERTS
 
 static const char *tls_conf_set_client_ca(
@@ -687,8 +707,12 @@ const command_rec tls_conf_cmds[] = {
         "Enable TLS encryption of outgoing connections in this location/server."),
     AP_INIT_TAKE1("TLSProxyCA", tls_conf_set_proxy_ca, NULL, RSRC_CONF|PROXY_CONF,
         "Set the trust anchors for certificates from proxied backend servers from a PEM file."),
-    AP_INIT_TAKE1("TLSProxyProtocol", tls_conf_set_proxy_protocol, NULL, RSRC_CONF,
+    AP_INIT_TAKE1("TLSProxyProtocol", tls_conf_set_proxy_protocol, NULL, RSRC_CONF|PROXY_CONF,
         "Set the minimum TLS protocol version to use for proxy connections."),
+    AP_INIT_TAKE_ARGV("TLSProxyCiphersPrefer", tls_conf_set_proxy_preferred_ciphers, NULL, RSRC_CONF|PROXY_CONF,
+        "Set the TLS ciphers to prefer when negotiating a proxy connection."),
+    AP_INIT_TAKE_ARGV("TLSProxyCiphersSuppress", tls_conf_set_proxy_suppressed_ciphers, NULL, RSRC_CONF|PROXY_CONF,
+        "Set the TLS ciphers to never use when negotiating a proxy connection."),
 #if TLS_CLIENT_CERTS
     AP_INIT_TAKE1("TLSClientCA", tls_conf_set_client_ca, NULL, RSRC_CONF,
         "Set the trust anchors for client certificates from a PEM file."),

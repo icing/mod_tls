@@ -105,6 +105,8 @@ typedef struct {
     server_rec *defined_in;           /* the server/host defining this dir_conf */
     const char *proxy_ca;             /* PEM file with trust anchors for proxied remote server certs */
     int proxy_protocol_min;            /* the minimum TLS protocol version to use for proxy connections */
+    apr_array_header_t *proxy_pref_ciphers;  /* List of apr_uint16_t cipher ids to prefer */
+    apr_array_header_t *proxy_supp_ciphers;  /* List of apr_uint16_t cipher ids to suppress */
     const rustls_client_config *rustls_config;
 } tls_conf_proxy_t;
 
@@ -114,6 +116,8 @@ typedef struct {
     int proxy_enabled;                /* TLS_FLAG_TRUE if mod_tls is active on outgoing connections */
     const char *proxy_ca;             /* PEM file with trust anchors for proxied remote server certs */
     int proxy_protocol_min;            /* the minimum TLS protocol version to use for proxy connections */
+    apr_array_header_t *proxy_pref_ciphers;  /* List of apr_uint16_t cipher ids to prefer */
+    apr_array_header_t *proxy_supp_ciphers;  /* List of apr_uint16_t cipher ids to suppress */
     tls_conf_proxy_t *proxy_config;
 } tls_conf_dir_t;
 
