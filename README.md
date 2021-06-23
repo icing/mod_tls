@@ -12,29 +12,22 @@ This project is sponsored by the [ISRG](https://www.abetterinternet.org).
 
 In development/beta test. See [beta testing](#beta-testing) for instructions how to use the recent release.
 
+You need Apache httpd version 2.4.48 or newer to run this module. Also you need [crustls](https://github.com/abetterinternet/crustls), either the `main` branch or a version *greater than* 0.6.1.
 
-The module's `master` branch follows the `main` branch of [crustls](https://github.com/abetterinternet/crustls),
-the `C` binding for the `rustls` crate and the `trunk` version of the Apache httpd server.
-
-Apache `trunk` has received patches that allow two (or more) SSL providing modules
-to be loaded and active on the same server. This required an extension of the core
-API which has become part of the 2.4.48 release..
-
-`mod_tls` supports:
+`mod_tls` gives you:
  
- * TLS for incoming connections on a address+port. You can use `mod_ssl` on another port at the same time.
- * certificates for the server and/or a virtual host. You may specify more than one certificate for a host and the first one matching client capabilities will be chosen.
- * protocol versions. You may specify the minimum version to use.
- * cipher preferences. You may specified the ciphers that should be considered first during negotiation. This does not disable any other ciphers.
- * cipher suppression. You may specify ciphers that are never used. All unmentioned ciphers remain active.
- * cipher client order disregard. By default, the order of client supplied ciphers is honored.
- * option to forward certain variables, such as `SSL_CIPHER` and `SSL_PROTOCOL` to request processing.
- * interworking with Apache's module `mod_md` for Let's Encrypt (ACME) certificates and OCSP stapling.
-
+ * a memory safe TLS via [rustls](https://docs.rs/rustls/0.19.1/rustls/).
+ * TLS v1.2 and TLS v1.3, features as supported in [rustls](https://docs.rs/rustls/0.19.1/rustls/).
+ * Configuration similar to Apache's own `mod_ssl`.
+ * Similar performance as `mod_ssl`, better in some areas.
+ * Frontend TLS for your clients
+ * Backend TLS for `mod_proxy`
+ * Frontend OCSP Stapling via `mod_md`
+ 
 `mod_tls` currently does **not** support:
  
-  * backend connections (via `mod_proxy`)
   * client certificates
+
 
 ## Platforms
 

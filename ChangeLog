@@ -1,3 +1,7 @@
+ * Fixed test configuration to accomodate for installations on debian with static modules
+   and directories used.
+ * Updated docker image "debian-test" to use the apache2 package instead of a local
+   compiled httpd.
  * Fixed a missing flush at the end of a connection that makes sure the connection close
    is clean and immediate and that short linger times apply.
  * Added `TLSProxyCiphersPrefer` and `TLSProxyCiphersSuppress` for proxy connections.

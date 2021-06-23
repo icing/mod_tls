@@ -114,9 +114,9 @@ class TlsTestEnv:
         self._server_error_log = os.path.join(self._server_dir, "logs", "error_log")
         self._mpm_type = os.environ['MPM'] if 'MPM' in os.environ else 'event'
 
-        self._apachectl = os.path.join(self._prefix, 'bin', 'apachectl')
         self._apxs = os.path.join(self._prefix, 'bin', 'apxs')
-        self._httpd = os.path.join(self._prefix, 'bin', 'httpd')
+        self._apachectl = os.path.join(self.get_apxs_var('SBINDIR'), 'apachectl')
+        self._libexec_dir = self.get_apxs_var('LIBEXECDIR')
         self._http_port = int(config.get('global', 'http_port'))
         self._https_port = int(config.get('global', 'https_port'))
 
@@ -161,6 +161,10 @@ class TlsTestEnv:
     @property
     def server_dir(self) -> str:
         return self._server_dir
+
+    @property
+    def libexec_dir(self) -> str:
+        return self._libexec_dir
 
     @property
     def server_conf_dir(self) -> str:
@@ -240,22 +244,22 @@ class TlsTestEnv:
         log.warning(f"Server still responding after {timeout} sec".format(timeout=timeout))
         return False
 
-    def get_httpd_version(self):
-        p = subprocess.run([self._apxs, "-q", "HTTPD_VERSION"], capture_output=True, text=True)
+    def get_apxs_var(self, name: str) -> str:
+        p = subprocess.run([self._apxs, "-q", name], capture_output=True, text=True)
         if p.returncode != 0:
-            return "unknown"
+            return None
         return p.stdout.strip()
+
+    def get_httpd_version(self) -> str:
+        return self.get_apxs_var("HTTPD_VERSION")
 
     # --------- control apache ---------
 
-    def httpd(self):
-        args = [self._httpd, "-d", self._server_dir]
-        p = subprocess.run(args, capture_output=True, text=True)
-        rv = p.returncode
-        return rv
-
     def apachectl(self, cmd, check_live=True):
-        args = [self._apachectl, "-d", self._server_dir, "-k", cmd]
+        args = [self._apachectl,
+                "-d", self._server_dir,
+                "-f", os.path.join(self._server_dir, 'conf/httpd.conf'),
+                "-k", cmd]
         p = subprocess.run(args, capture_output=True, text=True)
         rv = p.returncode
         if rv == 0:
@@ -263,12 +267,12 @@ class TlsTestEnv:
             if check_live:
                 rv = 0 if self.is_live(timeout=timeout) else -1
                 if rv != 0:
-                    log.warning("apache did not start: {0}".format(p.stderr))
+                    log.warning(f"apache did not start: {p.stderr}")
             else:
                 rv = 0 if self.is_dead(timeout=timeout) else -1
-                log.debug("waited for a apache.is_dead, rv=%d" % rv)
+                log.debug(f"waited for a apache.is_dead, rv={rv}")
         else:
-            log.warning("exit %d, stderr: %s" % (rv, p.stderr))
+            log.warning(f"exit {rv}, stdout: {p.stdout} stderr: {p.stderr}")
         return rv
 
     def apache_restart(self):

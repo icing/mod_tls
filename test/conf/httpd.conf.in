@@ -5,6 +5,7 @@ LogFormat "%h %l %u %t \"%r\" %>s %O \"%{Referer}i\" \"%{User-Agent}i\" %k" comb
 LogFormat "%h %l %u %t \"%r\" %>s %b" common
 CustomLog "logs/access_log" combined
 
+TypesConfig "@GEN_DIR@/apache/conf/mime.types"
 
 ServerName localhost
 ServerRoot "@GEN_DIR@/apache"

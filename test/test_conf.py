@@ -11,8 +11,8 @@ class TlsTestConf:
         self.name = name
         self._mpm_type = mpm_type if mpm_type is not None else env.mpm_type
         self._content = [
-            "LoadModule mpm_{mpm_type}_module  \"{prefix}/modules/mod_mpm_{mpm_type}.so\"".format(
-                prefix=self.env.prefix,
+            "LoadModule mpm_{mpm_type}_module  \"{libexecdir}/mod_mpm_{mpm_type}.so\"".format(
+                libexecdir=self.env.libexec_dir,
                 mpm_type=self._mpm_type
             ),
         ]
@@ -82,7 +82,7 @@ LogLevel ssl:trace4
     def add_md_vhosts(self, domains: List[str], extras: Dict[str, str] = None):
         extras = extras if extras is not None else {}
         self.add(f"""
-LoadModule md_module       {self.env.prefix}/modules/mod_md.so
+LoadModule md_module       {self.env.libexec_dir}/mod_md.so
 
 TLSEngine {self.env.https_port}
 LogLevel md:debug
@@ -112,7 +112,7 @@ LogLevel tls:trace8
 
     def add_md_base(self, domain: str):
         self.add(f"""
-    LoadModule md_module       {self.env.prefix}/modules/mod_md.so
+    LoadModule md_module       {self.env.libexec_dir}/mod_md.so
 
     TLSEngine {self.env.https_port}
     LogLevel md:debug
