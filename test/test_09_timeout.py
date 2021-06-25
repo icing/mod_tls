@@ -1,38 +1,34 @@
-import json
 import socket
-import sys
-import time
 from datetime import timedelta
 
-from test_env import TlsTestEnv
+import pytest
+
 from test_conf import TlsTestConf
 
 
 class TestTimeout:
 
-    env = TlsTestEnv()
-    domain_a = None
-    domain_b = None
-
-    @classmethod
-    def setup_class(cls):
-        conf = TlsTestConf(env=cls.env)
-        conf.add_vhosts(domains=[cls.env.domain_a, cls.env.domain_b], extras={
+    @pytest.fixture(autouse=True, scope='class')
+    def _class_scope(self, env):
+        conf = TlsTestConf(env=env)
+        conf.add_vhosts(domains=[env.domain_a, env.domain_b], extras={
             'base': """
             RequestReadTimeout handshake=1
             """,
         })
         conf.write()
-        assert cls.env.apache_restart() == 0
+        assert env.apache_restart() == 0
+        yield
+        if env.is_live(timeout=timedelta(milliseconds=100)):
+            assert env.apache_stop() == 0
 
-    @classmethod
-    def teardown_class(cls):
-        if cls.env.is_live(timeout=timedelta(milliseconds=100)):
-            assert cls.env.apache_stop() == 0
+    @pytest.fixture(autouse=True, scope='function')
+    def _function_scope(self, env):
+        pass
 
-    def test_09_timeout_handshake(self):
+    def test_09_timeout_handshake(self, env):
         # in domain_b root, the StdEnvVars is switch on
-        s = socket.create_connection(('localhost', self.env.https_port))
+        s = socket.create_connection(('localhost', env.https_port))
         s.send(b'1234')
         s.settimeout(0.0)
         try:

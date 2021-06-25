@@ -1,5 +1,6 @@
 import os
 import re
+import sys
 from datetime import timedelta, datetime
 from typing import List, Any, Optional
 
@@ -7,7 +8,9 @@ from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
-from cryptography.hazmat.primitives.serialization import Encoding, PrivateFormat, NoEncryption
+from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePrivateKey
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
+from cryptography.hazmat.primitives.serialization import Encoding, PrivateFormat, NoEncryption, load_pem_private_key
 from cryptography.x509 import ExtendedKeyUsageOID, NameOID
 
 
@@ -53,7 +56,7 @@ class CertificateSpec:
                  valid_to: timedelta = timedelta(days=89),
                  client: bool = False,
                  sub_specs: List['CertificateSpec'] = None):
-        self.name = name
+        self._name = name
         self.domains = domains
         self.client = client
         self.email = email
@@ -63,17 +66,21 @@ class CertificateSpec:
         self.valid_to = valid_to
         self.sub_specs = sub_specs
 
+    @property
+    def name(self) -> str:
+        if self._name:
+            return self._name
+        elif self.domains:
+            return self.domains[0]
+        return None
+
 
 class Credentials:
 
-    def __init__(self, name: str, subject: x509.Name, cert: Any, pkey: Any, key_type: str,
-                 issuer: 'Credentials' = None):
+    def __init__(self, name: str, cert: Any, pkey: Any):
         self._name = name
-        self._subject = subject
         self._cert = cert
         self._pkey = pkey
-        self._key_type = key_type
-        self._issuer = issuer
         self._cert_file = None
         self._pkey_file = None
         self._store = None
@@ -84,11 +91,16 @@ class Credentials:
 
     @property
     def subject(self) -> x509.Name:
-        return self._subject
+        return self._cert.subject
 
     @property
     def key_type(self):
-        return self._key_type
+        if isinstance(self._pkey, RSAPrivateKey):
+            return f"rsa{self._pkey.key_size}"
+        elif isinstance(self._pkey, EllipticCurvePrivateKey):
+            return f"{self._pkey.curve.name}"
+        else:
+            raise Exception(f"unknown key type: {self._pkey}")
 
     @property
     def private_key(self) -> Any:
@@ -106,7 +118,7 @@ class Credentials:
     def pkey_pem(self) -> bytes:
         return self._pkey.private_bytes(
             Encoding.PEM,
-            PrivateFormat.TraditionalOpenSSL if self._key_type.startswith('rsa') else PrivateFormat.PKCS8,
+            PrivateFormat.TraditionalOpenSSL if self.key_type.startswith('rsa') else PrivateFormat.PKCS8,
             NoEncryption())
 
     def set_store(self, store: 'CertStore'):
@@ -136,20 +148,23 @@ class Credentials:
         return [self.issue_cert(spec=spec, chain=chain) for spec in specs]
 
     def issue_cert(self, spec: CertificateSpec, chain: List['Credentials'] = None) -> 'Credentials':
-        cert = TlsTestCA.create_credentials(spec=spec, issuer=self,
-                                            key_type=spec.key_type if spec.key_type else self.key_type,
-                                            valid_from=spec.valid_from, valid_to=spec.valid_to,
-                                            )
-        if self._store:
-            self._store.save(cert, single_file=spec.single_file)
+        key_type = spec.key_type if spec.key_type else self.key_type
+        creds = self._store.load_credentials(name=spec.name, key_type=key_type, single_file=spec.single_file) \
+            if self._store else None
+        if creds is None:
+            creds = TlsTestCA.create_credentials(spec=spec, issuer=self, key_type=key_type,
+                                                 valid_from=spec.valid_from, valid_to=spec.valid_to)
+            if self._store:
+                self._store.save(creds, single_file=spec.single_file)
+
         if spec.sub_specs:
             if self._store:
-                sub_store = CertStore(fpath=os.path.join(self._store.path, cert.name))
-                cert.set_store(sub_store)
+                sub_store = CertStore(fpath=os.path.join(self._store.path, creds.name))
+                creds.set_store(sub_store)
             subchain = chain.copy() if chain else []
             subchain.append(self)
-            cert.issue_certs(spec.sub_specs, chain=subchain)
-        return cert
+            creds.issue_certs(spec.sub_specs, chain=subchain)
+        return creds
 
 
 class CertStore:
@@ -168,7 +183,8 @@ class CertStore:
              chain: List[Credentials] = None,
              single_file: bool = False) -> None:
         name = name if name is not None else creds.name
-        cert_file, pkey_file = self._fpaths_for(name, creds)
+        cert_file = self.get_cert_file(name=name, key_type=creds.key_type)
+        pkey_file = self.get_pkey_file(name=name, key_type=creds.key_type)
         if single_file:
             pkey_file = None
         with open(cert_file, "wb") as fd:
@@ -182,6 +198,9 @@ class CertStore:
             with open(pkey_file, "wb") as fd:
                 fd.write(creds.pkey_pem)
         creds.set_files(cert_file, pkey_file)
+        self._add_credentials(name, creds)
+
+    def _add_credentials(self, name: str, creds: Credentials):
         if name not in self._creds_by_name:
             self._creds_by_name[name] = []
         self._creds_by_name[name].append(creds)
@@ -189,23 +208,47 @@ class CertStore:
     def get_credentials_for_name(self, name) -> List[Credentials]:
         return self._creds_by_name[name] if name in self._creds_by_name else []
 
-    def _fpaths_for(self, name: str, creds: Credentials):
-        key_infix = ".{0}".format(creds.key_type) if creds.key_type is not None else ""
-        return os.path.join(self._store_dir, '{dname}{key_infix}.cert.pem'.format(
-            dname=name, key_infix=key_infix)),\
-            os.path.join(self._store_dir, '{dname}{key_infix}.pkey.pem'.format(
-                   dname=name, key_infix=key_infix))
+    def get_cert_file(self, name: str, key_type=None) -> str:
+        key_infix = ".{0}".format(key_type) if key_type is not None else ""
+        return os.path.join(self._store_dir, f'{name}{key_infix}.cert.pem')
+
+    def get_pkey_file(self, name: str, key_type=None) -> str:
+        key_infix = ".{0}".format(key_type) if key_type is not None else ""
+        return os.path.join(self._store_dir, f'{name}{key_infix}.pkey.pem')
+
+    def load_pem_cert(self, fpath: str) -> x509.Certificate:
+        with open(fpath) as fd:
+            return x509.load_pem_x509_certificate("".join(fd.readlines()).encode())
+
+    def load_pem_pkey(self, fpath: str):
+        with open(fpath) as fd:
+            return load_pem_private_key("".join(fd.readlines()).encode(), password=None)
+
+    def load_credentials(self, name: str, key_type=None, single_file: bool = False):
+        cert_file = self.get_cert_file(name=name, key_type=key_type)
+        pkey_file = cert_file if single_file else self.get_pkey_file(name=name, key_type=key_type)
+        if os.path.isfile(cert_file) and os.path.isfile(pkey_file):
+            cert = self.load_pem_cert(cert_file)
+            pkey = self.load_pem_pkey(pkey_file)
+            creds = Credentials(name=name, cert=cert, pkey=pkey)
+            creds.set_store(self)
+            creds.set_files(cert_file, pkey_file)
+            self._add_credentials(name, creds)
+            return creds
+        return None
 
 
 class TlsTestCA:
 
     @classmethod
-    def create(cls, name: str, store_dir: str, key_type: str = "rsa2048") -> Credentials:
+    def create_root(cls, name: str, store_dir: str, key_type: str = "rsa2048") -> Credentials:
         store = CertStore(fpath=store_dir)
-        cert = TlsTestCA._make_ca_credentials(name=name, key_type=key_type)
-        store.save(cert, name="ca")
-        cert.set_store(store)
-        return cert
+        creds = store.load_credentials(name="ca", key_type=key_type)
+        if creds is None:
+            creds = TlsTestCA._make_ca_credentials(name=name, key_type=key_type)
+            store.save(creds, name="ca")
+            creds.set_store(store)
+        return creds
 
     @staticmethod
     def create_credentials(spec: CertificateSpec, issuer: Credentials, key_type: Any,
@@ -216,7 +259,7 @@ class TlsTestCA:
         :returns: the certificate and private key PEM file paths
         """
         if spec.domains and len(spec.domains):
-            creds = TlsTestCA._make_server_credentials(domains=spec.domains,
+            creds = TlsTestCA._make_server_credentials(name=spec.name, domains=spec.domains,
                                                        issuer=issuer,
                                                        valid_from=valid_from,
                                                        valid_to=valid_to,
@@ -373,15 +416,15 @@ class TlsTestCA:
         cert = csr.sign(private_key=issuer_key,
                         algorithm=hashes.SHA256(),
                         backend=default_backend())
-        return Credentials(name=name, subject=subject, cert=cert, pkey=pkey, key_type=key_type, issuer=issuer)
+        return Credentials(name=name, cert=cert, pkey=pkey)
 
     @staticmethod
-    def _make_server_credentials(domains: List[str], issuer: Credentials,
+    def _make_server_credentials(name: str, domains: List[str], issuer: Credentials,
                                  key_type: Any,
                                  valid_from: timedelta = timedelta(days=-1),
                                  valid_to: timedelta = timedelta(days=89),
                                  ) -> Credentials:
-        name = domains[0]
+        name = name
         pkey = _private_key(key_type=key_type)
         subject = TlsTestCA._make_x509_name(common_name=name, parent=issuer.subject)
         csr = TlsTestCA._make_csr(subject=subject,
@@ -391,7 +434,7 @@ class TlsTestCA:
         cert = csr.sign(private_key=issuer.private_key,
                         algorithm=hashes.SHA256(),
                         backend=default_backend())
-        return Credentials(name=name, subject=subject, cert=cert, pkey=pkey, key_type=key_type, issuer=issuer)
+        return Credentials(name=name, cert=cert, pkey=pkey)
 
     @staticmethod
     def _make_client_credentials(name: str,
@@ -409,4 +452,4 @@ class TlsTestCA:
         cert = csr.sign(private_key=issuer.private_key,
                         algorithm=hashes.SHA256(),
                         backend=default_backend())
-        return Credentials(name=name, subject=subject, cert=cert, pkey=pkey, key_type=key_type, issuer=issuer)
+        return Credentials(name=name, cert=cert, pkey=pkey)

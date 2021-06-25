@@ -484,6 +484,10 @@ cleanup:
         ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, fctx->c, APLOGNO()
                      "tls_filter_conn_input: [%d] %s", (int)rr, err_descr);
     }
+    else if (APR_STATUS_IS_EAGAIN(rv)) {
+        ap_log_cerror(APLOG_MARK, APLOG_TRACE4, rv, fctx->c,
+                     "tls_filter_conn_input: no data available");
+    }
     else if (APR_SUCCESS != rv) {
         ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, fctx->c, APLOGNO()
                      "tls_filter_conn_input");
@@ -527,21 +531,20 @@ cleanup:
 }
 
 static rustls_io_result tls_write_vectored_callback(
-    void *userdata, const rustls_slice_bytes *slices, size_t count, size_t *out_n)
+    void *userdata, const rustls_iovec *riov, size_t count, size_t *out_n)
 {
     tls_filter_ctx_t *fctx = userdata;
-    const rustls_slice_bytes *slice;
+    const struct iovec *iov = (const struct iovec*)riov;
     apr_status_t rv;
     size_t i, n = 0;
     apr_bucket *b;
 
-    for (i = 0; i < count; ++i) {
-        slice = &slices[i];
-        b = apr_bucket_transient_create((const char*)slice->data, slice->len, fctx->fout_tls_bb->bucket_alloc);
+    for (i = 0; i < count; ++i, ++iov) {
+        b = apr_bucket_transient_create((const char*)iov->iov_base, iov->iov_len, fctx->fout_tls_bb->bucket_alloc);
         APR_BRIGADE_INSERT_TAIL(fctx->fout_tls_bb, b);
-        n += slice->len;
-        fctx->fout_bytes_in_tls_bb += (apr_off_t)slice->len;
+        n += iov->iov_len;
     }
+    fctx->fout_bytes_in_tls_bb += (apr_off_t)n;
     rv = fout_pass_tls_to_net(fctx);
     *out_n = n;
     ap_log_error(APLOG_MARK, APLOG_TRACE5, rv, fctx->cc->server,
@@ -742,7 +745,7 @@ static apr_status_t fout_append_plain(tls_filter_ctx_t *fctx, apr_bucket *b)
             rv = apr_bucket_read(b, &data, &dlen, APR_BLOCK_READ);
             if (APR_STATUS_IS_EOF(rv)) {
                 apr_bucket_delete(b);
-                b = NULL;
+                goto maybe_flush;
             }
             else if (APR_SUCCESS != rv) goto cleanup;
         }
@@ -757,6 +760,9 @@ static apr_status_t fout_append_plain(tls_filter_ctx_t *fctx, apr_bucket *b)
             rv = fout_add_bucket_to_tls(fctx, b);
             flush = 1;
         }
+        else if (b->length == 0) {
+            apr_bucket_delete(b);
+        }
         else if (b->length < 1024 || fctx->fout_buf_plain_len > 0) {
             /* we want to buffer small chunks to create larger TLS records and
              * not leak security relevant information. So, we buffer small
@@ -768,7 +774,7 @@ static apr_status_t fout_append_plain(tls_filter_ctx_t *fctx, apr_bucket *b)
         else {
             /* we have a large chunk and our plain buffer is empty, write it
              * directly into rustls. */
-#define TLS_FILE_CHUNK_SIZE  8 * TLS_PREF_PLAIN_CHUNK_SIZE
+#define TLS_FILE_CHUNK_SIZE  4 * TLS_PREF_PLAIN_CHUNK_SIZE
             if (b->length > TLS_FILE_CHUNK_SIZE) {
                 apr_bucket_split(b, TLS_FILE_CHUNK_SIZE);
             }
@@ -820,8 +826,9 @@ static apr_status_t fout_append_plain(tls_filter_ctx_t *fctx, apr_bucket *b)
         }
     }
 
+maybe_flush:
     if (flush) {
-        rv = fout_pass_all_to_net(fctx, 0);
+        rv = fout_pass_all_to_net(fctx, 1);
         if (APR_SUCCESS != rv) goto cleanup;
     }
 

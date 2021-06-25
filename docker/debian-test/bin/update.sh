@@ -21,8 +21,14 @@ needs_update() {
   return 1
 }
 
+PREFIX=$(apxs -q exec_prefix)
+if test ! -d $PREFIX; then
+    fail "apache install prefix not found: $PREFIX"
+fi
+
 # remove some stuff that accumulates
-rm -f $DATADIR/apache2/logs/*
+LOG_DIR=$(apxs -q logfiledir)
+rm -f $LOG_DIR/*
 
 cd $DATADIR
 if test ! -f rustup.sh.run; then
@@ -31,40 +37,14 @@ if test ! -f rustup.sh.run; then
   touch rustup.sh.run
 fi
 
-if test ! -d httpd; then
-  git clone https://github.com/icing/httpd.git httpd ||fail
-fi
-cd httpd
-if test ! -d srclib/apr; then
-  svn co http://svn.apache.org/repos/asf/apr/apr/trunk srclib/apr
-fi
-git fetch origin 2.4.x ||fail
-git checkout 2.4.x ||fail
-if needs_update $DATADIR/apache2/.installed .; then
-  rm -f $DATADIR/apache2/.installed
-  ./buildconf ||fail
-  ./configure --prefix=$DATADIR/apache2 --with-included-apr \
-    --enable-mpms-shared=event --enable-ssl --enable-http2 \
-    --enable-cgi --enable-md  ||fail
-  make install ||fail
-  touch $DATADIR/apache2/.installed
-fi
-
 cd $DATADIR
-rm -f $DATADIR/apache2/.crustls-installed
-rm -rf crustls
 if test ! -d crustls; then
   git clone https://github.com/abetterinternet/crustls.git crustls
 fi
 cd crustls
 git fetch origin main
 git checkout main
-if needs_update $DATADIR/apache2/.crustls-installed .; then
-  rm -f $DATADIR/apache2/.crustls-installed
-  touch src/crustls.h ||fail "missing src/crustls.h"
-  make install DESTDIR=$DATADIR/apache2 ||fail
-  touch $DATADIR/apache2/.crustls-installed
-fi
+make install DESTDIR=$PREFIX || fail
 
 cd "$TOP/mod_tls" ||fail
 if needs_update .installed .; then
@@ -73,7 +53,7 @@ if needs_update .installed .; then
     autoreconf -i ||fail
   fi
   if test ! -d Makefile -o ./configure -nt Makefile; then
-    ./configure --with-apxs=$DATADIR/apache2/bin/apxs ||fail
+    ./configure || fail
     touch ./configure
   fi
   make clean||fail
@@ -82,5 +62,5 @@ if needs_update .installed .; then
   make install ||fail
   touch .installed
 fi
-make test
+make test &&
 python3 test/load_test.py 1k-files

@@ -14,7 +14,7 @@
 #
 
 AC_PREREQ([2.69])
-AC_INIT([mod_tls], [0.7.1], [stefan.eissing@greenbytes.de])
+AC_INIT([mod_tls], [0.8.0], [stefan.eissing@greenbytes.de])
 
 LT_PREREQ([2.2.6])
 LT_INIT()
@@ -166,14 +166,36 @@ if test "$APR_INC" != "$AP_INC"; then
 fi
 export SYSCONF_DIR="$($APXS -q sysconfdir)"
 export LIBEXEC_DIR="$($APXS -q LIBEXECDIR)"
+export SBINDIR="$($APXS -q SBINDIR)"
 
 HTTPD_VERSION="$($APXS -q HTTPD_VERSION)"
 
+AC_SUBST(LIBEXECDIR)
 
 AC_CHECK_LIB([apr-1], [apr_pool_create_ex], [LIB_APR=apr-1], [AC_MSG_ERROR("library apr-1 not found")])
 AC_SUBST(LIB_APR)
 AC_CHECK_LIB([aprutil-1], [apr_brigade_create], [LIB_APRUTIL=aprutil-1], [AC_MSG_ERROR("library aprutil-1 not found")])
 AC_SUBST(LIB_APRUTIL)
+
+# some installations have modules linked statically
+test -x "$SBINDIR/apachectl" || AC_MSG_ERROR("no found: $SBINDIR/apachectl")
+LOAD_LOG_CONFIG=
+LOAD_LOGIO=
+LOAD_UNIXD=
+LOAD_VERSION=
+LOAD_WATCHDOG=
+linked=$($SBINDIR/apachectl -t -D DUMP_MODULES | fgrep '(static)')
+case "$linked" in *log_config_module*) LOAD_LOG_CONFIG='#';; esac
+case "$linked" in *logio_module*) LOAD_LOGIO='#';; esac
+case "$linked" in *unixd_module*) LOAD_UNIXD='#';; esac
+case "$linked" in *version_module*) LOAD_VERSION='#';; esac
+case "$linked" in *watchdog_module*) LOAD_WATCHDOG='#';; esac
+
+AC_SUBST(LOAD_LOG_CONFIG)
+AC_SUBST(LOAD_LOGIO)
+AC_SUBST(LOAD_UNIXD)
+AC_SUBST(LOAD_VERSION)
+AC_SUBST(LOAD_WATCHDOG)
 
 if test x"$request_crustls" != "xcheck"; then
     LDFLAGS="$LDFLAGS -L$request_crustls/lib";

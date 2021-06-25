@@ -18,7 +18,7 @@
  * @macro
  * Version number of the md module as c string
  */
-#define MOD_TLS_VERSION "0.7.1"
+#define MOD_TLS_VERSION "0.8.0"
 
 /**
  * @macro
@@ -26,6 +26,6 @@
  * release. This is a 24 bit number with 8 bits for major number, 8 bits
  * for minor and 8 bits for patch. Version 1.2.3 becomes 0x010203.
  */
-#define MOD_TLS_VERSION_NUM 0x000701
+#define MOD_TLS_VERSION_NUM 0x000800
 
 #endif /* mod_md_md_version_h */

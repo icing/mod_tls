@@ -9,6 +9,8 @@ RUN apt-get install -y apt-listchanges \
 
 RUN pip install pytest tqdm pycurl cryptography
 
+RUN apt-get install -y apache2 apache2-dev libapache2-mod-md
+
 COPY docker/debian-test/bin/* /abetterinternet/bin/
 COPY configure.ac Makefile.am NEWS README* AUTHORS ChangeLog COPYING LICENSE /abetterinternet/mod_tls/
 COPY src /abetterinternet/mod_tls/src

@@ -32,7 +32,7 @@ test: $(SERVER_DIR)/.test-setup unit_tests
 	@pytest
 
 loadtest: $(SERVER_DIR)/.test-setup unit_tests
-	@python3 load_test.py -m mod_tls 1c-throughput
+	@python3 load_test.py 1k-files
 
 $(SERVER_DIR)/.test-setup: \
 	$(wildcard conf/*) \
