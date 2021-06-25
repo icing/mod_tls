@@ -12,7 +12,7 @@ This project is sponsored by the [ISRG](https://www.abetterinternet.org).
 
 In development/beta test. See [beta testing](#beta-testing) for instructions how to use the recent release.
 
-You need Apache httpd version 2.4.48 or newer to run this module. Also you need [crustls](https://github.com/abetterinternet/crustls), either the `main` branch or a version *greater than* 0.6.1.
+You need Apache httpd version 2.4.48 or newer to run this module. Also you need [rustls-ffi](https://github.com/rustls/rustls-ffi), either the `main` branch or a version at least 0.7.0.
 
 `mod_tls` gives you:
  
@@ -37,7 +37,7 @@ You need Apache httpd version 2.4.48 or newer to run this module. Also you need 
 
 ### Installation from source
 
-Run the usual autoconf/automake magic incantations. You need a built Apache trunk and specify the `--with-apxe=<path>/bin/apxs` on configuration if that is not in your `$PATH`. Also, you need [crustls](https://github.com/abetterinternet/crustls/) installed.
+Run the usual autoconf/automake magic incantations. You need a built Apache trunk and specify the `--with-apxe=<path>/bin/apxs` on configuration if that is not in your `$PATH`. Also, you need [rustls-ffi](https://github.com/rustls/rustls-ffi) installed.
 
 Run the usual autoconf/automake magic incantations.
 
@@ -58,14 +58,14 @@ There is now support for building a Docker image based on `debian sid` to run th
 > docker-compose run debian-test
 ```
 
-This clone the git repository from `apache` and `crustls`, switched to the necessary branches and builds a copy of the local `mod_tls` sources. If you want to setup your own build, you'll find the instructions in `docker/debian-test/bin/update.sh`.
+This clone the git repository from `apache` and `rustls-ffi`, switched to the necessary branches and builds a copy of the local `mod_tls` sources. If you want to setup your own build, you'll find the instructions in `docker/debian-test/bin/update.sh`.
 
 ## Beta Testing
 
 The releases v0.7.x are beta release that lets you run `mod_tls` inside the Apache web server. What your need:
 
 * [Apache httpd](https://httpd.apache.org) 2.4.48 (earlier versions will **not** work). 
-* [crustls](https://github.com/abetterinternet/crustls) 0.6.1
+* [rustls-ffi](https://github.com/rustls/rustls-ffi) 0.7.0
 
 #### What to Expect
 
@@ -79,7 +79,7 @@ The releases v0.7.x are beta release that lets you run `mod_tls` inside the Apac
 
 At the time of this writing Apache 2.4.48 was not generally available as package, but expect that to change soon. When you have it, it usually is accompanied by a `apache2-dev` package that includes all header files and binaries to build `mod_tls`.
 
-When you have that, you need to checkout and build `crustls`. It has [its own build instructions](https://github.com/abetterinternet/crustls#build). Basically, you need the `Rust` tool set installed and the run `make` which will pull in the components needed.
+When you have that, you need to checkout and build `rustls-ffi`. It has [its own build instructions](https://github.com/rustls/rustls-ffi#build). Basically, you need the `Rust` tool set installed and the run `make` which will pull in the components needed.
 
 After you have the `apache2-dev` package, the tool `apxs` is installed (also when you build apache2 from source yourself). `apxs` is useful to give information about the environment and parameters apache2 was built with. For example:
 
@@ -87,10 +87,10 @@ After you have the `apache2-dev` package, the tool `apxs` is installed (also whe
 > apxs -q exec_prefix
 /usr
 ```
-will tell you the directory underneath everything else is placed. When you have built `crustls` you need to install it in this location with
+will tell you the directory underneath everything else is placed. When you have built `rustls-ffi` you need to install it in this location with
 
 ```
-crustls> make install DESTDIR=/usr
+rustls-ffi> make install DESTDIR=/usr
 ```
 
 which copies the header file and library. Then get the `mod_tls` release, unpack it somewhere and run:
@@ -214,7 +214,7 @@ LoadModule tls_module           "<modules-path>/mod_tls.so"
 On several linux distributions there are mechanisms to do that from the command line, e.g. debian has
 the nice `a2enmod` command.
 
-When you restart the server afterwards, the module will log in `INFO` entry. This lists versions of `crustls` binding and the `rustls` library are logged by `mod_tls`, like this:
+When you restart the server afterwards, the module will log in `INFO` entry. This lists versions of `rustls-ffi` binding and the `rustls` library are logged by `mod_tls`, like this:
 
 ```
 [date time] [tls:info] [pid] mod_tls/0.6.0 (crustls=crustls/0.6.0/rustls/0.19.0), initializing...
@@ -400,7 +400,7 @@ Variable       | TLSOption | Description
 `SSL_PROTOCOL`     |  *    |  the TLS protocol negotiated (TLSv1.2, TLSv1.3)
 `SSL_CIPHER`       |  *    |  the name of the TLS cipher negotiated
 `SSL_VERSION_INTERFACE` |StdEnvVars| the module version as `mod_tls/n.n.n`
-`SSL_VERSION_LIBRARY` |StdEnvVars  | the rustls version as `crustls/n.n.n/rustls/n.n.n` 
+`SSL_VERSION_LIBRARY` |StdEnvVars  | the rustls-ffi version as `crustls/n.n.n/rustls/n.n.n` 
 `SSL_SECURE_RENEG` | StdEnvVars    | always `false` since rustls does not support that feature
 `SSL_COMPRESS_METHOD`| StdEnvVars  | always `NULL` since rustls does not support that feature
 `SSL_CIPHER_EXPORT` |  StdEnvVars  | always `false` as rustls does not support such ciphers
