@@ -16,21 +16,22 @@ class TestProxyMixed:
             'base': f"""
             LogLevel proxy:trace1 proxy_http:trace1 ssl:trace1 proxy_http2:trace1
             ProxyPreserveHost on
-            <Proxy https://127.0.0.1:{env.https_port}/>
-                SSLProxyEngine on
-                SSLProxyVerify require
-                SSLProxyCACertificateFile {env.ca.cert_file}
-            </Proxy>
-            <Proxy h2://127.0.0.1:{env.https_port}/>
-                TLSProxyEngine on
-                TLSProxyCA {env.ca.cert_file}
-            </Proxy>
+            """,
+            env.domain_a: f"""
+            Protocols h2 http/1.1
+            TLSProxyEngine on
+            TLSProxyCA {env.ca.cert_file}
+            <Location /proxy-tls/>
+                ProxyPass h2://127.0.0.1:{env.https_port}/
+            </Location>
             """,
             env.domain_b: f"""
-            Protocols h2 http/1.1
-            ProxyPass /proxy-ssl/ https://127.0.0.1:{env.https_port}/
-            ProxyPass /proxy-tls/ h2://127.0.0.1:{env.https_port}/
-            TLSOptions +StdEnvVars
+            SSLProxyEngine on
+            SSLProxyVerify require
+            SSLProxyCACertificateFile {env.ca.cert_file}
+            <Location /proxy-ssl/>
+                ProxyPass https://127.0.0.1:{env.https_port}/
+            </Location>
             """,
         })
         conf.write()
@@ -44,6 +45,6 @@ class TestProxyMixed:
         assert data == {'domain': env.domain_b}
 
     def test_16_proxy_mixed_tls_get(self, env):
-        data = env.https_get_json(env.domain_b, "/proxy-tls/index.json")
-        assert data == {'domain': env.domain_b}
+        data = env.https_get_json(env.domain_a, "/proxy-tls/index.json")
+        assert data == {'domain': env.domain_a}
 
