@@ -17,13 +17,6 @@ class TestSessionID:
         conf.add_vhosts(domains=[env.domain_a, env.domain_b])
         conf.write()
         assert env.apache_restart() == 0
-        yield
-        if env.is_live(timeout=timedelta(milliseconds=100)):
-            assert env.apache_stop() == 0
-
-    @pytest.fixture(autouse=True, scope='function')
-    def _function_scope(self, env):
-        pass
 
     def find_openssl_session_ids(self, r: ExecResult) -> List[str]:
         ids = []

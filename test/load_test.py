@@ -221,13 +221,13 @@ class LoadTestCase:
 
     @staticmethod
     def start_server(env: TlsTestEnv, cd: timedelta = None):
-        if env.apache_stop() == 0 and cd:
+        if cd:
             with tqdm(desc="connection cooldown", total=int(cd.total_seconds()), unit="s", leave=False) as t:
                 end = datetime.now() + cd
                 while datetime.now() < end:
                     time.sleep(1)
                     t.update()
-        assert env.apache_start() == 0
+        assert env.apache_restart() == 0
 
     @staticmethod
     def server_setup(env: TlsTestEnv, ssl_module: str):
@@ -315,8 +315,7 @@ class SingleFileLoadTest(LoadTestCase):
         return fname
 
     def _teardown(self):
-        if self.env.is_live(timeout=timedelta(milliseconds=100)):
-            assert self.env.apache_stop() == 0
+        pass
 
     def run_test(self, mode: str, path: str) -> H2LoadLogSummary:
         monitor = None
@@ -420,8 +419,7 @@ class MultiFileLoadTest(LoadTestCase):
         self.start_server(env=self.env)
 
     def _teardown(self):
-        if self.env.is_live(timeout=timedelta(milliseconds=100)):
-            assert self.env.apache_stop() == 0
+        pass
 
     def run_test(self, mode: str, path: str) -> H2LoadLogSummary:
         monitor = None
@@ -526,8 +524,7 @@ class ConnectionLoadTest(LoadTestCase):
         self.start_server(env=self.env, cd=self._cd)
 
     def _teardown(self):
-        if self.env.is_live(timeout=timedelta(milliseconds=100)):
-            assert self.env.apache_stop() == 0
+        pass
 
     def run_test(self, mode: str, path: str) -> H2LoadLogSummary:
         monitor = None
@@ -631,6 +628,7 @@ class LoadTest:
             console.setFormatter(logging.Formatter(logging.BASIC_FORMAT))
             logging.getLogger('').addHandler(console)
 
+        rv = 0
         try:
             log.debug("starting tests")
 
@@ -858,11 +856,13 @@ class LoadTest:
                                                         f"[{len(foot_notes)}]" if fnote else ""))
                         cls.print_table(table, foot_notes)
         except KeyboardInterrupt:
-            sys.exit(1)
+            rv = 1
         except LoadTestException as ex:
             sys.stderr.write(f"ERROR: {str(ex)}\n")
-            sys.exit(1)
-        sys.exit(0)
+            rv = 1
+
+        env.apache_stop()
+        sys.exit(rv)
 
 
 if __name__ == "__main__":

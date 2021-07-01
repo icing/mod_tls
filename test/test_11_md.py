@@ -18,9 +18,6 @@ class TestMD:
         })
         conf.write()
         assert env.apache_restart() == 0
-        yield
-        if env.is_live(timeout=timedelta(milliseconds=100)):
-            assert env.apache_stop() == 0
 
     def test_11_get_a(self, env):
         # do we see the correct json for the domain_a?

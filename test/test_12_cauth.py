@@ -28,14 +28,9 @@ class TestTLS:
 
     @pytest.fixture(autouse=True, scope='class')
     def _class_scope(self, env, clients_x, cax_file):
-        if env.is_live(timeout=timedelta(milliseconds=100)):
-            assert env.apache_stop() == 0
         with open(cax_file, 'w') as fd:
             fd.write("".join(open(clients_x.cert_file).readlines()))
             fd.write("".join(open(env.ca.cert_file).readlines()))
-        yield
-        if env.is_live(timeout=timedelta(milliseconds=100)):
-            assert env.apache_stop() == 0
 
     @pytest.fixture(autouse=True, scope='function')
     def _function_scope(self, env):

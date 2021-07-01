@@ -46,3 +46,8 @@ def env() -> TlsTestEnv:
     ca.issue_certs(cert_specs)
     env.set_ca(ca)
     return env
+
+@pytest.fixture(autouse=True, scope="session")
+def _session_scope(env):
+    yield
+    assert env.apache_stop() == 0

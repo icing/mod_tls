@@ -209,13 +209,13 @@ class FuzzTestCase:
         return conf
 
     def start_server(self, cd: timedelta = None):
-        if self.env.apache_stop() == 0 and cd:
+        if cd:
             with tqdm(desc="connection cooldown", total=int(cd.total_seconds()), unit="s", leave=False) as t:
                 end = datetime.now() + cd
                 while datetime.now() < end:
                     time.sleep(1)
                     t.update()
-        assert self.env.apache_start() == 0
+        assert self.env.apache_restart() == 0
 
 
 class SingleUrlFuzzTest(FuzzTestCase):

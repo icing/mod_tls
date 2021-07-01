@@ -35,13 +35,6 @@ class TestGet:
         mk_text_file(os.path.join(docs_a, "1m.txt"), 8000)
         mk_text_file(os.path.join(docs_a, "10m.txt"), 80000)
         assert env.apache_restart() == 0
-        yield
-        if env.is_live(timeout=timedelta(milliseconds=100)):
-            assert env.apache_stop() == 0
-
-    @pytest.fixture(autouse=True, scope='function')
-    def _function_scope(self, env):
-        pass
 
     @pytest.mark.parametrize("fname, flen", [
         ("1k.txt", 1024),

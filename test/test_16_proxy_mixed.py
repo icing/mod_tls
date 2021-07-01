@@ -36,9 +36,6 @@ class TestProxyMixed:
         })
         conf.write()
         assert env.apache_restart() == 0
-        yield
-        if env.is_live(timeout=timedelta(milliseconds=100)):
-            assert env.apache_stop() == 0
 
     def test_16_proxy_mixed_ssl_get(self, env):
         data = env.https_get_json(env.domain_b, "/proxy-ssl/index.json")

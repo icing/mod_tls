@@ -18,9 +18,6 @@ class TestTimeout:
         })
         conf.write()
         assert env.apache_restart() == 0
-        yield
-        if env.is_live(timeout=timedelta(milliseconds=100)):
-            assert env.apache_stop() == 0
 
     @pytest.fixture(autouse=True, scope='function')
     def _function_scope(self, env):

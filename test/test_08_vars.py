@@ -20,13 +20,6 @@ class TestVars:
         })
         conf.write()
         assert env.apache_restart() == 0
-        yield
-        if env.is_live(timeout=timedelta(milliseconds=100)):
-            assert env.apache_stop() == 0
-
-    @pytest.fixture(autouse=True, scope='function')
-    def _function_scope(self, env):
-        pass
 
     def test_08_vars_root(self, env):
         # in domain_b root, the StdEnvVars is switch on
