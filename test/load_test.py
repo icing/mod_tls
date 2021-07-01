@@ -364,7 +364,7 @@ class SingleFileLoadTest(LoadTestCase):
             self._teardown()
 
     def format_result(self, summary: H2LoadLogSummary) -> Tuple[str, Optional[List[str]]]:
-        return "{0:.1f}".format(summary.throughput_mb), summary.get_footnote()
+        return "{0:.0f}".format(summary.throughput_mb), summary.get_footnote()
 
 
 class MultiFileLoadTest(LoadTestCase):
@@ -467,7 +467,7 @@ class MultiFileLoadTest(LoadTestCase):
             self._teardown()
 
     def format_result(self, summary: H2LoadLogSummary) -> Tuple[str, Optional[List[str]]]:
-        return "{0:.1f}".format(
+        return "{0:.0f}".format(
             summary.response_count / summary.duration.total_seconds()
         ), summary.get_footnote()
 
@@ -574,7 +574,7 @@ class ConnectionLoadTest(LoadTestCase):
             self._teardown()
 
     def format_result(self, summary: H2LoadLogSummary) -> Tuple[str, Optional[List[str]]]:
-        return "{0:.1f}".format(
+        return "{0:.0f}".format(
             summary.response_count / summary.duration.total_seconds() / self._requests
         ), summary.get_footnote()
 

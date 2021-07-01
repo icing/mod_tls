@@ -42,8 +42,9 @@ if test ! -d crustls; then
   git clone https://github.com/abetterinternet/crustls.git crustls
 fi
 cd crustls
-git fetch origin main
+git fetch origin
 git checkout main
+git pull origin main
 make install DESTDIR=$PREFIX || fail
 
 cd "$TOP/mod_tls" ||fail
