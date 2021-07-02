@@ -28,7 +28,7 @@ You need Apache httpd version 2.4.48 or newer to run this module. Also you need 
  
   * client certificates
 
-There is a [comparison table with mod_ssl functionality](#comparision-with-mod_ssl).
+There is a [comparison table with mod_ssl functionality](#comparison-with-mod_ssl).
 
 ## Platforms
 
