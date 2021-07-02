@@ -1,6 +1,8 @@
+v0.8.0
+----------------------------------------------------------------------------------------------------
  * Fixed the case where client authentication (currently disabled) on a server
    would prevent ACME challenges from working.
- * Fixed test configuration to accomodate for installations on debian with static modules
+ * Fixed test configuration to accommodate for installations on debian with static modules
    and directories used.
  * Updated docker image "debian-test" to use the apache2 package instead of a local
    compiled httpd.
@@ -27,7 +29,7 @@ v0.7.1
 
 v0.7.0
 ----------------------------------------------------------------------------------------------------
- * Disabled all client certificate related configurations and test. Cleint certificates
+ * Disabled all client certificate related configurations and test. Client certificates
    are unsupported in mod_tls for the time being, as there is no Rust revocation
    mechanism currently available. See also README.md.
 
@@ -40,7 +42,7 @@ v0.6.1
 
 v0.6.0
 ----------------------------------------------------------------------------------------------------
- * Adapated to the new read/write callbacks in crustls
+ * Adapted to the new read/write callbacks in crustls
 
 v0.5.0
 ----------------------------------------------------------------------------------------------------
@@ -51,7 +53,7 @@ v0.5.0
  * Client CA is loaded as new rustls_root_cert_store (PR tbd) and is used
    in building session configs.
  * Presence of a client certificate is checked when client auth is required.
- * variable SSL_CLIENT_S_DN_CN added with fake data since we are not able to disect
+ * variable SSL_CLIENT_S_DN_CN added with fake data since we are not able to dissect
    the client certificate DER data yet.
  * Implemented support for OCSP stapling using the new ap_ssl_ocsp* functions
    in the patched Apache httpd and a development branch of crustls.
@@ -68,7 +70,7 @@ v0.5.0
    serving requests to server A on a connection opened on server B.
  * A warning will be logged when TLS ciphers are configured for preference, but
    not supported by rustls. Test cases added.
- * Sucessfull run with the `mod_md` extended test suite that allows specification
+ * Successful run with the `mod_md` extended test suite that allows specification
    of the ssl module to test with.
  * Fixed various edge cases about vhost selection, fallback and challenge certificates
    and added a new directive `TLSStrictSNI` to allow relaxed checks of client
@@ -93,7 +95,7 @@ v0.5.0
  * Added support for setting challenge certificates using the new (apache trunk)
    hooks and functions. ACME tls-alpn-01 support incoming.
  * The module now also allows certificate configuration via the new central
-   hookes. A future mod_md will provide ACME certificate this way.
+   hooks. A future mod_md will provide ACME certificate this way.
  * Updated patch file for the Apache httpd 2.4.x release line with the latest
    necessary changes to run the module.
  * Fixes in output handling to pass meta buckets in their proper location down
@@ -106,12 +108,12 @@ v0.5.0
    necessary changes to the server. Make mod_tls compile against httpd trunk and
    a patched branches/2.4.x.
  * More load test scenarios.
- * Adding the first load test scenario for compaing transfer speeds between mod_tls
+ * Adding the first load test scenario for comparing transfer speeds between mod_tls
    and mod_ssl on a single connection for various resource sizes. Use `make loadtest`
    to run.
  * Fixed a bug that caused the connection to close after the first request had been
    handled.
- * Improved the passing of encrytped data to the network to involve a bit less buffering.
+ * Improved the passing of encrypted data to the network to involve a bit less buffering.
  * Started load test scenarios to measure performance and resource usage.
  * ALPN negotiation implemented. Curl in test cases now speaks HTTP/2 with mod_tls
    when configured.
@@ -144,7 +146,7 @@ v0.5.0
    - requests against a virtual hosts server are only allowed if the client uses SNI.
    - requests to domain B on a connection to domain A are only allowed if there
      are no relevant differences between the TLS configurations. This does exclude
-     the certificates configured, since it is the client's repsonsibility to check
+     the certificates configured, since it is the client's responsibility to check
      if B falls under the certificate from A.
  * New directive `TLSHonorClientOrder on|off` with default off, to make the
    server session honor client cipher ordering.
