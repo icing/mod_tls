@@ -191,7 +191,6 @@ static apr_status_t tls_post_config_proxy_ssl(
          * them to manipulate SSL status for backend connections.
          * We provide our own implementations to avoid becoming active on such
          * connections for now.
-         * TODO: the real fix is to add this interworking in core ap_ssl_*() stuff
          * */
         fn_ssl_engine_set = APR_RETRIEVE_OPTIONAL_FN(ssl_engine_set);
         module_ssl_engine_set = (fn_ssl_engine_set

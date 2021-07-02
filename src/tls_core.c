@@ -981,6 +981,7 @@ int tls_core_pre_conn_init(conn_rec *c)
 #endif
                 sc->enabled == TLS_FLAG_TRUE;
         cc->state = enabled? TLS_CONN_ST_CLIENT_HELLO : TLS_CONN_ST_DISABLED;
+        cc->client_auth = sc->client_auth;
         ap_log_error(APLOG_MARK, APLOG_TRACE3, 0, c->base_server,
             "tls_core_conn_init: %s for tls: %s",
             enabled? "enabled" : "disabled", c->base_server->server_hostname);
@@ -1099,7 +1100,7 @@ static apr_status_t select_application_protocol(
                 if (APR_SUCCESS != rv) goto cleanup;
 
                 cc->service_unavailable = 1;
-                /* TODO: SSL_set_verify(ssl, SSL_VERIFY_NONE, ssl_callback_SSLVerify); */
+                cc->client_auth = TLS_CLIENT_AUTH_NONE;
             }
         }
     }
@@ -1169,15 +1170,31 @@ apr_status_t tls_core_conn_seen_client_hello(conn_rec *c)
     sc = tls_conf_server_get(cc->server);
     /* on relaxed SNI matches, we do not enforce the 503 of fallback
      * certificates. */
-    cc->service_unavailable = sni_match? sc->service_unavailable : 0;
+    if (!cc->service_unavailable) {
+        cc->service_unavailable = sni_match? sc->service_unavailable : 0;
+    }
 
     if (!sc->rustls_config && !initial_sc->rustls_config) {
         ap_log_cerror(APLOG_MARK, APLOG_DEBUG, 0, c, APLOGNO()
             "vhost_init: no base rustls config found, denying to serve");
         rv = APR_NOTFOUND; goto cleanup;
     }
-    builder = rustls_server_config_builder_from_config(
-        sc->rustls_config? sc->rustls_config : initial_sc->rustls_config);
+    /* FIXME: there is no method to disable client certificates again
+     * in a builder. And one needs to create the builder either with
+     * client certs mandator/optional/none.
+     * This means for ACME challenges on a host with client certs, we
+     * cannot reuse the server config as we do otherwise.
+     * But with a naked new builder, we lose all other settings that
+     * may have been done in sc->rustls_config. But better than failing
+     * ACME challenges, I guess.
+     */
+    if (sc->client_auth != cc->client_auth && cc->client_auth == TLS_CLIENT_AUTH_NONE) {
+        builder = rustls_server_config_builder_new();
+    }
+    else {
+        builder = rustls_server_config_builder_from_config(
+            sc->rustls_config? sc->rustls_config : initial_sc->rustls_config);
+    }
     if (NULL == builder) {
         rv = APR_ENOMEM; goto cleanup;
     }

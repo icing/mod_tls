@@ -34,6 +34,7 @@ typedef struct {
     tls_conn_state_t state;
     int outgoing;                     /* != 0 iff outgoing connection (redundant once c->outgoing is everywhere) */
     int service_unavailable;          /* we 503 all requests on this connection */
+    tls_client_auth_t client_auth;    /* how client authentication with certificates is used */
     int client_hello_seen;            /* the client hello has been inspected */
 
     rustls_connection *rustls_connection; /* the session used on this connection or NULL */

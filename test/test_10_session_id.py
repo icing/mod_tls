@@ -44,7 +44,7 @@ class TestSessionID:
         ])
         # openssl -reconnect closes connection immediately after the handhshake, so
         # the Session data in TLSv1.3 is not seen and not found in its output.
-        # TODO: how to check session data with TLSv1.3?
+        # FIXME: how to check session data with TLSv1.3?
         session_ids = self.find_openssl_session_ids(r)
         assert 0 == len(session_ids), "expected no session-ids: {0}, stderr={1}".format(
             session_ids, r.stdout
