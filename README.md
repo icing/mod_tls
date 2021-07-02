@@ -28,6 +28,7 @@ You need Apache httpd version 2.4.48 or newer to run this module. Also you need 
  
   * client certificates
 
+There is a [comparison table with mod_ssl functionality](#comparision_with_mod_ssl).
 
 ## Platforms
 
@@ -51,14 +52,14 @@ Run the usual autoconf/automake magic incantations.
 
 ### Docker Test Image
 
-There is now support for building a Docker image based on `debian sid` to run the test suite in.
+There is support for building a Docker image based on `debian sid` to run the test suite in.
 
 ```
 > docker-compose build debian-test
 > docker-compose run debian-test
 ```
 
-This clone the git repository from `apache` and `rustls-ffi`, switched to the necessary branches and builds a copy of the local `mod_tls` sources. If you want to setup your own build, you'll find the instructions in `docker/debian-test/bin/update.sh`.
+This clones the git repository `rustls-ffi` and builds a copy of the local `mod_tls` sources. If you want to setup your own build on this platform, you'll find the instructions in `docker/debian-test/bin/update.sh`.
 
 ## Beta Testing
 
@@ -196,6 +197,36 @@ To run these, you nee:
 
 This runs one test. There are several defined in `test/load_test.py` which you can invoke via arguments.
 
+## Comparison with `mod_ssl`
+
+ Feature          | mod_ssl  | mod_tls | Comment
+ -----------------|:--------:|:-------:|---------
+ Frontend TLS     |  yes     | yes  |
+ Backend TLS (proxy) |  yes  |  yes |
+ TLSv1.3           | yes*    |  yes | *)with recent OpenSSL
+ TLSv1.2          |  yes    |  yes  |
+ TLSv1.1/1.0      | yes*    |  no    | *)if enabled in OpenSSL
+ Individual VirtualHost TLS Settings |  yes  | yes  |
+ Frontend client certificates |  yes  | no |
+ Backend machine certificate |  yes  | no* | *)planned, but not implemented yet.
+ Frontend OCSP stapling | yes  | yes*  | *)via mod_md
+ Backend OCSP check |  yes  | no*  |  *)stapling will be verified
+ TLS version used | min-max  |  min |
+ TLS ciphers     | exclusive list | preferred/suppressed |
+ TLS ciphers preference | client/server | client/server | whose ordering shall be honored
+ TLS sessions    |  yes   |  yes  |
+ SNI strictness  | default no |  default yes | 
+ Option EnvVars   | exhaustive | limited | See [variables](#variables)
+ Option ExportCertData  | client+server | server | See [variables](#variables)
+ Backend CA     | file/dir  | file  |
+ Revocation CRLs |  yes  |  no  |
+ FIPS           | yes*   |  no  | *)depends on OpenSSL
+ TLS Renegotiation |  yes  |  no  | e.g. varying TLS settings per location
+ Encrypted Certificate Keys |  yes  | no  |
+ TLS SRP         |  yes  |  no  |
+ TLS SCT         |  no    |  no  |
+ 
+ 
 ## Configuration
 
 `mod_tls` has, like all other Apache httpd modules, a number of configuration directives that
