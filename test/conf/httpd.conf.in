@@ -35,8 +35,15 @@ AddHandler cgi-script .py
     DocumentRoot "htdocs/b.mod-tls.test"
 </VirtualHost>
 
+<Directory "@GEN_DIR@/apache/htdocs/a.mod-tls.test">
+    AllowOverride None
+    Require all granted
+
+    AddHandler cgi-script .py
+    Options +ExecCGI
+</Directory>
+
 <Directory "@GEN_DIR@/apache/htdocs/b.mod-tls.test">
-    Options Indexes FollowSymLinks
     AllowOverride None
     Require all granted
 

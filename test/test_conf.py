@@ -27,24 +27,20 @@ class TlsTestConf:
         with open(os.path.join(self.env.server_conf_dir, self.name), "w") as fd:
             fd.write("\n".join(self._content))
 
-    def add_vhosts(self, domains: List[str], extras: Dict[str, str] = None):
+    def add_vhosts(self, domains: List[str], extras: Dict[str, str] = None, port: str = None):
         extras = extras if extras is not None else {}
-        self.add("""
-TLSEngine {https}
+        port = port if port else self.env.https_port
+        self.add(f"""
+TLSEngine {port}
 LogLevel tls:trace4
-{extras}
-        """.format(
-            https=self.env.https_port,
-            extras=extras['base'] if 'base' in extras else "",
-        ))
+{extras['base'] if 'base' in extras else ""}
+        """)
         for domain in domains:
-            self.add("""
-    <VirtualHost *:{https}>
+            self.add(f"""
+    <VirtualHost *:{port}>
       ServerName {domain}
       DocumentRoot htdocs/{domain}
-                 """.format(
-                    https=self.env.https_port,
-                    domain=domain))
+                 """)
             for cred in self.env.ca.get_credentials_for_name(domain):
                 cert_file = os.path.relpath(cred.cert_file, self.env.server_dir)
                 pkey_file = os.path.relpath(cred.pkey_file, self.env.server_dir) if cred.pkey_file else ""
@@ -56,15 +52,16 @@ LogLevel tls:trace4
                     extras=extras[domain] if domain in extras else ""
                 ))
 
-    def add_ssl_vhosts(self, domains: List[str], extras: Dict[str, str] = None):
+    def add_ssl_vhosts(self, domains: List[str], extras: Dict[str, str] = None, port: str = None):
         extras = extras if extras is not None else {}
+        port = port if port else self.env.https_port
         self.add(f"""
 LogLevel ssl:trace4
 {extras['base'] if 'base' in extras else ""}
         """)
         for domain in domains:
             self.add(f"""
-    <VirtualHost *:{self.env.https_port}>
+    <VirtualHost *:{port}>
       ServerName {domain}
       DocumentRoot htdocs/{domain}
       SSLEngine on
@@ -79,12 +76,13 @@ LogLevel ssl:trace4
     </VirtualHost>
                 """)
 
-    def add_md_vhosts(self, domains: List[str], extras: Dict[str, str] = None):
+    def add_md_vhosts(self, domains: List[str], extras: Dict[str, str] = None, port: str = None):
         extras = extras if extras is not None else {}
+        port = port if port else self.env.https_port
         self.add(f"""
 LoadModule md_module       {self.env.libexec_dir}/mod_md.so
 
-TLSEngine {self.env.https_port}
+TLSEngine {port}
 LogLevel md:debug
 LogLevel tls:trace8
 {extras['base'] if 'base' in extras else ""}
@@ -103,7 +101,7 @@ LogLevel tls:trace8
             self.add(f"""
     </MDomain>
 
-    <VirtualHost *:{self.env.https_port}>
+    <VirtualHost *:{port}>
       ServerName {domain}
       DocumentRoot htdocs/{domain}
       {extras[domain] if domain in extras else ""}

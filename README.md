@@ -551,6 +551,15 @@ This will not disable any ciphers supported by `rustls`. If you specify a cipher
 
 This will not disable any unmentioned ciphers supported by `rustls`. If you specify a cipher that is completely unknown, the configuration will fail. If you specify a cipher that is known but not supported by `rustls`, a warning will be logged but the server will continue.
 
+### `TLSProxyMachineCertificate`
+
+`TLSProxyMachineCertificate cert_file [key_file]` adds a certificate file (PEM encoded) to a proxy setup. The
+certificate is used to authenticate against a proxied backend server.
+
+If you do not specify a separate key file, the key is assumed to also be found in the first file. You may add more than one certificate to a proxy setup. The first certificate suitable for a proxy connection to a backend is then chosen.
+
+The path can be specified relative to the server root.
+
 
 <!---
 ### `TLSStrictSNI`

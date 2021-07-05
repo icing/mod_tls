@@ -32,6 +32,10 @@ struct apr_global_mutex_t;
  */
 #define TLS_CLIENT_CERTS    0
 
+/* support for this exists as PR <https://github.com/rustls/rustls-ffi/pull/128>
+ */
+#define TLS_MACHINE_CERTS    1
+
 
 typedef enum {
     TLS_CLIENT_AUTH_UNSET,
@@ -107,6 +111,8 @@ typedef struct {
     int proxy_protocol_min;            /* the minimum TLS protocol version to use for proxy connections */
     apr_array_header_t *proxy_pref_ciphers;  /* List of apr_uint16_t cipher ids to prefer */
     apr_array_header_t *proxy_supp_ciphers;  /* List of apr_uint16_t cipher ids to suppress */
+    apr_array_header_t *machine_cert_specs; /* configured machine certificates specs */
+    apr_array_header_t *machine_certified_keys;  /* rustls_certified_key list */
     const rustls_client_config *rustls_config;
 } tls_conf_proxy_t;
 
@@ -118,6 +124,8 @@ typedef struct {
     int proxy_protocol_min;            /* the minimum TLS protocol version to use for proxy connections */
     apr_array_header_t *proxy_pref_ciphers;  /* List of apr_uint16_t cipher ids to prefer */
     apr_array_header_t *proxy_supp_ciphers;  /* List of apr_uint16_t cipher ids to suppress */
+    apr_array_header_t *proxy_machine_cert_specs; /* configured machine certificates specs */
+
     tls_conf_proxy_t *proxy_config;
 } tls_conf_dir_t;
 

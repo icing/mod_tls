@@ -1,3 +1,9 @@
+ * Support for machine certificates in proxy conections. Use `TLSProxyMachineCertificate`
+   similar to `TLSCertificate` to configure a certificate to use for authentication
+   against a proxied backend server.
+   As with `TLSCertificate` more than one certificate may be configured and the
+   first compatible is chosen by the `rustls` library for the connection.
+
 v0.8.0
 ----------------------------------------------------------------------------------------------------
  * Fixed the case where client authentication (currently disabled) on a server

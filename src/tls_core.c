@@ -101,7 +101,7 @@ static apr_status_t tls_core_free(void *data)
 }
 
 static apr_status_t load_certified_keys(
-    tls_conf_server_t *sc, server_rec *s,
+    apr_array_header_t *keys, server_rec *s,
     apr_array_header_t *cert_specs,
     tls_cert_reg_t *cert_reg)
 {
@@ -123,9 +123,8 @@ static apr_status_t load_certified_keys(
                 goto cleanup;
             }
             assert(ckey);
-            APR_ARRAY_PUSH(sc->certified_keys, const rustls_certified_key*) = ckey;
+            APR_ARRAY_PUSH(keys, const rustls_certified_key*) = ckey;
         }
-
     }
 cleanup:
     return rv;
@@ -433,7 +432,7 @@ static apr_status_t server_conf_setup(
 
     cert_specs = complete_cert_specs(ptemp, sc);
     sc->certified_keys = apr_array_make(p, 3, sizeof(rustls_certified_key *));
-    rv = load_certified_keys(sc, sc->server, cert_specs, gc->cert_reg);
+    rv = load_certified_keys(sc->certified_keys, sc->server, cert_specs, gc->cert_reg);
     if (APR_SUCCESS != rv) goto cleanup;
     ap_log_error(APLOG_MARK, APLOG_TRACE1, rv, sc->server,
                  "init server: %s with %d certificates loaded",
@@ -606,6 +605,18 @@ static apr_status_t proxy_conf_setup(
 
     rv = set_proxy_ciphers(ptemp, pc, gc, builder);
     if (APR_SUCCESS != rv) goto cleanup;
+
+#if TLS_MACHINE_CERTS
+    rv = load_certified_keys(pc->machine_certified_keys, pc->defined_in,
+                             pc->machine_cert_specs, gc->cert_reg);
+    if (APR_SUCCESS != rv) goto cleanup;
+    if (pc->machine_certified_keys->nelts > 0) {
+        rr = rustls_client_config_builder_set_certified_key(
+                builder, (const rustls_certified_key**)pc->machine_certified_keys->elts,
+                (size_t)pc->machine_certified_keys->nelts);
+        if (RUSTLS_RESULT_OK != rr) goto cleanup;
+    }
+#endif
 
     pc->rustls_config = rustls_client_config_builder_build(builder);
     builder = NULL;

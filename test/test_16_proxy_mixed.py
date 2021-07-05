@@ -1,6 +1,3 @@
-import re
-from datetime import timedelta
-
 import pytest
 
 from test_conf import TlsTestConf

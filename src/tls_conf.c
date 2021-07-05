@@ -138,6 +138,7 @@ void *tls_conf_create_dir(apr_pool_t *pool, char *dir)
     conf->proxy_protocol_min = TLS_FLAG_UNSET;
     conf->proxy_pref_ciphers = apr_array_make(pool, 3, sizeof(apr_uint16_t));;
     conf->proxy_supp_ciphers = apr_array_make(pool, 3, sizeof(apr_uint16_t));;
+    conf->proxy_machine_cert_specs = apr_array_make(pool, 3, sizeof(tls_cert_spec_t*));
     return conf;
 }
 
@@ -148,7 +149,7 @@ static int same_proxy_settings(tls_conf_dir_t *a, tls_conf_dir_t *b)
 }
 
 static void dir_assign_merge(
-    tls_conf_dir_t *dest, tls_conf_dir_t *base, tls_conf_dir_t *add)
+    tls_conf_dir_t *dest, apr_pool_t *pool, tls_conf_dir_t *base, tls_conf_dir_t *add)
 {
     tls_conf_dir_t local;
 
@@ -162,6 +163,8 @@ static void dir_assign_merge(
         add->proxy_pref_ciphers : base->proxy_pref_ciphers;
     local.proxy_supp_ciphers = add->proxy_supp_ciphers->nelts?
         add->proxy_supp_ciphers : base->proxy_supp_ciphers;
+    local.proxy_machine_cert_specs = apr_array_append(pool,
+        base->proxy_machine_cert_specs, add->proxy_machine_cert_specs);
     if (local.proxy_enabled == TLS_FLAG_TRUE) {
         if (add->proxy_config) {
             local.proxy_config = same_proxy_settings(&local, add)? add->proxy_config : NULL;
@@ -178,7 +181,7 @@ void *tls_conf_merge_dir(apr_pool_t *pool, void *basev, void *addv)
     tls_conf_dir_t *base = basev;
     tls_conf_dir_t *add = addv;
     tls_conf_dir_t *nconf = apr_pcalloc(pool, sizeof(*nconf));
-    dir_assign_merge(nconf, base, add);
+    dir_assign_merge(nconf, pool, base, add);
     return nconf;
 }
 
@@ -218,6 +221,8 @@ tls_conf_proxy_t *tls_conf_proxy_make(
     pc->proxy_protocol_min = dc->proxy_protocol_min;
     pc->proxy_pref_ciphers = dc->proxy_pref_ciphers;
     pc->proxy_supp_ciphers = dc->proxy_supp_ciphers;
+    pc->machine_cert_specs = dc->proxy_machine_cert_specs;
+    pc->machine_certified_keys = apr_array_make(p, 3, sizeof(const rustls_certified_key*));
     return pc;
 }
 
@@ -240,14 +245,14 @@ int tls_proxy_section_post_config(
      * `proxy_dc` is then complete and tells us if we handle outgoing connections
      * here and with what parameter settings.
      */
-    (void)p; (void)ptemp; (void)plog;
+    (void)ptemp; (void)plog;
     ap_log_error(APLOG_MARK, APLOG_TRACE3, 0, s,
         "%s: tls_proxy_section_post_config called", s->server_hostname);
     proxy_dc = ap_get_module_config(section_config, &tls_module);
     if (!proxy_dc) goto cleanup;
     server_dc = ap_get_module_config(s->lookup_defaults, &tls_module);
     ap_assert(server_dc);
-    dir_assign_merge(proxy_dc, server_dc, proxy_dc);
+    dir_assign_merge(proxy_dc, p, server_dc, proxy_dc);
     tls_conf_dir_apply_defaults(proxy_dc, p);
     if (proxy_dc->proxy_enabled && !proxy_dc->proxy_config) {
         /* remember `proxy_dc` for subsequent configuration of outoing TLS setups */
@@ -682,6 +687,43 @@ static const char *tls_conf_set_user_name(
 
 #endif /* if TLS_CLIENT_CERTS */
 
+#if TLS_MACHINE_CERTS
+
+static const char *tls_conf_add_proxy_machine_certificate(
+    cmd_parms *cmd, void *dir_conf, const char *cert_file, const char *pkey_file)
+{
+    tls_conf_dir_t *dc = dir_conf;
+    const char *err = NULL, *fpath;
+    tls_cert_spec_t *cert;
+
+    (void)dc;
+    if (NULL != (err = cmd_check_file(cmd, cert_file))) goto cleanup;
+    /* key file may be NULL, in which case cert_file must contain the key PEM */
+    if (pkey_file && NULL != (err = cmd_check_file(cmd, pkey_file))) goto cleanup;
+
+    cert = apr_pcalloc(cmd->pool, sizeof(*cert));
+    fpath = ap_server_root_relative(cmd->pool, cert_file);
+    if (!tls_util_is_file(cmd->pool, fpath)) {
+        return apr_pstrcat(cmd->pool, cmd->cmd->name,
+            ": unable to find certificate file: '", fpath, "'", NULL);
+    }
+    cert->cert_file = cert_file;
+    if (pkey_file) {
+        fpath = ap_server_root_relative(cmd->pool, pkey_file);
+        if (!tls_util_is_file(cmd->pool, fpath)) {
+            return apr_pstrcat(cmd->pool, cmd->cmd->name,
+                ": unable to find certificate key file: '", fpath, "'", NULL);
+        }
+    }
+    cert->pkey_file = pkey_file;
+    *(const tls_cert_spec_t **)apr_array_push(dc->proxy_machine_cert_specs) = cert;
+
+cleanup:
+    return err;
+}
+
+#endif  /* if TLS_MACHINE_CERTS */
+
 const command_rec tls_conf_cmds[] = {
     AP_INIT_TAKE12("TLSCertificate", tls_conf_add_certificate, NULL, RSRC_CONF,
         "Add a certificate to the server by specifying a file containing the "
@@ -720,6 +762,10 @@ const command_rec tls_conf_cmds[] = {
         "If TLS client authentication is 'required', 'optional' or 'none'."),
     AP_INIT_TAKE1("TLSUserName", tls_conf_set_user_name, NULL, RSRC_CONF,
         "Set the SSL variable to be used as user name."),
-#endif
+#endif  /* if TLS_CLIENT_CERTS */
+#if TLS_MACHINE_CERTS
+    AP_INIT_TAKE12("TLSProxyMachineCertificate", tls_conf_add_proxy_machine_certificate, NULL, RSRC_CONF|PROXY_CONF,
+        "Add a certificate to be used as client certificate on a proxy connection. "),
+#endif  /* if TLS_MACHINE_CERTS */
     AP_INIT_TAKE1(NULL, NULL, NULL, RSRC_CONF, NULL)
 };

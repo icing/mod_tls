@@ -119,6 +119,7 @@ class TlsTestEnv:
         self._libexec_dir = self.get_apxs_var('LIBEXECDIR')
         self._http_port = int(config.get('global', 'http_port'))
         self._https_port = int(config.get('global', 'https_port'))
+        self._https_port2 = int(config.get('global', 'https_port2'))
 
         self._http_base = "http://127.0.0.1:{port}".format(port=self._http_port)
         self._httpd_check_url = self._http_base
@@ -145,6 +146,10 @@ class TlsTestEnv:
     @property
     def https_port(self) -> int:
         return self._https_port
+
+    @property
+    def https_port2(self) -> int:
+        return self._https_port2
 
     @property
     def http_base_url(self) -> str:
