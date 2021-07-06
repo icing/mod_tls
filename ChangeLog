@@ -1,3 +1,5 @@
+v0.8.1
+----------------------------------------------------------------------------------------------------
  * Support for machine certificates in proxy conections. Use `TLSProxyMachineCertificate`
    similar to `TLSCertificate` to configure a certificate to use for authentication
    against a proxied backend server.

@@ -208,7 +208,7 @@ This runs one test. There are several defined in `test/load_test.py` which you c
  TLSv1.1/1.0      | yes*    |  no    | *)if enabled in OpenSSL
  Individual VirtualHost TLS Settings |  yes  | yes  |
  Frontend client certificates |  yes  | no |
- Backend machine certificate |  yes  | no* | *)planned, but not implemented yet.
+ Backend machine certificate |  yes  | yes* | *)since v0.8.1
  Frontend OCSP stapling | yes  | yes*  | *)via mod_md
  Backend OCSP check |  yes  | no*  |  *)stapling will be verified
  TLS version used | min-max  |  min |
