@@ -105,7 +105,7 @@ static apr_status_t tls_post_proxy_config(
     return tls_core_init(p, ptemp, s);
 }
 
-#if AP_MODULE_MAGIC_AT_LEAST(20210531, 0)
+#if AP_MODULE_MAGIC_AT_LEAST(20120211, 109)
 static int tls_ssl_outgoing(conn_rec *c, ap_conf_vector_t *dir_conf, int enable_ssl)
 {
     /* we are not handling proxy connections - for now */
@@ -123,7 +123,7 @@ static int tls_ssl_outgoing(conn_rec *c, ap_conf_vector_t *dir_conf, int enable_
     return DECLINED;
 }
 
-#else /* AP_MODULE_MAGIC_AT_LEAST(20210531, 0) */
+#else /* #if AP_MODULE_MAGIC_AT_LEAST(20120211, 109) */
 
 APR_DECLARE_OPTIONAL_FN(int, ssl_proxy_enable, (conn_rec *));
 APR_DECLARE_OPTIONAL_FN(int, ssl_engine_disable, (conn_rec *));
@@ -201,7 +201,7 @@ static apr_status_t tls_post_config_proxy_ssl(
     }
     return APR_SUCCESS;
 }
-#endif /* AP_MODULE_MAGIC_AT_LEAST(20210531, 0) else part */
+#endif /* #if AP_MODULE_MAGIC_AT_LEAST(20120211, 109) */
 
 static void tls_init_child(apr_pool_t *p, server_rec *s)
 {
@@ -272,7 +272,7 @@ static void tls_hooks(apr_pool_t *pool)
     ap_hook_ssl_conn_is_ssl(tls_conn_check_ssl, NULL, NULL, APR_HOOK_MIDDLE);
     ap_hook_ssl_var_lookup(tls_var_lookup, NULL, NULL, APR_HOOK_MIDDLE);
 
-#if AP_MODULE_MAGIC_AT_LEAST(20210531, 0)
+#if AP_MODULE_MAGIC_AT_LEAST(20120211, 109)
     ap_hook_ssl_bind_outgoing(tls_ssl_outgoing, NULL, NULL, APR_HOOK_MIDDLE);
 #else
     ap_hook_post_config(tls_post_config_proxy_ssl, NULL, dep_proxy, APR_HOOK_MIDDLE);

@@ -987,7 +987,7 @@ int tls_core_pre_conn_init(conn_rec *c)
     if (cc->state == TLS_CONN_ST_INIT) {
         /* Need to decide if we TLS this connection or not */
         int enabled =
-#if AP_MODULE_MAGIC_AT_LEAST(20210531, 0)
+#if AP_MODULE_MAGIC_AT_LEAST(20120211, 109)
                 !c->outgoing &&
 #endif
                 sc->enabled == TLS_FLAG_TRUE;
@@ -1377,7 +1377,7 @@ int tls_core_setup_outgoing(conn_rec *c)
 
     ap_log_cerror(APLOG_MARK, APLOG_TRACE2, 0, c,
                  "tls_core_setup_outgoing called");
-#if AP_MODULE_MAGIC_AT_LEAST(20210531, 0)
+#if AP_MODULE_MAGIC_AT_LEAST(20120211, 109)
     if (!c->outgoing) goto cleanup;
 #endif
     cc = cc_get_or_make(c);
