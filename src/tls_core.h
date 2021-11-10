@@ -38,6 +38,8 @@ typedef struct {
     int client_hello_seen;            /* the client hello has been inspected */
 
     rustls_connection *rustls_connection; /* the session used on this connection or NULL */
+    const rustls_server_config *rustls_server_config; /* the config made for this connection (incoming) or NULL */
+    const rustls_client_config *rustls_client_config; /* the config made for this connection (outgoing) or NULL */
     struct tls_filter_ctx_t *filter_ctx; /* the context used by this connection's tls filters */
 
     apr_array_header_t *local_keys;   /* rustls_certified_key* array of connection specific keys */

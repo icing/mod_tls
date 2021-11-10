@@ -23,7 +23,7 @@ lib_LTLIBRARIES    = mod_tls.la
 #---------------------------------------------------------------------------------------------------
 
 mod_tls_la_CPPFLAGS = -g -I../src -std=c99 -D_GNU_SOURCE -Werror @WERROR_CFLAGS@
-mod_tls_la_LDFLAGS  = -lcrustls -module -export-symbols-regex tls_module
+mod_tls_la_LDFLAGS  = -lrustls -module -export-symbols-regex tls_module
 
 
 OBJECTS = \

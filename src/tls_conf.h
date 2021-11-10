@@ -102,11 +102,11 @@ typedef struct {
     apr_array_header_t *certified_keys; /* rustls_certified_key list configured */
     int base_server;                  /* != 0 iff this is the base server */
     int service_unavailable;          /* TLS not trustworthy configured, return 503s */
-    const rustls_server_config *rustls_config; /* config to use for TLS against this very server */
 } tls_conf_server_t;
 
 typedef struct {
     server_rec *defined_in;           /* the server/host defining this dir_conf */
+    tls_conf_global_t *global;        /* global module config, singleton */
     const char *proxy_ca;             /* PEM file with trust anchors for proxied remote server certs */
     int proxy_protocol_min;            /* the minimum TLS protocol version to use for proxy connections */
     apr_array_header_t *proxy_pref_ciphers;  /* List of apr_uint16_t cipher ids to prefer */
@@ -166,7 +166,7 @@ apr_status_t tls_conf_dir_apply_defaults(tls_conf_dir_t *dc, apr_pool_t *p);
 
 /* create a new proxy configuration from directory config in server */
 tls_conf_proxy_t *tls_conf_proxy_make(
-    apr_pool_t *p, tls_conf_dir_t *dc, server_rec *s);
+    apr_pool_t *p, tls_conf_dir_t *dc, tls_conf_global_t *gc, server_rec *s);
 
 int tls_proxy_section_post_config(
     apr_pool_t *p, apr_pool_t *plog, apr_pool_t *ptemp, server_rec *s,

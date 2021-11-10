@@ -16,7 +16,7 @@
 #include <http_log.h>
 #include <ap_socache.h>
 
-#include <crustls.h>
+#include <rustls.h>
 
 #include "tls_conf.h"
 #include "tls_core.h"

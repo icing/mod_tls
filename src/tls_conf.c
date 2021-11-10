@@ -17,7 +17,7 @@
 #include <http_main.h>
 #include <ap_socache.h>
 
-#include <crustls.h>
+#include <rustls.h>
 
 #include "tls_cert.h"
 #include "tls_proto.h"
@@ -213,10 +213,11 @@ apr_status_t tls_conf_dir_apply_defaults(tls_conf_dir_t *dc, apr_pool_t *p)
 }
 
 tls_conf_proxy_t *tls_conf_proxy_make(
-    apr_pool_t *p, tls_conf_dir_t *dc, server_rec *s)
+    apr_pool_t *p, tls_conf_dir_t *dc, tls_conf_global_t *gc, server_rec *s)
 {
     tls_conf_proxy_t *pc = apr_pcalloc(p, sizeof(*pc));
     pc->defined_in = s;
+    pc->global = gc;
     pc->proxy_ca = dc->proxy_ca;
     pc->proxy_protocol_min = dc->proxy_protocol_min;
     pc->proxy_pref_ciphers = dc->proxy_pref_ciphers;
@@ -257,7 +258,7 @@ int tls_proxy_section_post_config(
     if (proxy_dc->proxy_enabled && !proxy_dc->proxy_config) {
         /* remember `proxy_dc` for subsequent configuration of outoing TLS setups */
         sc = tls_conf_server_get(s);
-        proxy_dc->proxy_config = tls_conf_proxy_make(p, proxy_dc, s);
+        proxy_dc->proxy_config = tls_conf_proxy_make(p, proxy_dc, sc->global, s);
         ap_log_error(APLOG_MARK, APLOG_TRACE3, 0, s,
             "%s: adding proxy_conf to globals in proxy_post_config_section",
             s->server_hostname);

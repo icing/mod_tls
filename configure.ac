@@ -53,8 +53,8 @@ AC_ARG_WITH([apxs], [AS_HELP_STRING([--with-apxs],
     [Use APXS executable [default=check]])],
     [request_apxs=$withval], [request_apxs=check])
 
-AC_ARG_WITH([crustls], [AS_HELP_STRING([--with-crustls], [Use crustls from this prefix])],
-    [request_crustls=$withval], [request_crustls=check])
+AC_ARG_WITH([rustls], [AS_HELP_STRING([--with-rustls], [Use rustls from this prefix])],
+    [request_rustls=$withval], [request_rustls=check])
 
 AC_ARG_WITH([curl], [AS_HELP_STRING([--with-curl],
     [Use curl executable [default=check]])],
@@ -153,59 +153,64 @@ else
     AC_MSG_NOTICE("using APXS=$APXS as configured")
 fi
 
-export BUILD_SUBDIRS="src test"
+AC_SUBST(APR)
 
 prefix="$($APXS -q prefix)"
 prefix="${prefix:-/usr}"
-export PREFIX="${prefix}"
-LDFLAGS="$LDFLAGS -L$($APXS -q libdir)"
+AC_SUBST(prefix)
 
-AP_INC=$($APXS -q includedir)
-CPPFLAGS="$CPPFLAGS -I$AP_INC"
-APR_INC=$($APXS -q APR_INCLUDEDIR)
-if test "$APR_INC" != "$AP_INC"; then
-    CPPFLAGS="$CPPFLAGS -I$APR_INC"
-fi
-export SYSCONF_DIR="$($APXS -q sysconfdir)"
-export LIBEXEC_DIR="$($APXS -q LIBEXECDIR)"
-export SBINDIR="$($APXS -q SBINDIR)"
+exec_prefix="$($APXS -q exec_prefix)"
+AC_SUBST(exec_prefix)
+APR_BINDIR="$($APXS -q APR_BINDIR)"
+AC_SUBST(APR_BINDIR)
+sbindir="$($APXS -q sbindir)"
+AC_SUBST(sbindir)
+progname="$($APXS -q progname)"
+AC_SUBST(progname)
+libdir="$($APXS -q libdir)"
+AC_SUBST(libdir)
+SYSCONF_DIR="$($APXS -q sysconfdir)"
+AC_SUBST(SYSCONF_DIR)
+LIBEXEC_DIR="$($APXS -q LIBEXECDIR)"
+AC_SUBST(LIBEXEC_DIR)
+
+LDFLAGS="-L$libdir $LDFLAGS"
+CPPFLAGS="-I$($APXS -q includedir) -I$($APXS -q APR_INCLUDEDIR) $($APXS -q EXTRA_CPPFLAGS) $CPPFLAGS"
 
 HTTPD_VERSION="$($APXS -q HTTPD_VERSION)"
+AC_SUBST(HTTPD_VERSION)
 
-AC_SUBST(LIBEXECDIR)
+APACHECTL="$sbindir/apachectl"
+if test ! -x "$APACHECTL"; then
+    # rogue distros rename things! =)
+    APACHECTL="$sbindir/apache2ctl"
+fi
+AC_SUBST(APACHECTL)
 
-AC_CHECK_LIB([apr-1], [apr_pool_create_ex], [LIB_APR=apr-1], [AC_MSG_ERROR("library apr-1 not found")])
-AC_SUBST(LIB_APR)
-AC_CHECK_LIB([aprutil-1], [apr_brigade_create], [LIB_APRUTIL=aprutil-1], [AC_MSG_ERROR("library aprutil-1 not found")])
-AC_SUBST(LIB_APRUTIL)
-
-# some installations have modules linked statically
-test -x "$SBINDIR/apachectl" || AC_MSG_ERROR("no found: $SBINDIR/apachectl")
-LOAD_LOG_CONFIG=
-LOAD_LOGIO=
-LOAD_UNIXD=
-LOAD_VERSION=
-LOAD_WATCHDOG=
-linked=$($SBINDIR/apachectl -t -D DUMP_MODULES | fgrep '(static)')
-case "$linked" in *log_config_module*) LOAD_LOG_CONFIG='#';; esac
-case "$linked" in *logio_module*) LOAD_LOGIO='#';; esac
-case "$linked" in *unixd_module*) LOAD_UNIXD='#';; esac
-case "$linked" in *version_module*) LOAD_VERSION='#';; esac
-case "$linked" in *watchdog_module*) LOAD_WATCHDOG='#';; esac
-
+if test -x "$APACHECTL"; then
+    DSO_MODULES="$($APACHECTL -t -D DUMP_MODULES | fgrep '(shared)'| sed 's/_module.*//g'|tr -d \\n)"
+    AC_SUBST(DSO_MODULES)
+    STATIC_MODULES="$($APACHECTL -t -D DUMP_MODULES | fgrep '(static)'| sed 's/_module.*//g'|tr -d \\n)"
+    AC_SUBST(STATIC_MODULES)
+else
+    AC_MSG_WARN("apachectl not found in '$BINDIR', test suite will not work!")
+    APACHECTL=""
+fi
 AC_SUBST(LOAD_LOG_CONFIG)
 AC_SUBST(LOAD_LOGIO)
 AC_SUBST(LOAD_UNIXD)
 AC_SUBST(LOAD_VERSION)
 AC_SUBST(LOAD_WATCHDOG)
 
-if test x"$request_crustls" != "xcheck"; then
-    LDFLAGS="$LDFLAGS -L$request_crustls/lib";
-    CFLAGS="$CFLAGS -I$request_crustls/include";
-    CPPFLAGS="$CPPFLAGS -I$request_crustls/include";
+export BUILD_SUBDIRS="src"
+
+if test x"$request_rustls" != "xcheck"; then
+    LDFLAGS="$LDFLAGS -L$request_rustls/lib";
+    CFLAGS="$CFLAGS -I$request_rustls/include";
+    CPPFLAGS="$CPPFLAGS -I$request_rustls/include";
 fi
 
-# Need some additional things for crustls linkage. This seems platform specific.
+# Need some additional things for rustls linkage. This seems platform specific.
 if test $(uname) = "Darwin"; then
     CRUSTLS_LDFLAGS="-Wl,-dead_strip -framework Security -framework Foundation"
 else
@@ -213,9 +218,9 @@ else
 fi
 LDFLAGS="$LDFLAGS $CRUSTLS_LDFLAGS"
 
-# verify that we can link crustls now
+# verify that we can link rustls now
 # commented: problem running on debian
-# AC_CHECK_LIB([crustls], [rustls_version], [AC_MSG_NOTICE("crustls found.")], [AC_MSG_ERROR("library crustls not found")])
+# AC_CHECK_LIB([rustls], [rustls_version], [AC_MSG_NOTICE("rustls found.")], [AC_MSG_ERROR("library rustls not found")])
 
 # Checks for header files.
 AC_CHECK_HEADERS([ \
@@ -257,9 +262,7 @@ AC_CONFIG_FILES([
     src/tls_version.h
     src/Makefile
     test/Makefile
-    test/conf/httpd.conf
-    test/conf/modules.conf
-    test/test.ini
+    test/pyhttpd/config.ini
 ])
 
 AC_OUTPUT

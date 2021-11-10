@@ -18,7 +18,7 @@
 #include <http_request.h>
 #include <ap_socache.h>
 
-#include <crustls.h>
+#include <rustls.h>
 
 #include "mod_tls.h"
 #include "tls_conf.h"
@@ -48,12 +48,10 @@ AP_DECLARE_MODULE(tls) = {
 
 static const char* crustls_version(apr_pool_t *p)
 {
-    char buffer[1024];
-    size_t len;
+    struct rustls_str rversion;
 
-    memset(buffer, 0, sizeof(buffer));
-    len = rustls_version(buffer, sizeof(buffer)-1);
-    return apr_pstrndup(p, buffer, len);
+    rversion = rustls_version();
+    return apr_pstrndup(p, rversion.data, rversion.len);
 }
 
 static int tls_pre_config(apr_pool_t *pconf, apr_pool_t *plog, apr_pool_t *ptemp)

@@ -19,7 +19,7 @@
 #include <http_main.h>
 #include <ap_socache.h>
 
-#include <crustls.h>
+#include <rustls.h>
 
 #include "tls_proto.h"
 #include "tls_cert.h"
@@ -79,24 +79,12 @@ static apr_status_t tls_core_free(void *data)
 {
     server_rec *base_server = (server_rec *)data;
     tls_conf_server_t *sc = tls_conf_server_get(base_server);
-    server_rec *s;
 
     if (sc && sc->global && sc->global->rustls_hello_config) {
         rustls_server_config_free(sc->global->rustls_hello_config);
         sc->global->rustls_hello_config = NULL;
     }
     tls_cache_free(base_server);
-
-    /* free all rustls things we are owning. */
-    for (s = base_server; s; s = s->next) {
-        sc = tls_conf_server_get(s);
-        if (sc) {
-            if (sc->rustls_config) {
-                rustls_server_config_free(sc->rustls_config);
-                sc->rustls_config = NULL;
-            }
-        }
-    }
     return APR_SUCCESS;
 }
 
@@ -250,6 +238,7 @@ static apr_status_t calc_ciphers(
     return rv;
 }
 
+#ifdef CRUSTLS
 static apr_status_t set_server_ciphers(
     apr_pool_t *pool, tls_conf_server_t *sc,
     rustls_server_config_builder *builder)
@@ -290,6 +279,7 @@ cleanup:
     }
     return rv;
 }
+#endif
 
 static apr_array_header_t *complete_cert_specs(
     apr_pool_t *p, tls_conf_server_t *sc)
@@ -341,13 +331,16 @@ static const rustls_certified_key *select_certified_key(
     void* userdata, const rustls_client_hello *hello)
 {
     conn_rec *c = userdata;
-    tls_conf_conn_t *cc = tls_conf_conn_get(c);
+    tls_conf_conn_t *cc;
     tls_conf_server_t *sc;
     apr_array_header_t *keys;
     const rustls_certified_key *clone;
     rustls_result rr = RUSTLS_RESULT_OK;
     apr_status_t rv;
 
+    ap_assert(c);
+    cc = tls_conf_conn_get(c);
+    ap_assert(cc);
     ap_log_cerror(APLOG_MARK, APLOG_TRACE2, 0, c, "client hello select certified key");
     if (!cc || !cc->server) goto cleanup;
     sc = tls_conf_server_get(cc->server);
@@ -392,42 +385,23 @@ cleanup:
 static apr_status_t server_conf_setup(
     apr_pool_t *p, apr_pool_t *ptemp, tls_conf_server_t *sc, tls_conf_global_t *gc)
 {
-    rustls_server_config_builder *builder = NULL;
     apr_array_header_t *cert_specs;
-    rustls_result rr = RUSTLS_RESULT_OK;
     apr_status_t rv = APR_SUCCESS;
 
+    /* TODO: most code has been stripped here with the changes in rustls-ffi v0.8.0
+     * and this means that any errors are only happening at connection setup, which
+     * is too late.
+     */
     (void)p;
     ap_log_error(APLOG_MARK, APLOG_TRACE1, rv, sc->server,
                  "init server: %s", sc->server->server_hostname);
-    if (sc->client_auth != TLS_CLIENT_AUTH_NONE) {
-        if (!sc->client_ca) {
-            ap_log_error(APLOG_MARK, APLOG_ERR, 0, sc->server, APLOGNO()
-                         "TLSClientAuthentication is enabled for %s, but no client CA file is set. "
-                          "Use 'TLSClientCA <file>' to specify the trust anchors.",
-                         sc->server->server_hostname);
-            rv = APR_EINVAL; goto cleanup;
-        }
 
-        if (sc->client_auth == TLS_CLIENT_AUTH_REQUIRED) {
-            const rustls_client_cert_verifier *verifier;
-            rv = tls_cert_client_verifiers_get(gc->verifiers, sc->client_ca, &verifier);
-            if (APR_SUCCESS != rv) goto cleanup;
-            builder = rustls_server_config_builder_with_client_verifier(verifier);
-        }
-        else {
-            const rustls_client_cert_verifier_optional *verifier;
-            rv = tls_cert_client_verifiers_get_optional(gc->verifiers, sc->client_ca, &verifier);
-            if (APR_SUCCESS != rv) goto cleanup;
-            builder = rustls_server_config_builder_with_client_verifier_optional(verifier);
-        }
-    }
-    else {
-        builder = rustls_server_config_builder_new();
-    }
-
-    if (!builder) {
-        rv = APR_ENOMEM; goto cleanup;
+    if (sc->client_auth != TLS_CLIENT_AUTH_NONE && !sc->client_ca) {
+        ap_log_error(APLOG_MARK, APLOG_ERR, 0, sc->server, APLOGNO()
+                     "TLSClientAuthentication is enabled for %s, but no client CA file is set. "
+                      "Use 'TLSClientCA <file>' to specify the trust anchors.",
+                     sc->server->server_hostname);
+        rv = APR_EINVAL; goto cleanup;
     }
 
     cert_specs = complete_cert_specs(ptemp, sc);
@@ -437,136 +411,50 @@ static apr_status_t server_conf_setup(
     ap_log_error(APLOG_MARK, APLOG_TRACE1, rv, sc->server,
                  "init server: %s with %d certificates loaded",
                  sc->server->server_hostname, sc->certified_keys->nelts);
-
-    rustls_server_config_builder_set_hello_callback(builder, select_certified_key);
-
-    if (sc->tls_protocol_min > 0) {
-        apr_array_header_t *tls_versions;
-
-        ap_log_error(APLOG_MARK, APLOG_TRACE1, rv, sc->server,
-                     "init server: set protocol min version %04x", sc->tls_protocol_min);
-        tls_versions = tls_proto_create_versions_plus(
-            sc->global->proto, (apr_uint16_t)sc->tls_protocol_min, ptemp);
-        if (tls_versions->nelts > 0) {
-            rr = rustls_server_config_builder_set_versions(builder,
-                (const apr_uint16_t*)tls_versions->elts, (apr_size_t)tls_versions->nelts);
-            if (RUSTLS_RESULT_OK != rr) goto cleanup;
-            if (sc->tls_protocol_min != APR_ARRAY_IDX(tls_versions, 0, apr_uint16_t)) {
-                ap_log_error(APLOG_MARK, APLOG_WARNING, 0, sc->server, APLOGNO()
-                             "Init: the minimum protocol version configured for %s (%04x) "
-                             "is not supported and version %04x was selected instead.",
-                             sc->server->server_hostname, sc->tls_protocol_min,
-                             APR_ARRAY_IDX(tls_versions, 0, apr_uint16_t));
-            }
-        }
-        else {
-            ap_log_error(APLOG_MARK, APLOG_ERR, 0, sc->server, APLOGNO()
-                         "Unable to configure the protocol version for %s: "
-                          "neither the configured minimum version (%04x), nor any higher one is "
-                         "available.", sc->server->server_hostname, sc->tls_protocol_min);
-            rv = APR_ENOTIMPL; goto cleanup;
-        }
-    }
-
-    rv = set_server_ciphers(ptemp, sc, builder);
-    if (APR_SUCCESS != rv) goto cleanup;
-
-    rr = rustls_server_config_builder_set_ignore_client_order(
-        builder, sc->honor_client_order == TLS_FLAG_FALSE);
-    if (RUSTLS_RESULT_OK != rr) goto cleanup;
-
-    /* whatever we negotiate later on a connection, the base we start with is http/1.1 */
-    if (1) {
-        rustls_slice_bytes rsb = {
-            (const unsigned char*)"http/1.1",
-            sizeof("http/1.1")-1,
-        };
-        rr = rustls_server_config_builder_set_protocols(builder, &rsb, 1);
-        if (RUSTLS_RESULT_OK != rr) goto cleanup;
-    }
-
-    rv = tls_cache_init_server(builder, sc->server);
-    if (APR_SUCCESS != rv) goto cleanup;
-
-    sc->rustls_config = rustls_server_config_builder_build(builder);
-    builder = NULL;
-    if (!sc->rustls_config) {
-        rv = APR_ENOMEM; goto cleanup;
-    }
-
 cleanup:
-    if (builder) rustls_server_config_builder_free(builder);
-    if (RUSTLS_RESULT_OK != rr) {
-        const char *err_descr;
-        rv = tls_util_rustls_error(ptemp, rr, &err_descr);
-        ap_log_error(APLOG_MARK, APLOG_ERR, rv, sc->server, APLOGNO()
-                     "Failed to configure server %s: [%d] %s",
-                     sc->server->server_hostname, (int)rr, err_descr);
-        goto cleanup;
-    }
     return rv;
 }
 
-static apr_status_t set_proxy_ciphers(
-    apr_pool_t *pool, tls_conf_proxy_t *pc,
-    tls_conf_global_t *gc, rustls_client_config_builder *builder)
+static apr_status_t get_proxy_ciphers(const apr_array_header_t **pciphersuites,
+    apr_pool_t *pool, tls_conf_proxy_t *pc)
 {
-    const apr_array_header_t *ciphers;
-    rustls_result rr = RUSTLS_RESULT_OK;
+    const apr_array_header_t *ciphers, *suites = NULL;
     apr_status_t rv = APR_SUCCESS;
 
-    rv = calc_ciphers(pool, pc->defined_in, gc,
-        "", pc->proxy_pref_ciphers, pc->proxy_supp_ciphers,
-        &ciphers);
+    rv = calc_ciphers(pool, pc->defined_in, pc->global,
+        "", pc->proxy_pref_ciphers, pc->proxy_supp_ciphers, &ciphers);
     if (APR_SUCCESS != rv) goto cleanup;
 
     if (ciphers) {
-        apr_array_header_t *suites = tls_proto_get_rustls_suites(
-            gc->proto, ciphers, pool);
+        suites = tls_proto_get_rustls_suites(pc->global->proto, ciphers, pool);
         /* this changed the default rustls ciphers, configure it. */
         if (APLOGtrace2(pc->defined_in)) {
-            tls_proto_conf_t *conf = gc->proto;
+            tls_proto_conf_t *conf = pc->global->proto;
             ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, pc->defined_in,
                          "tls proxy ciphers configured[%s]: %s",
                          pc->defined_in->server_hostname,
                          tls_proto_get_cipher_names(conf, ciphers, pool));
         }
-        rr = rustls_client_config_builder_set_ciphersuites(builder,
-            (const rustls_supported_ciphersuite* const*)suites->elts,
-            (apr_size_t)suites->nelts);
-        if (RUSTLS_RESULT_OK != rr) goto cleanup;
     }
 
 cleanup:
-    if (RUSTLS_RESULT_OK != rr) {
-        const char *err_descr;
-        rv = tls_util_rustls_error(pool, rr, &err_descr);
-        ap_log_error(APLOG_MARK, APLOG_ERR, rv, pc->defined_in, APLOGNO()
-                     "Failed to configure proxy ciphers %s: [%d] %s",
-                     pc->defined_in->server_hostname, (int)rr, err_descr);
-    }
+    *pciphersuites = (APR_SUCCESS == rv)? suites : NULL;
     return rv;
 }
 
 static apr_status_t proxy_conf_setup(
     apr_pool_t *p, apr_pool_t *ptemp, tls_conf_proxy_t *pc, tls_conf_global_t *gc)
 {
-    rustls_client_config_builder *builder;
-    rustls_root_cert_store *ca_store = NULL;
-    rustls_result rr = RUSTLS_RESULT_OK;
     apr_status_t rv = APR_SUCCESS;
 
     (void)p; (void)ptemp;
     ap_assert(pc->defined_in);
+    pc->global = gc;
 
-    builder = rustls_client_config_builder_new();
     if (pc->proxy_ca && strcasecmp(pc->proxy_ca, "default")) {
         ap_log_error(APLOG_MARK, APLOG_TRACE2, rv, pc->defined_in,
-                     "proxy: loading roots in %s from %s",
+                     "proxy: will use roots in %s from %s",
                      pc->defined_in->server_hostname, pc->proxy_ca);
-        rv = tls_cert_root_stores_get(gc->stores, pc->proxy_ca, &ca_store);
-        if (APR_SUCCESS != rv) goto cleanup;
-        rustls_client_config_builder_use_roots(builder, ca_store);
     }
     else {
         ap_log_error(APLOG_MARK, APLOG_WARNING, rv, pc->defined_in,
@@ -583,9 +471,6 @@ static apr_status_t proxy_conf_setup(
         tls_versions = tls_proto_create_versions_plus(
             gc->proto, (apr_uint16_t)pc->proxy_protocol_min, ptemp);
         if (tls_versions->nelts > 0) {
-            rr = rustls_client_config_builder_set_versions(builder,
-                (const apr_uint16_t*)tls_versions->elts, (apr_size_t)tls_versions->nelts);
-            if (RUSTLS_RESULT_OK != rr) goto cleanup;
             if (pc->proxy_protocol_min != APR_ARRAY_IDX(tls_versions, 0, apr_uint16_t)) {
                 ap_log_error(APLOG_MARK, APLOG_WARNING, 0, pc->defined_in, APLOGNO()
                              "Init: the minimum proxy protocol version configured for %s (%04x) "
@@ -603,34 +488,13 @@ static apr_status_t proxy_conf_setup(
         }
     }
 
-    rv = set_proxy_ciphers(ptemp, pc, gc, builder);
-    if (APR_SUCCESS != rv) goto cleanup;
-
 #if TLS_MACHINE_CERTS
     rv = load_certified_keys(pc->machine_certified_keys, pc->defined_in,
                              pc->machine_cert_specs, gc->cert_reg);
     if (APR_SUCCESS != rv) goto cleanup;
-    if (pc->machine_certified_keys->nelts > 0) {
-        rr = rustls_client_config_builder_set_certified_key(
-                builder, (const rustls_certified_key**)pc->machine_certified_keys->elts,
-                (size_t)pc->machine_certified_keys->nelts);
-        if (RUSTLS_RESULT_OK != rr) goto cleanup;
-    }
 #endif
 
-    pc->rustls_config = rustls_client_config_builder_build(builder);
-    builder = NULL;
-
 cleanup:
-    if (builder) rustls_client_config_builder_free(builder);
-    if (RUSTLS_RESULT_OK != rr) {
-        const char *err_descr;
-        rv = tls_util_rustls_error(ptemp, rr, &err_descr);
-        ap_log_error(APLOG_MARK, APLOG_ERR, rv, pc->defined_in, APLOGNO()
-                     "Failed to configure proxy %s: [%d] %s",
-                     pc->defined_in->server_hostname, (int)rr, err_descr);
-        goto cleanup;
-    }
     return rv;
 }
 
@@ -669,9 +533,12 @@ static const rustls_certified_key *extract_client_hello_values(
             protocol = apr_pstrndup(c->pool, (const char*)rs.data, rs.len);
             APR_ARRAY_PUSH(alpn, const char*) = protocol;
             ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, c,
-                "ALPN: client proposes `%s`", protocol);
+                "ALPN: client proposes %d: `%s`", (int)i, protocol);
         }
         cc->alpn = alpn;
+    }
+    else {
+        ap_log_cerror(APLOG_MARK, APLOG_DEBUG, 0, c, "ALPN: no alpn proposed by client");
     }
 cleanup:
     return NULL;
@@ -780,7 +647,7 @@ static apr_status_t init_outgoing(apr_pool_t *p, apr_pool_t *ptemp, server_rec *
         rv = tls_conf_dir_apply_defaults(dc, p);
         if (APR_SUCCESS != rv) goto cleanup;
         if (dc->proxy_enabled != TLS_FLAG_TRUE) continue;
-        dc->proxy_config = tls_conf_proxy_make(p, dc, s);
+        dc->proxy_config = tls_conf_proxy_make(p, dc, gc, s);
         ap_log_error(APLOG_MARK, APLOG_TRACE3, 0, s, "%s: adding proxy_conf to globals",
             s->server_hostname);
         APR_ARRAY_PUSH(gc->proxy_configs, tls_conf_proxy_t*) = dc->proxy_config;
@@ -838,6 +705,14 @@ static apr_status_t tls_core_conn_free(void *data)
         rustls_connection_free(cc->rustls_connection);
         cc->rustls_connection = NULL;
     }
+    if (cc->rustls_server_config) {
+        rustls_server_config_free(cc->rustls_server_config);
+        cc->rustls_server_config = NULL;
+    }
+    if (cc->rustls_client_config) {
+        rustls_client_config_free(cc->rustls_client_config);
+        cc->rustls_client_config = NULL;
+    }
     if (cc->key_cloned && cc->key) {
         rustls_certified_key_free(cc->key);
         cc->key = NULL;
@@ -889,9 +764,11 @@ static apr_status_t init_outgoing_connection(conn_rec *c)
 {
     tls_conf_conn_t *cc = tls_conf_conn_get(c);
     tls_conf_proxy_t *pc;
-    rustls_client_config_builder *builder;
+    const apr_array_header_t *ciphersuites = NULL;
+    apr_array_header_t *tls_versions = NULL;
+    rustls_client_config_builder *builder = NULL;
+    rustls_root_cert_store *ca_store = NULL;
     const char *hostname = NULL, *alpn_note = NULL;
-    const rustls_client_config* config = NULL;
     rustls_result rr = RUSTLS_RESULT_OK;
     apr_status_t rv = APR_SUCCESS;
 
@@ -899,7 +776,6 @@ static apr_status_t init_outgoing_connection(conn_rec *c)
     ap_assert(cc->dc);
     pc = cc->dc->proxy_config;
     ap_assert(pc);
-    ap_assert(pc->rustls_config);
 
     hostname = apr_table_get(c->notes, "proxy-request-hostname");
     alpn_note = apr_table_get(c->notes, "proxy-request-alpn-protos");
@@ -907,7 +783,48 @@ static apr_status_t init_outgoing_connection(conn_rec *c)
         "setup_outgoing: to %s [ALPN: %s] from configration in %s"
         " using CA %s", hostname, alpn_note, pc->defined_in->server_hostname, pc->proxy_ca);
 
-    builder = rustls_client_config_builder_from_config(pc->rustls_config);
+    rv = get_proxy_ciphers(&ciphersuites, c->pool, pc);
+    if (APR_SUCCESS != rv) goto cleanup;
+
+    if (pc->proxy_protocol_min > 0) {
+        tls_versions = tls_proto_create_versions_plus(
+            pc->global->proto, (apr_uint16_t)pc->proxy_protocol_min, c->pool);
+    }
+
+    if (ciphersuites && ciphersuites->nelts > 0
+        && tls_versions && tls_versions->nelts >= 0) {
+        rr = rustls_client_config_builder_new_custom(
+            (const struct rustls_supported_ciphersuite *const *)ciphersuites->elts,
+            (size_t)ciphersuites->nelts,
+            (const uint16_t *)tls_versions->elts, (size_t)tls_versions->nelts,
+            &builder);
+        if (RUSTLS_RESULT_OK != rr) goto cleanup;
+    }
+    else {
+        builder = rustls_client_config_builder_new();
+        if (NULL == builder) {
+            rv = APR_ENOMEM;
+            goto cleanup;
+        }
+    }
+
+    if (pc->proxy_ca && strcasecmp(pc->proxy_ca, "default")) {
+        rv = tls_cert_root_stores_get(pc->global->stores, pc->proxy_ca, &ca_store);
+        if (APR_SUCCESS != rv) goto cleanup;
+        rustls_client_config_builder_use_roots(builder, ca_store);
+    }
+
+#if TLS_MACHINE_CERTS
+    if (pc->machine_certified_keys->nelts > 0) {
+        ap_log_error(APLOG_MARK, APLOG_TRACE1, 0, c->base_server,
+            "setup_outgoing: adding %d client certificate", (int)pc->machine_certified_keys->nelts);
+        rr = rustls_client_config_builder_set_certified_key(
+                builder, (const rustls_certified_key**)pc->machine_certified_keys->elts,
+                (size_t)pc->machine_certified_keys->nelts);
+        if (RUSTLS_RESULT_OK != rr) goto cleanup;
+    }
+#endif
+
     if (hostname) {
         rustls_client_config_builder_set_enable_sni(builder, true);
     }
@@ -948,7 +865,7 @@ static apr_status_t init_outgoing_connection(conn_rec *c)
                 APR_ARRAY_PUSH(rustls_protocols, rustls_slice_bytes) = bytes;
             }
 
-            rr = rustls_client_config_builder_set_protocols(builder,
+            rr = rustls_client_config_builder_set_alpn_protocols(builder,
                 (rustls_slice_bytes*)rustls_protocols->elts, (size_t)rustls_protocols->nelts);
             if (RUSTLS_RESULT_OK != rr) goto cleanup;
 
@@ -958,13 +875,15 @@ static apr_status_t init_outgoing_connection(conn_rec *c)
         }
     }
 
-    config = rustls_client_config_builder_build(builder);
-    rr = rustls_client_connection_new(config, hostname, &cc->rustls_connection);
+    cc->rustls_client_config = rustls_client_config_builder_build(builder);
+    builder = NULL;
+
+    rr = rustls_client_connection_new(cc->rustls_client_config, hostname, &cc->rustls_connection);
     if (RUSTLS_RESULT_OK != rr) goto cleanup;
     rustls_connection_set_userdata(cc->rustls_connection, c);
 
 cleanup:
-    if (config != NULL) rustls_client_config_free(config);
+    if (builder != NULL) rustls_client_config_builder_free(builder);
     if (RUSTLS_RESULT_OK != rr) {
         const char *err_descr = NULL;
         rv = tls_util_rustls_error(c->pool, rr, &err_descr);
@@ -1079,24 +998,31 @@ static apr_status_t select_application_protocol(
      * our only ALPN protocol and then do the 'real' handshake.
      */
     cc->application_protocol = ap_get_protocol(c);
-    if (cc->alpn && cc->alpn->nelts > 0
-        && (proposed = ap_select_protocol(c, NULL, s, cc->alpn))
-        && strcmp(proposed, cc->application_protocol)) {
+    if (cc->alpn && cc->alpn->nelts > 0) {
         rustls_slice_bytes rsb;
 
-        ap_log_cerror(APLOG_MARK, APLOG_TRACE2, rv, c,
-            "ALPN: switching protocol from `%s` to `%s`", cc->application_protocol, proposed);
-        rv = ap_switch_protocol(c, NULL, cc->server, proposed);
-        if (APR_SUCCESS != rv) goto cleanup;
+        proposed = ap_select_protocol(c, NULL, s, cc->alpn);
+        if (!proposed) {
+            ap_log_cerror(APLOG_MARK, APLOG_TRACE2, rv, c,
+                "ALPN: no protocol selected in server");
+            goto cleanup;
+        }
+
+        if (strcmp(proposed, cc->application_protocol)) {
+            ap_log_cerror(APLOG_MARK, APLOG_TRACE2, rv, c,
+                "ALPN: switching protocol from `%s` to `%s`", cc->application_protocol, proposed);
+            rv = ap_switch_protocol(c, NULL, cc->server, proposed);
+            if (APR_SUCCESS != rv) goto cleanup;
+        }
 
         rsb.data = (const unsigned char*)proposed;
         rsb.len = strlen(proposed);
-        rr = rustls_server_config_builder_set_protocols(builder, &rsb, 1);
+        rr = rustls_server_config_builder_set_alpn_protocols(builder, &rsb, 1);
         if (RUSTLS_RESULT_OK != rr) goto cleanup;
 
         cc->application_protocol = proposed;
         ap_log_cerror(APLOG_MARK, APLOG_TRACE2, rv, c,
-            "ALPN: switched connection to protocol `%s`", cc->application_protocol);
+            "ALPN: using connection protocol `%s`", cc->application_protocol);
 
         /* protocol was switched, this could be a challenge protocol
          * such as "acme-tls/1". Give handlers the opportunity to
@@ -1115,6 +1041,7 @@ static apr_status_t select_application_protocol(
             }
         }
     }
+
 cleanup:
     if (rr != RUSTLS_RESULT_OK) {
         const char *err_descr = NULL;
@@ -1128,13 +1055,126 @@ cleanup:
     return rv;
 }
 
+static apr_status_t build_server_connection(rustls_connection **pconnection,
+                                            const rustls_server_config **pconfig,
+                                            conn_rec *c)
+{
+    tls_conf_conn_t *cc = tls_conf_conn_get(c);
+    tls_conf_server_t *sc;
+    rustls_server_config_builder *builder = NULL;
+    const rustls_server_config *config = NULL;
+    rustls_connection *rconnection = NULL;
+    rustls_result rr = RUSTLS_RESULT_OK;
+    apr_status_t rv = APR_SUCCESS;
+
+    sc = tls_conf_server_get(cc->server);
+    builder = rustls_server_config_builder_new();
+    if (NULL == builder) {
+        rv = APR_ENOMEM; goto cleanup;
+    }
+
+    /* decide on the application protocol, this may change other
+     * settings like client_auth. */
+    rv = select_application_protocol(c, cc->server, builder);
+
+    if (cc->client_auth != TLS_CLIENT_AUTH_NONE) {
+        ap_assert(sc->client_ca);  /* checked in server_setup */
+        if (cc->client_auth == TLS_CLIENT_AUTH_REQUIRED) {
+            const rustls_client_cert_verifier *verifier;
+            rv = tls_cert_client_verifiers_get(sc->global->verifiers, sc->client_ca, &verifier);
+            if (APR_SUCCESS != rv) goto cleanup;
+            rustls_server_config_builder_set_client_verifier(builder, verifier);
+        }
+        else {
+            const rustls_client_cert_verifier_optional *verifier;
+            rv = tls_cert_client_verifiers_get_optional(sc->global->verifiers, sc->client_ca, &verifier);
+            if (APR_SUCCESS != rv) goto cleanup;
+            rustls_server_config_builder_set_client_verifier_optional(builder, verifier);
+        }
+    }
+
+    rustls_server_config_builder_set_hello_callback(builder, select_certified_key);
+
+#ifdef CRUSTLS
+    if (sc->tls_protocol_min > 0) {
+        apr_array_header_t *tls_versions;
+
+        ap_log_error(APLOG_MARK, APLOG_TRACE1, rv, sc->server,
+                     "init server: set protocol min version %04x", sc->tls_protocol_min);
+        tls_versions = tls_proto_create_versions_plus(
+            sc->global->proto, (apr_uint16_t)sc->tls_protocol_min, ptemp);
+        if (tls_versions->nelts > 0) {
+            rr = rustls_server_config_builder_set_versions(builder,
+                (const apr_uint16_t*)tls_versions->elts, (apr_size_t)tls_versions->nelts);
+            if (RUSTLS_RESULT_OK != rr) goto cleanup;
+            if (sc->tls_protocol_min != APR_ARRAY_IDX(tls_versions, 0, apr_uint16_t)) {
+                ap_log_error(APLOG_MARK, APLOG_WARNING, 0, sc->server, APLOGNO()
+                             "Init: the minimum protocol version configured for %s (%04x) "
+                             "is not supported and version %04x was selected instead.",
+                             sc->server->server_hostname, sc->tls_protocol_min,
+                             APR_ARRAY_IDX(tls_versions, 0, apr_uint16_t));
+            }
+        }
+        else {
+            ap_log_error(APLOG_MARK, APLOG_ERR, 0, sc->server, APLOGNO()
+                         "Unable to configure the protocol version for %s: "
+                          "neither the configured minimum version (%04x), nor any higher one is "
+                         "available.", sc->server->server_hostname, sc->tls_protocol_min);
+            rv = APR_ENOTIMPL; goto cleanup;
+        }
+    }
+
+    rv = set_server_ciphers(ptemp, sc, builder);
+    if (APR_SUCCESS != rv) goto cleanup;
+#endif
+
+    rr = rustls_server_config_builder_set_ignore_client_order(
+        builder, sc->honor_client_order == TLS_FLAG_FALSE);
+    if (RUSTLS_RESULT_OK != rr) goto cleanup;
+
+    rv = tls_cache_init_server(builder, sc->server);
+    if (APR_SUCCESS != rv) goto cleanup;
+
+    config = rustls_server_config_builder_build(builder);
+    builder = NULL;
+    if (!config) {
+        rv = APR_ENOMEM; goto cleanup;
+    }
+
+    rr = rustls_server_connection_new(config, &rconnection);
+    if (RUSTLS_RESULT_OK != rr) goto cleanup;
+    rustls_connection_set_userdata(rconnection, c);
+
+cleanup:
+    if (rr != RUSTLS_RESULT_OK) {
+        const char *err_descr = NULL;
+        rv = tls_util_rustls_error(c->pool, rr, &err_descr);
+        ap_log_error(APLOG_MARK, APLOG_DEBUG, rv, sc->server, APLOGNO()
+                     "Failed to init session for server %s: [%d] %s",
+                     sc->server->server_hostname, (int)rr, err_descr);
+    }
+    if (APR_SUCCESS == rv) {
+        *pconfig = config;
+        *pconnection = rconnection;
+        ap_log_error(APLOG_MARK, APLOG_TRACE1, 0, sc->server,
+                     "tls_core_conn_server_init done: %s",
+                     sc->server->server_hostname);
+    }
+    else {
+        ap_log_error(APLOG_MARK, APLOG_ERR, rv, sc->server, APLOGNO()
+                     "Failed to init session for server %s",
+                     sc->server->server_hostname);
+        c->aborted = 1;
+        if (config) rustls_server_config_free(config);
+        if (builder) rustls_server_config_builder_free(builder);
+    }
+    return rv;
+}
+
 apr_status_t tls_core_conn_seen_client_hello(conn_rec *c)
 {
     tls_conf_conn_t *cc = tls_conf_conn_get(c);
     tls_conf_server_t *sc, *initial_sc;
-    rustls_server_config_builder *builder = NULL;
-    const rustls_server_config *config = NULL;
-    rustls_result rr = RUSTLS_RESULT_OK;
     apr_status_t rv = APR_SUCCESS;
     int sni_match = 0;
 
@@ -1185,61 +1225,20 @@ apr_status_t tls_core_conn_seen_client_hello(conn_rec *c)
         cc->service_unavailable = sni_match? sc->service_unavailable : 0;
     }
 
-    if (!sc->rustls_config && !initial_sc->rustls_config) {
-        ap_log_cerror(APLOG_MARK, APLOG_DEBUG, 0, c, APLOGNO()
-            "vhost_init: no base rustls config found, denying to serve");
-        rv = APR_NOTFOUND; goto cleanup;
-    }
-    /* FIXME: there is no method to disable client certificates again
-     * in a builder. And one needs to create the builder either with
-     * client certs mandator/optional/none.
-     * This means for ACME challenges on a host with client certs, we
-     * cannot reuse the server config as we do otherwise.
-     * But with a naked new builder, we lose all other settings that
-     * may have been done in sc->rustls_config. But better than failing
-     * ACME challenges, I guess.
-     */
-    if (sc->client_auth != cc->client_auth && cc->client_auth == TLS_CLIENT_AUTH_NONE) {
-        builder = rustls_server_config_builder_new();
-    }
-    else {
-        builder = rustls_server_config_builder_from_config(
-            sc->rustls_config? sc->rustls_config : initial_sc->rustls_config);
-    }
-    if (NULL == builder) {
-        rv = APR_ENOMEM; goto cleanup;
-    }
-
-    /* decide on the application protocol we use */
-    rv = select_application_protocol(c, cc->server, builder);
-    if (APR_SUCCESS != rv) goto cleanup;
-
     /* if found or not, cc->server will be the server we use now to do
      * the real handshake and, if successful, the traffic after that.
      * Free the current session and create the real one for the
      * selected server. */
+    if (cc->rustls_server_config) {
+        rustls_server_config_free(cc->rustls_server_config);
+        cc->rustls_server_config = NULL;
+    }
     rustls_connection_free(cc->rustls_connection);
     cc->rustls_connection = NULL;
-    config = rustls_server_config_builder_build(builder);
-    builder = NULL;
-    rr = rustls_server_connection_new(config, &cc->rustls_connection);
-    if (RUSTLS_RESULT_OK != rr) goto cleanup;
-    rustls_connection_set_userdata(cc->rustls_connection, c);
+
+    rv = build_server_connection(&cc->rustls_connection, &cc->rustls_server_config, c);
 
 cleanup:
-    if (builder != NULL) rustls_server_config_builder_free(builder);
-    if (config != NULL) rustls_server_config_free(config);
-    if (rr != RUSTLS_RESULT_OK) {
-        const char *err_descr = NULL;
-        rv = tls_util_rustls_error(c->pool, rr, &err_descr);
-        ap_log_error(APLOG_MARK, APLOG_ERR, rv, sc->server, APLOGNO()
-                     "Failed to init session for server %s: [%d] %s",
-                     sc->server->server_hostname, (int)rr, err_descr);
-        c->aborted = 1;
-    }
-    ap_log_error(APLOG_MARK, APLOG_TRACE1, rv, sc->server,
-                 "tls_core_conn_server_init done: %s",
-                 sc->server->server_hostname);
     return rv;
 }
 

@@ -16,7 +16,7 @@
 #include <http_log.h>
 #include <ap_socache.h>
 
-#include <crustls.h>
+#include <rustls.h>
 
 #include "tls_proto.h"
 #include "tls_conf.h"
@@ -420,6 +420,10 @@ static apr_status_t filter_conn_input(
             in_buf = ap_calloc(in_buf_len, sizeof(char));
             rr = rustls_connection_read(fctx->cc->rustls_connection,
                 (unsigned char*)in_buf, in_buf_len, &rlen);
+            if (rr == RUSTLS_RESULT_PLAINTEXT_EMPTY) {
+                rr = RUSTLS_RESULT_OK;
+                rlen = 0;
+            }
             if (rr != RUSTLS_RESULT_OK) goto cleanup;
             ap_log_cerror(APLOG_MARK, APLOG_TRACE2, rv, fctx->c,
                          "tls_filter_conn_input: got %ld plain bytes from rustls", (long)rlen);
