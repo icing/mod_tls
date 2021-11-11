@@ -503,7 +503,7 @@ cleanup:
 
 #if AP_MODULE_MAGIC_AT_LEAST(20200420, 1)
     if (APR_SUCCESS == rv || APR_STATUS_IS_EAGAIN(rv)) {
-        rv = ap_filter_setaside_brigade(f, fctx->fin_plain_bb);
+        ap_filter_setaside_brigade(f, fctx->fin_plain_bb);
     }
 #endif
     return rv;

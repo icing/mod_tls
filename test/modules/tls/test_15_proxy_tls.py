@@ -13,7 +13,7 @@ class TestProxyTLS:
         # add vhosts a+b and a ssl proxy from a to b
         conf = TlsTestConf(env=env, extras={
             'base': [
-                "LogLevel proxy:trace1 proxy_http:trace1 proxy_http2:trace2 http2:trace2",
+                "LogLevel proxy:trace1 proxy_http:trace1 proxy_http2:trace2 http2:trace2 cgid:trace4",
                 "TLSProxyProtocol TLSv1.3+",
                 f"<Proxy https://127.0.0.1:{env.https_port}/>",
                 "    TLSProxyEngine on",
@@ -29,7 +29,7 @@ class TestProxyTLS:
                 f"<Proxy h2://127.0.0.1:{env.https_port}/>",
                 "    TLSProxyEngine on",
                 f"    TLSProxyCA {env.ca.cert_file}",
-                "    TLSProxyCiphersSuppress TLS_AES_256_GCM_SHA384",
+                "    TLSProxyCiphersSuppress TLS_AES_256_GCM_SHA384:TLS_AES_128_GCM_SHA256",
                 "    ProxyPreserveHost on",
                 "</Proxy>",
             ],

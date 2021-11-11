@@ -238,13 +238,11 @@ static apr_status_t calc_ciphers(
     return rv;
 }
 
-#ifdef CRUSTLS
-static apr_status_t set_server_ciphers(
-    apr_pool_t *pool, tls_conf_server_t *sc,
-    rustls_server_config_builder *builder)
+static apr_status_t get_server_ciphersuites(
+    const apr_array_header_t **pciphersuites,
+    apr_pool_t *pool, tls_conf_server_t *sc)
 {
-    const apr_array_header_t *ciphers;
-    rustls_result rr = RUSTLS_RESULT_OK;
+    const apr_array_header_t *ciphers, *suites = NULL;
     apr_status_t rv = APR_SUCCESS;
 
     rv = calc_ciphers(pool, sc->server, sc->global,
@@ -253,7 +251,7 @@ static apr_status_t set_server_ciphers(
     if (APR_SUCCESS != rv) goto cleanup;
 
     if (ciphers) {
-        apr_array_header_t *suites = tls_proto_get_rustls_suites(
+        suites = tls_proto_get_rustls_suites(
             sc->global->proto, ciphers, pool);
         /* this changed the default rustls ciphers, configure it. */
         if (APLOGtrace2(sc->server)) {
@@ -263,23 +261,12 @@ static apr_status_t set_server_ciphers(
                          sc->server->server_hostname,
                          tls_proto_get_cipher_names(conf, ciphers, pool));
         }
-        rr = rustls_server_config_builder_set_ciphersuites(builder,
-            (const rustls_supported_ciphersuite* const*)suites->elts,
-            (apr_size_t)suites->nelts);
-        if (RUSTLS_RESULT_OK != rr) goto cleanup;
     }
 
 cleanup:
-    if (RUSTLS_RESULT_OK != rr) {
-        const char *err_descr;
-        rv = tls_util_rustls_error(pool, rr, &err_descr);
-        ap_log_error(APLOG_MARK, APLOG_ERR, rv, sc->server, APLOGNO()
-                     "Failed to configure ciphers %s: [%d] %s",
-                     sc->server->server_hostname, (int)rr, err_descr);
-    }
+    *pciphersuites = (APR_SUCCESS == rv)? suites : NULL;
     return rv;
 }
-#endif
 
 static apr_array_header_t *complete_cert_specs(
     apr_pool_t *p, tls_conf_server_t *sc)
@@ -1061,6 +1048,7 @@ static apr_status_t build_server_connection(rustls_connection **pconnection,
 {
     tls_conf_conn_t *cc = tls_conf_conn_get(c);
     tls_conf_server_t *sc;
+    const apr_array_header_t *ciphersuites = NULL, *tls_versions = NULL;
     rustls_server_config_builder *builder = NULL;
     const rustls_server_config *config = NULL;
     rustls_connection *rconnection = NULL;
@@ -1068,9 +1056,52 @@ static apr_status_t build_server_connection(rustls_connection **pconnection,
     apr_status_t rv = APR_SUCCESS;
 
     sc = tls_conf_server_get(cc->server);
-    builder = rustls_server_config_builder_new();
-    if (NULL == builder) {
-        rv = APR_ENOMEM; goto cleanup;
+
+    rv = get_server_ciphersuites(&ciphersuites, c->pool, sc);
+    if (APR_SUCCESS != rv) goto cleanup;
+
+    if (sc->tls_protocol_min > 0) {
+        ap_log_error(APLOG_MARK, APLOG_TRACE1, rv, sc->server,
+                     "init server: set protocol min version %04x", sc->tls_protocol_min);
+        tls_versions = tls_proto_create_versions_plus(
+            sc->global->proto, (apr_uint16_t)sc->tls_protocol_min, c->pool);
+        if (tls_versions->nelts > 0) {
+            if (sc->tls_protocol_min != APR_ARRAY_IDX(tls_versions, 0, apr_uint16_t)) {
+                ap_log_error(APLOG_MARK, APLOG_WARNING, 0, sc->server, APLOGNO()
+                             "Init: the minimum protocol version configured for %s (%04x) "
+                             "is not supported and version %04x was selected instead.",
+                             sc->server->server_hostname, sc->tls_protocol_min,
+                             APR_ARRAY_IDX(tls_versions, 0, apr_uint16_t));
+            }
+        }
+        else {
+            ap_log_error(APLOG_MARK, APLOG_ERR, 0, sc->server, APLOGNO()
+                         "Unable to configure the protocol version for %s: "
+                          "neither the configured minimum version (%04x), nor any higher one is "
+                         "available.", sc->server->server_hostname, sc->tls_protocol_min);
+            rv = APR_ENOTIMPL; goto cleanup;
+        }
+    }
+    else if (ciphersuites && ciphersuites->nelts > 0) {
+        /* FIXME: rustls-ffi current has not way to make a builder with ALL_PROTOCOL_VERSIONS */
+        tls_versions = tls_proto_create_versions_plus(sc->global->proto, 0, c->pool);
+    }
+
+    if (ciphersuites && ciphersuites->nelts > 0
+        && tls_versions && tls_versions->nelts >= 0) {
+        rr = rustls_server_config_builder_new_custom(
+            (const struct rustls_supported_ciphersuite *const *)ciphersuites->elts,
+            (size_t)ciphersuites->nelts,
+            (const uint16_t *)tls_versions->elts, (size_t)tls_versions->nelts,
+            &builder);
+        if (RUSTLS_RESULT_OK != rr) goto cleanup;
+    }
+    else {
+        builder = rustls_server_config_builder_new();
+        if (NULL == builder) {
+            rv = APR_ENOMEM;
+            goto cleanup;
+        }
     }
 
     /* decide on the application protocol, this may change other
@@ -1094,39 +1125,6 @@ static apr_status_t build_server_connection(rustls_connection **pconnection,
     }
 
     rustls_server_config_builder_set_hello_callback(builder, select_certified_key);
-
-#ifdef CRUSTLS
-    if (sc->tls_protocol_min > 0) {
-        apr_array_header_t *tls_versions;
-
-        ap_log_error(APLOG_MARK, APLOG_TRACE1, rv, sc->server,
-                     "init server: set protocol min version %04x", sc->tls_protocol_min);
-        tls_versions = tls_proto_create_versions_plus(
-            sc->global->proto, (apr_uint16_t)sc->tls_protocol_min, ptemp);
-        if (tls_versions->nelts > 0) {
-            rr = rustls_server_config_builder_set_versions(builder,
-                (const apr_uint16_t*)tls_versions->elts, (apr_size_t)tls_versions->nelts);
-            if (RUSTLS_RESULT_OK != rr) goto cleanup;
-            if (sc->tls_protocol_min != APR_ARRAY_IDX(tls_versions, 0, apr_uint16_t)) {
-                ap_log_error(APLOG_MARK, APLOG_WARNING, 0, sc->server, APLOGNO()
-                             "Init: the minimum protocol version configured for %s (%04x) "
-                             "is not supported and version %04x was selected instead.",
-                             sc->server->server_hostname, sc->tls_protocol_min,
-                             APR_ARRAY_IDX(tls_versions, 0, apr_uint16_t));
-            }
-        }
-        else {
-            ap_log_error(APLOG_MARK, APLOG_ERR, 0, sc->server, APLOGNO()
-                         "Unable to configure the protocol version for %s: "
-                          "neither the configured minimum version (%04x), nor any higher one is "
-                         "available.", sc->server->server_hostname, sc->tls_protocol_min);
-            rv = APR_ENOTIMPL; goto cleanup;
-        }
-    }
-
-    rv = set_server_ciphers(ptemp, sc, builder);
-    if (APR_SUCCESS != rv) goto cleanup;
-#endif
 
     rr = rustls_server_config_builder_set_ignore_client_order(
         builder, sc->honor_client_order == TLS_FLAG_FALSE);

@@ -39,7 +39,7 @@ class TestCiphers:
         ecdsa_1_2 = [c for c in env.RUSTLS_CIPHERS
                      if c.max_version == 1.2 and c.flavour == 'ECDSA'][0]
         # client speaks only this cipher, see that it gets it
-        r = env.openssl_client(env.domain_b, options=[
+        r = env.openssl_client(env.domain_b, extra_args=[
             "-cipher", ecdsa_1_2.openssl_name, "-tls1_2"
         ])
         protocol, cipher = self._get_protocol_cipher(r.stdout)
@@ -50,7 +50,7 @@ class TestCiphers:
         rsa_1_2 = [c for c in env.RUSTLS_CIPHERS
                    if c.max_version == 1.2 and c.flavour == 'RSA'][0]
         # client speaks only this cipher, see that it gets it
-        r = env.openssl_client(env.domain_b, options=[
+        r = env.openssl_client(env.domain_b, extra_args=[
             "-cipher", rsa_1_2.openssl_name, "-tls1_2"
         ])
         protocol, cipher = self._get_protocol_cipher(r.stdout)
@@ -77,7 +77,7 @@ class TestCiphers:
         conf.add_tls_vhosts(domains=[env.domain_a, env.domain_b])
         conf.install()
         assert env.apache_restart() == 0
-        r = env.openssl_client(env.domain_b, options=["-tls1_2"])
+        r = env.openssl_client(env.domain_b, extra_args=["-tls1_2"])
         client_proto, client_cipher = self._get_protocol_cipher(r.stdout)
         assert client_proto == "TLSv1.2", r.stdout
         assert client_cipher == cipher.openssl_name, r.stdout
@@ -102,7 +102,7 @@ class TestCiphers:
         conf.add_tls_vhosts(domains=[env.domain_a, env.domain_b])
         conf.install()
         assert env.apache_restart() == 0
-        r = env.openssl_client(env.domain_b, options=["-tls1_2"])
+        r = env.openssl_client(env.domain_b, extra_args=["-tls1_2"])
         client_proto, client_cipher = self._get_protocol_cipher(r.stdout)
         assert client_proto == "TLSv1.2", r.stdout
         assert client_cipher == cipher.openssl_name, r.stdout
@@ -126,7 +126,7 @@ class TestCiphers:
         conf.add_tls_vhosts(domains=[env.domain_a, env.domain_b])
         conf.install()
         assert env.apache_restart() == 0
-        r = env.openssl_client(env.domain_b, options=["-tls1_2"])
+        r = env.openssl_client(env.domain_b, extra_args=["-tls1_2"])
         client_proto, client_cipher = self._get_protocol_cipher(r.stdout)
         assert client_proto == "TLSv1.2", r.stdout
         assert client_cipher == cipher.openssl_name, r.stdout
@@ -150,7 +150,7 @@ class TestCiphers:
         conf.add_tls_vhosts(domains=[env.domain_a, env.domain_b])
         conf.install()
         assert env.apache_restart() == 0
-        r = env.openssl_client(env.domain_b, options=["-tls1_2"])
+        r = env.openssl_client(env.domain_b, extra_args=["-tls1_2"])
         client_proto, client_cipher = self._get_protocol_cipher(r.stdout)
         assert client_proto == "TLSv1.2", r.stdout
         assert client_cipher == cipher.openssl_name, r.stdout
@@ -170,14 +170,14 @@ class TestCiphers:
 
     def test_06_ciphers_pref_unsupported(self, env):
         # a warning on prefering a known, but not supported cipher
-        env.apache_error_log_clear()
+        env.httpd_error_log.ignore_recent()
         conf = TlsTestConf(env=env, extras={
             env.domain_b: "TLSCiphersPrefer TLS_NULL_WITH_NULL_NULL"
         })
         conf.add_tls_vhosts(domains=[env.domain_a, env.domain_b])
         conf.install()
         assert env.apache_restart() == 0
-        (errors, warnings) = env.apache_error_log_count()
+        (errors, warnings) = env.httpd_error_log.get_recent_count()
         assert errors == 0
         assert warnings == 1
 
@@ -191,13 +191,13 @@ class TestCiphers:
 
     def test_06_ciphers_supp_unsupported(self, env):
         # no warnings on suppressing known, but not supported ciphers
-        env.apache_error_log_clear()
+        env.httpd_error_log.ignore_recent()
         conf = TlsTestConf(env=env, extras={
             env.domain_b: "TLSCiphersSuppress TLS_NULL_WITH_NULL_NULL"
         })
         conf.add_tls_vhosts(domains=[env.domain_a, env.domain_b])
         conf.install()
         assert env.apache_restart() == 0
-        (errors, warnings) = env.apache_error_log_count()
+        (errors, warnings) = env.httpd_error_log.get_recent_count()
         assert errors == 0
         assert warnings == 0
