@@ -253,7 +253,6 @@ static apr_status_t get_server_ciphersuites(
     if (ciphers) {
         suites = tls_proto_get_rustls_suites(
             sc->global->proto, ciphers, pool);
-        /* this changed the default rustls ciphers, configure it. */
         if (APLOGtrace2(sc->server)) {
             tls_proto_conf_t *conf = sc->global->proto;
             ap_log_error(APLOG_MARK, APLOG_TRACE2, 0, sc->server,
@@ -395,6 +394,10 @@ static apr_status_t server_conf_setup(
     sc->certified_keys = apr_array_make(p, 3, sizeof(rustls_certified_key *));
     rv = load_certified_keys(sc->certified_keys, sc->server, cert_specs, gc->cert_reg);
     if (APR_SUCCESS != rv) goto cleanup;
+
+    rv = get_server_ciphersuites(&sc->ciphersuites, p, sc);
+    if (APR_SUCCESS != rv) goto cleanup;
+
     ap_log_error(APLOG_MARK, APLOG_TRACE1, rv, sc->server,
                  "init server: %s with %d certificates loaded",
                  sc->server->server_hostname, sc->certified_keys->nelts);
@@ -1048,7 +1051,7 @@ static apr_status_t build_server_connection(rustls_connection **pconnection,
 {
     tls_conf_conn_t *cc = tls_conf_conn_get(c);
     tls_conf_server_t *sc;
-    const apr_array_header_t *ciphersuites = NULL, *tls_versions = NULL;
+    const apr_array_header_t *tls_versions = NULL;
     rustls_server_config_builder *builder = NULL;
     const rustls_server_config *config = NULL;
     rustls_connection *rconnection = NULL;
@@ -1056,9 +1059,6 @@ static apr_status_t build_server_connection(rustls_connection **pconnection,
     apr_status_t rv = APR_SUCCESS;
 
     sc = tls_conf_server_get(cc->server);
-
-    rv = get_server_ciphersuites(&ciphersuites, c->pool, sc);
-    if (APR_SUCCESS != rv) goto cleanup;
 
     if (sc->tls_protocol_min > 0) {
         ap_log_error(APLOG_MARK, APLOG_TRACE1, rv, sc->server,
@@ -1082,16 +1082,16 @@ static apr_status_t build_server_connection(rustls_connection **pconnection,
             rv = APR_ENOTIMPL; goto cleanup;
         }
     }
-    else if (ciphersuites && ciphersuites->nelts > 0) {
+    else if (sc->ciphersuites && sc->ciphersuites->nelts > 0) {
         /* FIXME: rustls-ffi current has not way to make a builder with ALL_PROTOCOL_VERSIONS */
         tls_versions = tls_proto_create_versions_plus(sc->global->proto, 0, c->pool);
     }
 
-    if (ciphersuites && ciphersuites->nelts > 0
+    if (sc->ciphersuites && sc->ciphersuites->nelts > 0
         && tls_versions && tls_versions->nelts >= 0) {
         rr = rustls_server_config_builder_new_custom(
-            (const struct rustls_supported_ciphersuite *const *)ciphersuites->elts,
-            (size_t)ciphersuites->nelts,
+            (const struct rustls_supported_ciphersuite *const *)sc->ciphersuites->elts,
+            (size_t)sc->ciphersuites->nelts,
             (const uint16_t *)tls_versions->elts, (size_t)tls_versions->nelts,
             &builder);
         if (RUSTLS_RESULT_OK != rr) goto cleanup;

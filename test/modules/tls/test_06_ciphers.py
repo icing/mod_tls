@@ -12,7 +12,7 @@ class TestCiphers:
     @pytest.fixture(autouse=True, scope='class')
     def _class_scope(self, env):
         conf = TlsTestConf(env=env, extras={
-            'base': "TLSHonorClientOrder off"
+            'base': "TLSHonorClientOrder off",
         })
         conf.add_tls_vhosts(domains=[env.domain_a, env.domain_b])
         conf.install()
@@ -82,6 +82,8 @@ class TestCiphers:
         assert client_proto == "TLSv1.2", r.stdout
         assert client_cipher == cipher.openssl_name, r.stdout
 
+    @pytest.mark.skip(reason="Wrong certified key selected by rustls")
+    # see <https://github.com/rustls/rustls-ffi/issues/236>
     @pytest.mark.parametrize("cipher", [
         c for c in TlsTestEnv.RUSTLS_CIPHERS if c.max_version == 1.2 and c.flavour == 'RSA'
     ], ids=[
@@ -107,6 +109,8 @@ class TestCiphers:
         assert client_proto == "TLSv1.2", r.stdout
         assert client_cipher == cipher.openssl_name, r.stdout
 
+    @pytest.mark.skip(reason="Wrong certified key selected by rustls")
+    # see <https://github.com/rustls/rustls-ffi/issues/236>
     @pytest.mark.parametrize("cipher", [
         c for c in TlsTestEnv.RUSTLS_CIPHERS if c.max_version == 1.2 and c.flavour == 'RSA'
     ], ids=[
@@ -131,6 +135,8 @@ class TestCiphers:
         assert client_proto == "TLSv1.2", r.stdout
         assert client_cipher == cipher.openssl_name, r.stdout
 
+    @pytest.mark.skip(reason="Wrong certified key selected by rustls")
+    # see <https://github.com/rustls/rustls-ffi/issues/236>
     @pytest.mark.parametrize("cipher", [
         c for c in TlsTestEnv.RUSTLS_CIPHERS if c.max_version == 1.2 and c.flavour == 'RSA'
     ], ids=[
@@ -179,7 +185,7 @@ class TestCiphers:
         assert env.apache_restart() == 0
         (errors, warnings) = env.httpd_error_log.get_recent_count()
         assert errors == 0
-        assert warnings == 1
+        assert warnings == 2  # once on dry run, once on start
 
     def test_06_ciphers_supp_unknown(self, env):
         conf = TlsTestConf(env=env, extras={
