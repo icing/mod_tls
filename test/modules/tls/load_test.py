@@ -10,9 +10,11 @@ from threading import Thread
 from tqdm import tqdm  # type: ignore
 from typing import Dict, Iterable, List, Tuple, Optional
 
+sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
+
 from pyhttpd.result import ExecResult
-from .conf import TlsTestConf
-from .env import TlsTestEnv
+from conf import TlsTestConf
+from env import TlsTestEnv
 
 log = logging.getLogger(__name__)
 
@@ -200,8 +202,8 @@ class LoadTestCase:
         raise NotImplemented
 
     @staticmethod
-    def setup_base_conf(env: TlsTestEnv, worker_count: int = 5000) -> TlsTestConf:
-        conf = TlsTestConf(env=env)
+    def setup_base_conf(env: TlsTestEnv, worker_count: int = 5000, extras=None) -> TlsTestConf:
+        conf = TlsTestConf(env=env, extras=extras)
         # ylavic's formula
         process_count = int(max(10, min(100, int(worker_count / 100))))
         thread_count = int(max(25, int(worker_count / process_count)))
@@ -231,49 +233,49 @@ class LoadTestCase:
 
     @staticmethod
     def server_setup(env: TlsTestEnv, ssl_module: str):
-        conf = LoadTestCase.setup_base_conf(env=env)
-        extras = {
-            'base': "Protocols h2 http/1.1"
-        }
         if 'mod_tls' == ssl_module:
-            extras['base'] += f"""
-            ProxyPreserveHost on
-            TLSProxyCA {env.ca.cert_file}
-            <Proxy https://127.0.0.1:{env.https_port}/>
-                TLSProxyEngine on
-            </Proxy>
-            <Proxy h2://127.0.0.1:{env.https_port}/>
-                TLSProxyEngine on
-            </Proxy>
-            """
-            extras[env.domain_a] = f"""
-            Protocols h2 http/1.1
-            ProxyPass /proxy-h1/ https://127.0.0.1:{env.https_port}/
-            ProxyPass /proxy-h2/ h2://127.0.0.1:{env.https_port}/
-            TLSOptions +StdEnvVars 
-            """
-            conf.add_tls_vhosts(domains=[env.domain_a], extras=extras)
+            extras = {
+                'base': [
+                    "Protocols h2 http/1.1",
+                    "ProxyPreserveHost on",
+                    f"TLSProxyCA {env.ca.cert_file}",
+                    f"<Proxy https://127.0.0.1:{env.https_port}/>",
+                    "    TLSProxyEngine on",
+                    "</Proxy>",
+                    f"<Proxy h2://127.0.0.1:{env.https_port}/>",
+                    "    TLSProxyEngine on",
+                    "</Proxy>",
+                ],
+                env.domain_a: [
+                    f"ProxyPass /proxy-h1/ https://127.0.0.1:{env.https_port}/",
+                    f"ProxyPass /proxy-h2/ h2://127.0.0.1:{env.https_port}/",
+                    f"TLSOptions +StdEnvVars",
+                ],
+            }
         elif 'mod_ssl' == ssl_module:
-            extras['base'] += f"""
-            ProxyPreserveHost on
-            SSLProxyVerify require
-            SSLProxyCACertificateFile {env.ca.cert_file}
-            <Proxy https://127.0.0.1:{env.https_port}/>
-                SSLProxyEngine on
-            </Proxy>
-            <Proxy h2://127.0.0.1:{env.https_port}/>
-                SSLProxyEngine on
-            </Proxy>
-            """
-            extras[env.domain_a] = f"""
-            Protocols h2 http/1.1
-            ProxyPass /proxy-h1/ https://127.0.0.1:{env.https_port}/
-            ProxyPass /proxy-h2/ h2://127.0.0.1:{env.https_port}/
-            TLSOptions +StdEnvVars 
-            """
-            conf.add_ssl_vhosts(domains=[env.domain_a], extras=extras)
+            extras = {
+                'base': [
+                    "Protocols h2 http/1.1",
+                    "ProxyPreserveHost on",
+                    "SSLProxyVerify require",
+                    f"SSLProxyCACertificateFile {env.ca.cert_file}",
+                    f"<Proxy https://127.0.0.1:{env.https_port}/>",
+                    "    SSLProxyEngine on",
+                    "</Proxy>",
+                    f"<Proxy h2://127.0.0.1:{env.https_port}/>",
+                    "    SSLProxyEngine on",
+                    "</Proxy>",
+                ],
+                env.domain_a: [
+                    f"ProxyPass /proxy-h1/ https://127.0.0.1:{env.https_port}/",
+                    f"ProxyPass /proxy-h2/ h2://127.0.0.1:{env.https_port}/",
+                    "TLSOptions +StdEnvVars",
+                ],
+            }
         else:
             raise LoadTestException("tests for module: {0}".format(ssl_module))
+        conf = LoadTestCase.setup_base_conf(env=env, extras=extras)
+        conf.add_tls_vhosts(domains=[env.domain_a])
         conf.install()
 
 
@@ -290,7 +292,7 @@ class SingleFileLoadTest(LoadTestCase):
         self._resource_kb = resource_kb
         self._ssl_module = ssl_module
         self._protocol = protocol
-        self._threads = threads if threads is not None else min(multiprocessing.cpu_count()/2, self._clients)
+        self._threads = threads if threads is not None else min(multiprocessing.cpu_count() / 2, self._clients)
 
     @staticmethod
     def from_scenario(scenario: Dict, env: TlsTestEnv) -> 'SingleFileLoadTest':
@@ -364,7 +366,6 @@ class SingleFileLoadTest(LoadTestCase):
 
 
 class MultiFileLoadTest(LoadTestCase):
-
     SETUP_DONE = False
 
     def __init__(self, env: TlsTestEnv, location: str,
@@ -381,7 +382,7 @@ class MultiFileLoadTest(LoadTestCase):
         self._ssl_module = ssl_module
         self._protocol = protocol
         self._threads = threads if threads is not None else \
-            min(multiprocessing.cpu_count()/2, self._clients)
+            min(multiprocessing.cpu_count() / 2, self._clients)
         self._url_file = "{gen_dir}/h2load-urls.txt".format(gen_dir=self.env.gen_dir)
 
     @staticmethod
@@ -418,6 +419,7 @@ class MultiFileLoadTest(LoadTestCase):
         pass
 
     def run_test(self, mode: str, path: str) -> H2LoadLogSummary:
+        _path = path
         monitor = None
         try:
             log_file = "{gen_dir}/h2load.log".format(gen_dir=self.env.gen_dir)
@@ -469,7 +471,6 @@ class MultiFileLoadTest(LoadTestCase):
 
 
 class ConnectionLoadTest(LoadTestCase):
-
     SETUP_DONE = False
 
     def __init__(self, env: TlsTestEnv, location: str,
@@ -523,6 +524,8 @@ class ConnectionLoadTest(LoadTestCase):
         pass
 
     def run_test(self, mode: str, path: str) -> H2LoadLogSummary:
+        _mode = mode
+        _path = path
         monitor = None
         try:
             log_file = "{gen_dir}/h2load.log".format(gen_dir=self.env.gen_dir)
@@ -596,7 +599,7 @@ class LoadTest:
             print(line)
         if foot_notes is not None:
             for idx, note in enumerate(foot_notes):
-                print("{0:3d}) {1}".format(idx+1, note))
+                print("{0:3d}) {1}".format(idx + 1, note))
 
     @staticmethod
     def scenario_with(base: Dict, updates: Dict) -> Dict:
@@ -811,16 +814,8 @@ class LoadTest:
                     raise LoadTestException(f"scenario unknown: '{name}'")
             names = args.names if len(args.names) else sorted(scenarios.keys())
 
-            cert_specs = [
-                CertificateSpec(domains=[env.domain_a]),
-                CertificateSpec(domains=[env.domain_b], key_type='secp256r1', single_file=True),
-                CertificateSpec(domains=[env.domain_b], key_type='rsa4096'),
-            ]
-            ca = TlsTestCA.create_root(name="abetterinternet-mod_tls",
-                                       store_dir=os.path.join(env.server_dir, 'ca'), key_type="rsa4096")
-            ca.issue_certs(cert_specs)
-            env.set_ca(ca)
-
+            env.setup_httpd()
+            
             for name in names:
                 scenario = scenarios[name]
                 table = [
@@ -844,7 +839,7 @@ class LoadTest:
                         t.update(row)
                         t.update(col)
                         test = scenario['class'].from_scenario(t, env=env)
-                        env.apache_error_log_clear()
+                        env.httpd_error_log.clear_log()
                         summary = test.run()
                         result, fnote = test.format_result(summary)
                         if fnote:
