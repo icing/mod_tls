@@ -76,7 +76,6 @@ class TlsTestEnv(HttpdTestEnv):
         self._domain_a = "a.mod-tls.test"
         self._domain_b = "b.mod-tls.test"
         self.add_httpd_conf([
-            f"TLSEngine {self.https_port}",
             f'<Directory "{self.server_dir}/htdocs/{self.domain_a}">',
             '    AllowOverride None',
             '    Require all granted',
@@ -122,7 +121,9 @@ class TlsTestEnv(HttpdTestEnv):
 
 
     def setup_httpd(self, setup: TlsTestSetup = None):
-        super().setup_httpd(setup=TlsTestSetup(env=self))
+        if setup is None:
+            setup = TlsTestSetup(env=self)
+        super().setup_httpd(setup=setup)
 
     @property
     def domain_a(self) -> str:

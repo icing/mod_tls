@@ -10,11 +10,12 @@ from threading import Thread
 from tqdm import tqdm  # type: ignore
 from typing import Dict, Iterable, List, Tuple, Optional
 
+sys.path.append(os.path.dirname(__file__))
 sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
 
-from pyhttpd.result import ExecResult
 from conf import TlsTestConf
-from env import TlsTestEnv
+from env import TlsTestEnv, TlsTestSetup
+from pyhttpd.result import ExecResult
 
 log = logging.getLogger(__name__)
 
@@ -272,10 +273,28 @@ class LoadTestCase:
                     "TLSOptions +StdEnvVars",
                 ],
             }
+        elif 'mod_gnutls' == ssl_module:
+            extras = {
+                'base': [
+                    "Protocols h2 http/1.1",
+                    "ProxyPreserveHost on",
+                    f"GnuTLSProxyCAFile {env.ca.cert_file}",
+                    f"<Proxy https://127.0.0.1:{env.https_port}/>",
+                    "    GnuTLSProxyEngine on",
+                    "</Proxy>",
+                    f"<Proxy h2://127.0.0.1:{env.https_port}/>",
+                    "    GnuTLSProxyEngine on",
+                    "</Proxy>",
+                ],
+                env.domain_a: [
+                    f"ProxyPass /proxy-h1/ https://127.0.0.1:{env.https_port}/",
+                    f"ProxyPass /proxy-h2/ h2://127.0.0.1:{env.https_port}/",
+                ],
+            }
         else:
             raise LoadTestException("tests for module: {0}".format(ssl_module))
         conf = LoadTestCase.setup_base_conf(env=env, extras=extras)
-        conf.add_tls_vhosts(domains=[env.domain_a])
+        conf.add_tls_vhosts(domains=[env.domain_a], ssl_module=ssl_module)
         conf.install()
 
 
@@ -459,6 +478,7 @@ class MultiFileLoadTest(LoadTestCase):
     def run(self) -> H2LoadLogSummary:
         path = self._setup(self.__class__)
         try:
+            time.sleep(1)
             self.run_test(mode="warmup", path=path)
             return self.run_test(mode="measure", path=path)
         finally:
@@ -814,7 +834,8 @@ class LoadTest:
                     raise LoadTestException(f"scenario unknown: '{name}'")
             names = args.names if len(args.names) else sorted(scenarios.keys())
 
-            env.setup_httpd()
+            setup = TlsTestSetup(env=env)
+            env.setup_httpd(setup=setup)
             
             for name in names:
                 scenario = scenarios[name]
