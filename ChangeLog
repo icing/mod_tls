@@ -1,3 +1,8 @@
+v0.8.2
+----------------------------------------------------------------------------------------------------
+ * Adapted to the new API in rustls-ffi v0.8.2
+ * Brought in Apache's pyhttpd test framework and adjusted test cases to its use.
+
 v0.8.1
 ----------------------------------------------------------------------------------------------------
  * Support for machine certificates in proxy conections. Use `TLSProxyMachineCertificate`
