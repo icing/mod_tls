@@ -38,9 +38,8 @@ rm -f $LOG_DIR/*
 #fi
 
 cd $DATADIR
-if test ! -d rustls-ffi; then
-  git clone https://github.com/rustls/rustls-ffi.git rustls-ffi
-fi
+rm -rf rustls-ffi
+git clone https://github.com/rustls/rustls-ffi.git rustls-ffi
 cd rustls-ffi
 git fetch origin
 git checkout tags/v0.8.2

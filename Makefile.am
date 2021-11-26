@@ -25,6 +25,6 @@ EXTRA_DIST      =
 test: all-recursive
 	$(MAKE) -C test/ test
 
-loadtest: all-recursive
-	$(MAKE) -C test/ loadtest
-
+docker-test:
+	docker-compose build debian-sid
+	docker-compose run debian-sid

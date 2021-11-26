@@ -1,5 +1,6 @@
-FROM debian:sid
+FROM ubuntu:focal
 
+ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update; apt-get upgrade -y
 RUN apt-get install -y apt-listchanges \
       make openssl libssl-dev libcurl4 libcurl4-openssl-dev \
@@ -10,8 +11,9 @@ RUN apt-get install -y apt-listchanges \
 RUN pip install pytest tqdm pycurl cryptography
 
 RUN apt-get install -y apache2 apache2-dev libapache2-mod-md
+RUN apt-get install -y cbindgen
 
-COPY docker/debian-test/bin/* /abetterinternet/bin/
+COPY docker/ubuntu-focal/bin/* /abetterinternet/bin/
 COPY configure.ac Makefile.am NEWS README* AUTHORS ChangeLog COPYING LICENSE /abetterinternet/mod_tls/
 COPY src /abetterinternet/mod_tls/src
 COPY test/Makefile.am test/conftest.py /abetterinternet/mod_tls/test/

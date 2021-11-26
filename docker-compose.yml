@@ -1,28 +1,53 @@
 version: '3.7'
 services:
-  debian-test:
+  debian-sid:
     # build and run tests in a debian sid container
-    image: ${DOCKER_REGISTRY}/mod-tls-debian-test:0.0.1
-    container_name: mod-tls-debian-test
+    image: ${DOCKER_REGISTRY}/mod-tls-debian-sid:0.0.1
+    container_name: mod-tls-debian-sid
     build:
       context: .
-      dockerfile: docker/debian-test/Dockerfile
+      dockerfile: docker/debian-sid/Dockerfile
       labels:
-        - "description=mod_tls debian test server"
+        - "description=mod_tls debian sid server"
         - "maintainer=stefan@eissing.org"
     expose:
       - "5010"
       - "5011"
     volumes:
-      - mod-tls-debian-test-data:/abetterinternet/data
+      - mod-tls-debian-sid-data:/abetterinternet/data
+    ports:
+      - "5010"
+      - "5011"
+
+  ubuntu-focal:
+    # build and run tests in a debian sid container
+    image: ${DOCKER_REGISTRY}/mod-tls-ubuntu-focal:0.0.1
+    container_name: mod-tls-ubuntu-focal
+    build:
+      context: .
+      dockerfile: docker/ubuntu-focal/Dockerfile
+      labels:
+        - "description=mod_tls ubuntu-focal server"
+        - "maintainer=stefan@eissing.org"
+    expose:
+      - "5010"
+      - "5011"
+    volumes:
+      - mod-tls-ubuntu-focal-data:/abetterinternet/data
     ports:
       - "5010"
       - "5011"
 
 volumes:
-  mod-tls-debian-test-data:
-    name: mod-tls-debian-test-data
+  mod-tls-debian-sid-data:
+    name: mod-tls-debian-sid-data
     labels:
-      - "description=debian test data for mod_tls"
+      - "description=debian sid data for mod_tls"
       - "maintainer=stefan@eissing.org"
+  mod-tls-ubuntu-focal-data:
+    name: mod-tls-ubuntu-focal-data
+    labels:
+      - "description=ubuntu-focal data for mod_tls"
+      - "maintainer=stefan@eissing.org"
+
 
