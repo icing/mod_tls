@@ -24,7 +24,7 @@ class TestVars:
         # in domain_b root, the StdEnvVars is switch on
         if env.curl_supports_tls_1_3():
             exp_proto = "TLSv1.3"
-            exp_cipher = "TLS_CHACHA20_POLY1305_SHA256"
+            exp_cipher = "TLS_AES_256_GCM_SHA384"
         else:
             exp_proto = "TLSv1.2"
             exp_cipher = "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384"

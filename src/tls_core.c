@@ -1172,7 +1172,7 @@ cleanup:
 apr_status_t tls_core_conn_seen_client_hello(conn_rec *c)
 {
     tls_conf_conn_t *cc = tls_conf_conn_get(c);
-    tls_conf_server_t *sc, *initial_sc;
+    tls_conf_server_t *sc;
     apr_status_t rv = APR_SUCCESS;
     int sni_match = 0;
 
@@ -1181,7 +1181,7 @@ apr_status_t tls_core_conn_seen_client_hello(conn_rec *c)
      * Time to select the actual server_rec and application protocol that
      * will be used on this connection. */
     ap_assert(cc);
-    initial_sc = sc = tls_conf_server_get(cc->server);
+    sc = tls_conf_server_get(cc->server);
     if (!cc->client_hello_seen) goto cleanup;
 
     if (cc->sni_hostname) {

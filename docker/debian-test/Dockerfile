@@ -14,7 +14,9 @@ RUN apt-get install -y apache2 apache2-dev libapache2-mod-md
 COPY docker/debian-test/bin/* /abetterinternet/bin/
 COPY configure.ac Makefile.am NEWS README* AUTHORS ChangeLog COPYING LICENSE /abetterinternet/mod_tls/
 COPY src /abetterinternet/mod_tls/src
-COPY test test/Makefile.am test/test.ini.in /abetterinternet/mod_tls/test
+COPY test/Makefile.am test/conftest.py /abetterinternet/mod_tls/test/
+COPY test/modules /abetterinternet/mod_tls/test/modules
+COPY test/pyhttpd /abetterinternet/mod_tls/test/pyhttpd
 COPY m4 /abetterinternet/mod_tls/m4
 
 CMD ["/bin/bash", "-c", "/abetterinternet/bin/update.sh"]

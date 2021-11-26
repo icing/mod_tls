@@ -30,21 +30,20 @@ fi
 LOG_DIR=$(apxs -q logfiledir)
 rm -f $LOG_DIR/*
 
-cd $DATADIR
-if test ! -f rustup.sh.run; then
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o rustup.sh ||rm -f rustup.sh
-  /bin/bash rustup.sh -y ||fail
-  touch rustup.sh.run
-fi
+#cd $DATADIR
+#if test ! -f rustup.sh.run; then
+#  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o rustup.sh ||rm -f rustup.sh
+#  /bin/bash rustup.sh -y ||fail
+#  touch rustup.sh.run
+#fi
 
 cd $DATADIR
-if test ! -d crustls; then
-  git clone https://github.com/abetterinternet/crustls.git crustls
+if test ! -d rustls-ffi; then
+  git clone https://github.com/rustls/rustls-ffi.git rustls-ffi
 fi
-cd crustls
+cd rustls-ffi
 git fetch origin
-git checkout main
-git pull origin main
+git checkout tags/v0.8.2
 make install DESTDIR=$PREFIX || fail
 
 cd "$TOP/mod_tls" ||fail
@@ -63,5 +62,4 @@ if needs_update .installed .; then
   make install ||fail
   touch .installed
 fi
-make test &&
-python3 test/load_test.py 1k-files
+pytest

@@ -1,3 +1,7 @@
+ * fixing a gcc warning about an unused variable
+ * updating dockerfile to use fixed rustls-ffi version
+ * updating dpckerfile to new test layout
+
 v0.8.2
 ----------------------------------------------------------------------------------------------------
  * Adapted to the new API in rustls-ffi v0.8.2
