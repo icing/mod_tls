@@ -1,10 +1,18 @@
-/* Copyright 2021, ISRG (https://www.abetterinternet.org)
+/* Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
  *
- * This software is licensed as described in the file LICENSE, which
- * you should have received as part of this distribution.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
-
 #include <assert.h>
 #include <apr_lib.h>
 #include <apr_strings.h>
@@ -115,7 +123,7 @@ static const char *var_get_client_cert(const tls_var_lookup_ctx_t *ctx)
     if (!ctx->cc->peer_certs || cert_idx >= ctx->cc->peer_certs->nelts) return NULL;
     cert = APR_ARRAY_IDX(ctx->cc->peer_certs, cert_idx, const rustls_certificate*);
     if (APR_SUCCESS != (rv = tls_cert_to_pem(&pem, ctx->p, cert))) {
-        ap_log_error(APLOG_MARK, APLOG_DEBUG, rv, ctx->s, APLOGNO()
+        ap_log_error(APLOG_MARK, APLOG_DEBUG, rv, ctx->s, APLOGNO(10315)
                          "Failed to create client certificate PEM");
         return NULL;
     }
@@ -132,7 +140,7 @@ static const char *var_get_server_cert(const tls_var_lookup_ctx_t *ctx)
     cert = rustls_certified_key_get_certificate(ctx->cc->key, 0);
     if (!cert) return NULL;
     if (APR_SUCCESS != (rv = tls_cert_to_pem(&pem, ctx->p, cert))) {
-        ap_log_error(APLOG_MARK, APLOG_DEBUG, rv, ctx->s, APLOGNO()
+        ap_log_error(APLOG_MARK, APLOG_DEBUG, rv, ctx->s, APLOGNO(10316)
                          "Failed to create server certificate PEM");
         return NULL;
     }
@@ -360,7 +368,7 @@ apr_status_t tls_var_handshake_done(conn_rec *c)
     if (cc->peer_certs && sc->var_user_name) {
         cc->user_name = tls_var_lookup(c->pool, cc->server, c, NULL, sc->var_user_name);
         if (!cc->user_name) {
-            ap_log_error(APLOG_MARK, APLOG_WARNING, 0, cc->server, APLOGNO()
+            ap_log_error(APLOG_MARK, APLOG_WARNING, 0, cc->server, APLOGNO(10317)
                 "Failed to set r->user to '%s'", sc->var_user_name);
         }
     }

@@ -36,13 +36,14 @@ class TestSni:
         assert r.exit_code != 0
 
     def test_03_sni_request_other_same_config(self, env):
-        # do we see the first vhost respone for an unknown domain?
+        # do we see the first vhost respone for another domain with different certs?
         r = env.tls_get(env.domain_a, "/index.json", options=[
             "-vvvv", "--header", "Host: {0}".format(env.domain_b)
         ])
-        # request goes through, we see the correct JSON
+        # request is marked as misdirected
         assert r.exit_code == 0
-        assert r.json == {'domain': env.domain_b}
+        assert r.json is None
+        assert r.response['status'] == 421
 
     def test_03_sni_request_other_other_honor(self, env):
         if env.curl_supports_tls_1_3():

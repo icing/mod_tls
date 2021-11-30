@@ -1,10 +1,18 @@
-/* Copyright 2021, ISRG (https://www.abetterinternet.org)
+/* Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
  *
- * This software is licensed as described in the file LICENSE, which
- * you should have received as part of this distribution.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
-
 #include <assert.h>
 #include <apr_lib.h>
 #include <apr_strings.h>
@@ -103,7 +111,7 @@ static apr_status_t load_certified_keys(
             spec = APR_ARRAY_IDX(cert_specs, i, tls_cert_spec_t*);
             rv = tls_cert_reg_get_certified_key(cert_reg, s, spec, &ckey);
             if (APR_SUCCESS != rv) {
-                ap_log_error(APLOG_MARK, APLOG_ERR, rv, s, APLOGNO()
+                ap_log_error(APLOG_MARK, APLOG_ERR, rv, s, APLOGNO(10318)
                      "Failed to load certificate %d[cert=%s(%d), key=%s(%d)] for %s",
                      i, spec->cert_file, (int)(spec->cert_pem? strlen(spec->cert_pem) : 0),
                      spec->pkey_file, (int)(spec->pkey_pem? strlen(spec->pkey_pem) : 0),
@@ -220,7 +228,7 @@ static apr_status_t calc_ciphers(
     }
 
     if (unsupported && unsupported->nelts) {
-        ap_log_error(APLOG_MARK, APLOG_WARNING, rv, s, APLOGNO()
+        ap_log_error(APLOG_MARK, APLOG_WARNING, rv, s, APLOGNO(10319)
                      "Server '%s' has TLS%sCiphersPrefer configured that are not "
                      "supported by rustls. These will not have an effect: %s",
                      s->server_hostname, proxy,
@@ -230,7 +238,7 @@ static apr_status_t calc_ciphers(
     if (RUSTLS_RESULT_OK != rr) {
         const char *err_descr;
         rv = tls_util_rustls_error(pool, rr, &err_descr);
-        ap_log_error(APLOG_MARK, APLOG_ERR, rv, s, APLOGNO()
+        ap_log_error(APLOG_MARK, APLOG_ERR, rv, s, APLOGNO(10320)
                      "Failed to configure ciphers %s: [%d] %s",
                      s->server_hostname, (int)rr, err_descr);
     }
@@ -298,13 +306,13 @@ static apr_array_header_t *complete_cert_specs(
         if (cert_adds->nelts > 0) {
             add_file_specs(specs, p, cert_adds, key_adds);
             sc->service_unavailable = 1;
-            ap_log_error(APLOG_MARK, APLOG_WARNING, 0, sc->server, APLOGNO()
+            ap_log_error(APLOG_MARK, APLOG_INFO, 0, sc->server, APLOGNO(10321)
                          "Init: %s will respond with '503 Service Unavailable' for now. There "
                          "are no SSL certificates configured and no other module contributed any.",
                          sc->server->server_hostname);
         }
         else if (!sc->base_server) {
-            ap_log_error(APLOG_MARK, APLOG_ERR, 0, sc->server, APLOGNO()
+            ap_log_error(APLOG_MARK, APLOG_ERR, 0, sc->server, APLOGNO(10322)
                          "Init: %s has no certificates configured. Use 'TLSCertificate' to "
                          "configure a certificate and key file.",
                          sc->server->server_hostname);
@@ -353,7 +361,7 @@ static const rustls_certified_key *select_certified_key(
     }
     if (APLOGctrace2(c)) {
         const char *key_id = tls_cert_reg_get_id(sc->global->cert_reg, cc->key);
-        ap_log_cerror(APLOG_MARK, APLOG_TRACE2, 0, c, APLOGNO()
+        ap_log_cerror(APLOG_MARK, APLOG_TRACE2, 0, c, APLOGNO(10323)
                       "client hello selected key: %s", key_id? key_id : "unknown");
     }
     return cc->key;
@@ -362,7 +370,7 @@ cleanup:
     if (RUSTLS_RESULT_OK != rr) {
         const char *err_descr;
         rv = tls_util_rustls_error(c->pool, rr, &err_descr);
-        ap_log_cerror(APLOG_MARK, APLOG_ERR, rv, c, APLOGNO()
+        ap_log_cerror(APLOG_MARK, APLOG_ERR, rv, c, APLOGNO(10324)
                       "Failed to select certified key: [%d] %s", (int)rr, err_descr);
     }
     return NULL;
@@ -383,7 +391,7 @@ static apr_status_t server_conf_setup(
                  "init server: %s", sc->server->server_hostname);
 
     if (sc->client_auth != TLS_CLIENT_AUTH_NONE && !sc->client_ca) {
-        ap_log_error(APLOG_MARK, APLOG_ERR, 0, sc->server, APLOGNO()
+        ap_log_error(APLOG_MARK, APLOG_ERR, 0, sc->server, APLOGNO(10325)
                      "TLSClientAuthentication is enabled for %s, but no client CA file is set. "
                       "Use 'TLSClientCA <file>' to specify the trust anchors.",
                      sc->server->server_hostname);
@@ -462,7 +470,7 @@ static apr_status_t proxy_conf_setup(
             gc->proto, (apr_uint16_t)pc->proxy_protocol_min, ptemp);
         if (tls_versions->nelts > 0) {
             if (pc->proxy_protocol_min != APR_ARRAY_IDX(tls_versions, 0, apr_uint16_t)) {
-                ap_log_error(APLOG_MARK, APLOG_WARNING, 0, pc->defined_in, APLOGNO()
+                ap_log_error(APLOG_MARK, APLOG_WARNING, 0, pc->defined_in, APLOGNO(10326)
                              "Init: the minimum proxy protocol version configured for %s (%04x) "
                              "is not supported and version %04x was selected instead.",
                              pc->defined_in->server_hostname, pc->proxy_protocol_min,
@@ -470,7 +478,7 @@ static apr_status_t proxy_conf_setup(
             }
         }
         else {
-            ap_log_error(APLOG_MARK, APLOG_ERR, 0, pc->defined_in, APLOGNO()
+            ap_log_error(APLOG_MARK, APLOG_ERR, 0, pc->defined_in, APLOGNO(10327)
                          "Unable to configure the proxy protocol version for %s: "
                           "neither the configured minimum version (%04x), nor any higher one is "
                          "available.", pc->defined_in->server_hostname, pc->proxy_protocol_min);
@@ -554,7 +562,7 @@ cleanup:
     if (RUSTLS_RESULT_OK != rr) {
         const char *err_descr = NULL;
         rv = tls_util_rustls_error(p, rr, &err_descr);
-        ap_log_error(APLOG_MARK, APLOG_ERR, rv, base_server, APLOGNO()
+        ap_log_error(APLOG_MARK, APLOG_ERR, rv, base_server, APLOGNO(10328)
                      "Failed to init generic hello config: [%d] %s", (int)rr, err_descr);
         goto cleanup;
     }
@@ -833,7 +841,7 @@ static apr_status_t init_outgoing_connection(conn_rec *c)
         while ((p = apr_strtok(p, ", ", &last))) {
             len = (apr_size_t)(last - p - (*last? 1 : 0));
             if (len > 255) {
-                ap_log_cerror(APLOG_MARK, APLOG_ERR, 0, c, APLOGNO()
+                ap_log_cerror(APLOG_MARK, APLOG_ERR, 0, c, APLOGNO(10329)
                               "ALPN proxy protocol identifier too long: %s", p);
                 rv = APR_EGENERAL;
                 goto cleanup;
@@ -877,7 +885,7 @@ cleanup:
     if (RUSTLS_RESULT_OK != rr) {
         const char *err_descr = NULL;
         rv = tls_util_rustls_error(c->pool, rr, &err_descr);
-        ap_log_error(APLOG_MARK, APLOG_ERR, rv, cc->server, APLOGNO()
+        ap_log_error(APLOG_MARK, APLOG_ERR, rv, cc->server, APLOGNO(10330)
                      "Failed to init pre_session for outgoing %s to %s: [%d] %s",
                      cc->server->server_hostname, hostname, (int)rr, err_descr);
         c->aborted = 1;
@@ -948,7 +956,7 @@ cleanup:
     if (RUSTLS_RESULT_OK != rr) {
         const char *err_descr = NULL;
         rv = tls_util_rustls_error(c->pool, rr, &err_descr);
-        ap_log_error(APLOG_MARK, APLOG_ERR, rv, sc->server, APLOGNO()
+        ap_log_error(APLOG_MARK, APLOG_ERR, rv, sc->server, APLOGNO(10331)
                      "Failed to init TLS connection for server %s: [%d] %s",
                      sc->server->server_hostname, (int)rr, err_descr);
         c->aborted = 1;
@@ -1036,7 +1044,7 @@ cleanup:
     if (rr != RUSTLS_RESULT_OK) {
         const char *err_descr = NULL;
         rv = tls_util_rustls_error(c->pool, rr, &err_descr);
-        ap_log_error(APLOG_MARK, APLOG_ERR, rv, s, APLOGNO()
+        ap_log_error(APLOG_MARK, APLOG_ERR, rv, s, APLOGNO(10332)
                      "Failed to init session for server %s: [%d] %s",
                      s->server_hostname, (int)rr, err_descr);
         c->aborted = 1;
@@ -1067,7 +1075,7 @@ static apr_status_t build_server_connection(rustls_connection **pconnection,
             sc->global->proto, (apr_uint16_t)sc->tls_protocol_min, c->pool);
         if (tls_versions->nelts > 0) {
             if (sc->tls_protocol_min != APR_ARRAY_IDX(tls_versions, 0, apr_uint16_t)) {
-                ap_log_error(APLOG_MARK, APLOG_WARNING, 0, sc->server, APLOGNO()
+                ap_log_error(APLOG_MARK, APLOG_WARNING, 0, sc->server, APLOGNO(10333)
                              "Init: the minimum protocol version configured for %s (%04x) "
                              "is not supported and version %04x was selected instead.",
                              sc->server->server_hostname, sc->tls_protocol_min,
@@ -1075,7 +1083,7 @@ static apr_status_t build_server_connection(rustls_connection **pconnection,
             }
         }
         else {
-            ap_log_error(APLOG_MARK, APLOG_ERR, 0, sc->server, APLOGNO()
+            ap_log_error(APLOG_MARK, APLOG_ERR, 0, sc->server, APLOGNO(10334)
                          "Unable to configure the protocol version for %s: "
                           "neither the configured minimum version (%04x), nor any higher one is "
                          "available.", sc->server->server_hostname, sc->tls_protocol_min);
@@ -1147,7 +1155,7 @@ cleanup:
     if (rr != RUSTLS_RESULT_OK) {
         const char *err_descr = NULL;
         rv = tls_util_rustls_error(c->pool, rr, &err_descr);
-        ap_log_error(APLOG_MARK, APLOG_DEBUG, rv, sc->server, APLOGNO()
+        ap_log_error(APLOG_MARK, APLOG_DEBUG, rv, sc->server, APLOGNO(10335)
                      "Failed to init session for server %s: [%d] %s",
                      sc->server->server_hostname, (int)rr, err_descr);
     }
@@ -1159,7 +1167,7 @@ cleanup:
                      sc->server->server_hostname);
     }
     else {
-        ap_log_error(APLOG_MARK, APLOG_ERR, rv, sc->server, APLOGNO()
+        ap_log_error(APLOG_MARK, APLOG_ERR, rv, sc->server, APLOGNO(10336)
                      "Failed to init session for server %s",
                      sc->server->server_hostname);
         c->aborted = 1;
@@ -1186,24 +1194,24 @@ apr_status_t tls_core_conn_seen_client_hello(conn_rec *c)
 
     if (cc->sni_hostname) {
         if (ap_vhost_iterate_given_conn(c, find_vhost, (void*)cc->sni_hostname)) {
-            ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, c, APLOGNO()
+            ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, c, APLOGNO(10337)
                 "vhost_init: virtual host found for SNI '%s'", cc->sni_hostname);
             sni_match = 1;
         }
         else if (tls_util_name_matches_server(cc->sni_hostname, ap_server_conf)) {
-            ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, c, APLOGNO()
+            ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, c, APLOGNO(10338)
                 "vhost_init: virtual host NOT found, but base server[%s] matches SNI '%s'",
                 ap_server_conf->server_hostname, cc->sni_hostname);
             cc->server = ap_server_conf;
             sni_match = 1;
         }
         else if (sc->strict_sni == TLS_FLAG_FALSE) {
-            ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, c, APLOGNO()
+            ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, c, APLOGNO(10339)
                 "vhost_init: no virtual host found, relaxed SNI checking enabled, SNI '%s'",
                 cc->sni_hostname);
         }
         else {
-            ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, c, APLOGNO()
+            ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, c, APLOGNO(10340)
                 "vhost_init: no virtual host, nor base server[%s] matches SNI '%s'",
                 c->base_server->server_hostname, cc->sni_hostname);
             cc->server = sc->global->ap_server;
@@ -1211,7 +1219,7 @@ apr_status_t tls_core_conn_seen_client_hello(conn_rec *c)
         }
     }
     else {
-        ap_log_cerror(APLOG_MARK, APLOG_DEBUG, 0, c, APLOGNO()
+        ap_log_cerror(APLOG_MARK, APLOG_DEBUG, 0, c, APLOGNO(10341)
             "vhost_init: no SNI hostname provided by client");
     }
 
@@ -1250,7 +1258,7 @@ apr_status_t tls_core_conn_post_handshake(conn_rec *c)
 
     if (rustls_connection_is_handshaking(cc->rustls_connection)) {
         rv = APR_EGENERAL;
-        ap_log_error(APLOG_MARK, APLOG_ERR, rv, cc->server, APLOGNO()
+        ap_log_error(APLOG_MARK, APLOG_ERR, rv, cc->server, APLOGNO(10342)
                      "post handshake, but rustls claims to still be handshaking: %s",
                      cc->server->server_hostname);
         goto cleanup;
@@ -1262,7 +1270,7 @@ apr_status_t tls_core_conn_post_handshake(conn_rec *c)
     rsuite = rustls_connection_get_negotiated_ciphersuite(cc->rustls_connection);
     if (!rsuite) {
         rv = APR_EGENERAL;
-        ap_log_error(APLOG_MARK, APLOG_ERR, rv, cc->server, APLOGNO()
+        ap_log_error(APLOG_MARK, APLOG_ERR, rv, cc->server, APLOGNO(10343)
                      "post handshake, but rustls does not report negotiated cipher suite: %s",
                      cc->server->server_hostname);
         goto cleanup;
@@ -1284,7 +1292,7 @@ apr_status_t tls_core_conn_post_handshake(conn_rec *c)
         }
     }
     if (!cc->peer_certs && sc->client_auth == TLS_CLIENT_AUTH_REQUIRED) {
-        ap_log_cerror(APLOG_MARK, APLOG_INFO, 0, c, APLOGNO()
+        ap_log_cerror(APLOG_MARK, APLOG_INFO, 0, c, APLOGNO(10344)
               "A client certificate is required, but no acceptable certificate was presented.");
         rv = APR_ECONNABORTED;
     }
@@ -1299,7 +1307,9 @@ cleanup:
  */
 static int tls_conn_compatible_for(tls_conf_conn_t *cc, server_rec *other)
 {
-    tls_conf_server_t *oc;
+    tls_conf_server_t *oc, *sc;
+    const rustls_certified_key *sk, *ok;
+    int i;
 
     /*   - differences in certificates are the responsibility of the client.
      *     if it thinks the SNI server works for r->server, we are fine with that.
@@ -1310,6 +1320,16 @@ static int tls_conn_compatible_for(tls_conf_conn_t *cc, server_rec *other)
     if (cc->server == other) return 1;
     oc = tls_conf_server_get(other);
     if (!oc) return 0;
+    sc = tls_conf_server_get(cc->server);
+    if (!sc) return 0;
+
+    /* same certified keys used? */
+    if (sc->certified_keys->nelts != oc->certified_keys->nelts) return 0;
+    for (i = 0; i < sc->certified_keys->nelts; ++i) {
+        sk = APR_ARRAY_IDX(sc->certified_keys, i, const rustls_certified_key*);
+        ok = APR_ARRAY_IDX(oc->certified_keys, i, const rustls_certified_key*);
+        if (sk != ok) return 0;
+    }
 
     /* If the connection TLS version is below other other min one, no */
     if (oc->tls_protocol_min > 0 && cc->tls_protocol_id < oc->tls_protocol_min) return 0;
@@ -1321,7 +1341,8 @@ static int tls_conn_compatible_for(tls_conf_conn_t *cc, server_rec *other)
 
 int tls_core_request_check(request_rec *r)
 {
-    tls_conf_conn_t *cc = tls_conf_conn_get(r->connection);
+    conn_rec *c = r->connection;
+    tls_conf_conn_t *cc = tls_conf_conn_get(c->master? c->master : c);
     int rv = DECLINED; /* do not object to the request */
 
     /* If we are not enabled on this connection, leave. We are not renegotiating.
@@ -1344,7 +1365,7 @@ int tls_core_request_check(request_rec *r)
     }
     if (!tls_conn_compatible_for(cc, r->server)) {
         rv = HTTP_MISDIRECTED_REQUEST;
-        ap_log_rerror(APLOG_MARK, APLOG_ERR, rv, r, APLOGNO()
+        ap_log_rerror(APLOG_MARK, APLOG_ERR, rv, r, APLOGNO(10345)
                      "Connection host %s, selected via SNI, and request host %s"
                      " have incompatible TLS configurations.",
                      cc->server->server_hostname, r->hostname);

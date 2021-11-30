@@ -1,10 +1,18 @@
-/* Copyright 2021, ISRG (https://www.abetterinternet.org)
+/* Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
  *
- * This software is licensed as described in the file LICENSE, which
- * you should have received as part of this distribution.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
-
 #include <assert.h>
 #include <apr_lib.h>
 #include <apr_strings.h>
@@ -134,7 +142,7 @@ cleanup:
         if (!errors_expected) {
             const char *err_descr = "";
             rv = tls_core_error(fctx->c, rr, &err_descr);
-            ap_log_cerror(APLOG_MARK, APLOG_WARNING, rv, fctx->c, APLOGNO()
+            ap_log_cerror(APLOG_MARK, APLOG_WARNING, rv, fctx->c, APLOGNO(10353)
                          "processing TLS data: [%d] %s", (int)rr, err_descr);
         }
     }
@@ -176,9 +184,11 @@ static apr_status_t filter_abort(
     apr_status_t rv;
 
     if (fctx->cc->state != TLS_CONN_ST_DONE) {
-        rustls_connection_send_close_notify(fctx->cc->rustls_connection);
-        rv = fout_pass_all_to_net(fctx, 1);
-        ap_log_cerror(APLOG_MARK, APLOG_TRACE2, rv, fctx->c, "filter_abort, flushed output");
+        if (fctx->cc->state > TLS_CONN_ST_CLIENT_HELLO) {
+            rustls_connection_send_close_notify(fctx->cc->rustls_connection);
+            rv = fout_pass_all_to_net(fctx, 1);
+            ap_log_cerror(APLOG_MARK, APLOG_TRACE2, rv, fctx->c, "filter_abort, flushed output");
+        }
         fctx->c->aborted = 1;
         fctx->cc->state = TLS_CONN_ST_DONE;
     }
@@ -294,7 +304,7 @@ cleanup:
         "tls_filter, server=%s, handshake done", fctx->cc->server->server_hostname);
     if (APR_SUCCESS != rv) {
         if (fctx->cc->last_error_descr) {
-            ap_log_cerror(APLOG_MARK, APLOG_INFO, APR_ECONNABORTED, fctx->c, APLOGNO()
+            ap_log_cerror(APLOG_MARK, APLOG_INFO, APR_ECONNABORTED, fctx->c, APLOGNO(10354)
                 "handshake failed: %s", fctx->cc->last_error_descr);
         }
     }
@@ -485,7 +495,7 @@ cleanup:
         const char *err_descr = "";
 
         rv = tls_core_error(fctx->c, rr, &err_descr);
-        ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, fctx->c, APLOGNO()
+        ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, fctx->c, APLOGNO(10355)
                      "tls_filter_conn_input: [%d] %s", (int)rr, err_descr);
     }
     else if (APR_STATUS_IS_EAGAIN(rv)) {
@@ -493,7 +503,7 @@ cleanup:
                      "tls_filter_conn_input: no data available");
     }
     else if (APR_SUCCESS != rv) {
-        ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, fctx->c, APLOGNO()
+        ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, fctx->c, APLOGNO(10356)
                      "tls_filter_conn_input");
     }
     else {
@@ -626,7 +636,7 @@ static apr_status_t fout_pass_buf_to_rustls(
         len -= written;
         if (written == 0) {
             rv = APR_EAGAIN;
-            ap_log_cerror(APLOG_MARK, APLOG_ERR, 0, fctx->c, APLOGNO()
+            ap_log_cerror(APLOG_MARK, APLOG_ERR, 0, fctx->c, APLOGNO(10357)
                          "fout_pass_buf_to_rustls: not read by rustls at all");
             goto cleanup;
         }
@@ -635,7 +645,7 @@ cleanup:
     if (rr != RUSTLS_RESULT_OK) {
         const char *err_descr = "";
         rv = tls_core_error(fctx->c, rr, &err_descr);
-        ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, fctx->c, APLOGNO()
+        ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, fctx->c, APLOGNO(10358)
                      "fout_pass_buf_to_tls to rustls: [%d] %s", (int)rr, err_descr);
     }
     return rv;
@@ -841,7 +851,7 @@ cleanup:
     if (rr != RUSTLS_RESULT_OK) {
         const char *err_descr = "";
         rv = tls_core_error(fctx->c, rr, &err_descr);
-        ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, fctx->c, APLOGNO()
+        ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, fctx->c, APLOGNO(10359)
                      "write_bucket_to_rustls: [%d] %s", (int)rr, err_descr);
     }
     return rv;
@@ -904,7 +914,7 @@ cleanup:
     if (rr != RUSTLS_RESULT_OK) {
         const char *err_descr = "";
         rv = tls_core_error(fctx->c, rr, &err_descr);
-        ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, fctx->c, APLOGNO()
+        ap_log_cerror(APLOG_MARK, APLOG_DEBUG, rv, fctx->c, APLOGNO(10360)
                      "tls_filter_conn_output: [%d] %s", (int)rr, err_descr);
     }
     else {

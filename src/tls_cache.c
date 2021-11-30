@@ -1,10 +1,18 @@
-/* Copyright 2021, ISRG (https://www.abetterinternet.org)
+/* Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
  *
- * This software is licensed as described in the file LICENSE, which
- * you should have received as part of this distribution.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
-
 #include <assert.h>
 #include <apr_lib.h>
 #include <apr_strings.h>
@@ -66,7 +74,7 @@ static const char *cache_init(tls_conf_global_t *gconf, apr_pool_t *p, apr_pool_
     else if (!apr_strnatcasecmp("none", gconf->session_cache_spec)) {
         gconf->session_cache_provider = NULL;
         gconf->session_cache = NULL;
-        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, gconf->ap_server, APLOGNO()
+        ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, gconf->ap_server, APLOGNO(10346)
                      "session cache explicitly disabled");
         goto cleanup;
     }
@@ -81,10 +89,10 @@ static const char *cache_init(tls_conf_global_t *gconf, apr_pool_t *p, apr_pool_
         gconf->session_cache_spec = "shmcb:mod_tls-sesss(64000)";
     }
 
-    ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, gconf->ap_server, APLOGNO()
+    ap_log_error(APLOG_MARK, APLOG_DEBUG, 0, gconf->ap_server, APLOGNO(10347)
                  "Using session cache: %s", gconf->session_cache_spec);
     name = gconf->session_cache_spec;
-    args = ap_strchr(name, ':');
+    args = ap_strchr((char*)name, ':');
     if (args) {
         name = apr_pstrmemdup(p, name, (apr_size_t)(args - name));
         ++args;
@@ -134,7 +142,7 @@ apr_status_t tls_cache_post_config(apr_pool_t *p, apr_pool_t *ptemp, server_rec 
 
     err = cache_init(sc->global, p, ptemp);
     if (err) {
-        ap_log_error(APLOG_MARK, APLOG_WARNING, 0, s, APLOGNO()
+        ap_log_error(APLOG_MARK, APLOG_WARNING, 0, s, APLOGNO(10348)
                      "session cache [%s] could not be initialized, will continue "
                      "without session one. Since this will impact performance, "
                      "consider making use of the 'TLSSessionCache' directive. The "
@@ -154,7 +162,7 @@ apr_status_t tls_cache_post_config(apr_pool_t *p, apr_pool_t *ptemp, server_rec 
         rv = sc->global->session_cache_provider->init(
             sc->global->session_cache, "mod_tls-sess", &hints, s, p);
         if (APR_SUCCESS != rv) {
-            ap_log_error(APLOG_MARK, APLOG_EMERG, 0, s, APLOGNO()
+            ap_log_error(APLOG_MARK, APLOG_EMERG, 0, s, APLOGNO(10349)
                          "error initializing session cache.");
         }
     }
@@ -171,7 +179,7 @@ void tls_cache_init_child(apr_pool_t *p, server_rec *s)
         lockfile = apr_global_mutex_lockfile(sc->global->session_cache_mutex);
         rv = apr_global_mutex_child_init(&sc->global->session_cache_mutex, lockfile, p);
         if (APR_SUCCESS != rv) {
-            ap_log_error(APLOG_MARK, APLOG_ERR, rv, s, APLOGNO()
+            ap_log_error(APLOG_MARK, APLOG_ERR, rv, s, APLOGNO(10350)
                          "Cannot reinit %s mutex (file `%s`)",
                          TLS_SESSION_CACHE_MUTEX_TYPE, lockfile? lockfile : "-");
         }
@@ -191,7 +199,7 @@ static void tls_cache_lock(tls_conf_global_t *gconf)
     if (gconf->session_cache_mutex) {
         apr_status_t rv = apr_global_mutex_lock(gconf->session_cache_mutex);
         if (APR_SUCCESS != rv) {
-            ap_log_error(APLOG_MARK, APLOG_WARNING, rv, gconf->ap_server, APLOGNO()
+            ap_log_error(APLOG_MARK, APLOG_WARNING, rv, gconf->ap_server, APLOGNO(10351)
                          "Failed to acquire TLS session cache lock");
         }
     }
@@ -202,7 +210,7 @@ static void tls_cache_unlock(tls_conf_global_t *gconf)
     if (gconf->session_cache_mutex) {
         apr_status_t rv = apr_global_mutex_unlock(gconf->session_cache_mutex);
         if (APR_SUCCESS != rv) {
-            ap_log_error(APLOG_MARK, APLOG_WARNING, rv, gconf->ap_server, APLOGNO()
+            ap_log_error(APLOG_MARK, APLOG_WARNING, rv, gconf->ap_server, APLOGNO(10352)
                          "Failed to release TLS session cache lock");
         }
     }

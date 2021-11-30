@@ -1,10 +1,18 @@
-/* Copyright 2021, ISRG (https://www.abetterinternet.org)
+/* Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
  *
- * This software is licensed as described in the file LICENSE, which
- * you should have received as part of this distribution.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
-
 #include <assert.h>
 #include <apr_lib.h>
 #include <apr_encode.h>
@@ -153,7 +161,7 @@ static apr_status_t make_certified_key(
     if (RUSTLS_RESULT_OK != rr) {
         const char *err_descr;
         rv = tls_util_rustls_error(p, rr, &err_descr);
-        ap_log_perror(APLOG_MARK, APLOG_ERR, rv, p, APLOGNO()
+        ap_log_perror(APLOG_MARK, APLOG_ERR, rv, p, APLOGNO(10363)
                      "Failed to load certified key %s: [%d] %s",
                      name, (int)rr, err_descr);
     }
@@ -353,7 +361,7 @@ cleanup:
     if (RUSTLS_RESULT_OK != rr) {
         const char *err_descr;
         rv = tls_util_rustls_error(p, rr, &err_descr);
-        ap_log_perror(APLOG_MARK, APLOG_ERR, rv, p, APLOGNO()
+        ap_log_perror(APLOG_MARK, APLOG_ERR, rv, p, APLOGNO(10364)
                      "Failed to load root store %s: [%d] %s",
                      store_file, (int)rr, err_descr);
     }
