@@ -12,7 +12,7 @@ This project is sponsored by the [ISRG](https://www.abetterinternet.org).
 
 In development/beta test. See [beta testing](#beta-testing) for instructions how to use the recent release.
 
-You need Apache httpd version 2.4.48 or newer to run this module. Also you need [rustls-ffi](https://github.com/rustls/rustls-ffi), either the `main` branch or a version at least 0.7.0.
+You need Apache httpd version 2.4.48 or newer to run this module. Also you need [rustls-ffi](https://github.com/rustls/rustls-ffi), either the `main` branch or a version at least 0.8.2.
 
 `mod_tls` gives you:
  
