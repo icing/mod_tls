@@ -53,7 +53,7 @@ static rustls_io_result tls_read_callback(
  * If <fctx->fin_tls_bb> holds data, take it from there. Otherwise perform a
  * read via the network filters below us into that brigade.
  *
- * <fctx->fin_block> determines if we do a blocking read inititally or not.
+ * <fctx->fin_block> determines if we do a blocking read initially or not.
  * If the first read did to not produce enough data, any secondary read is done
  * non-blocking.
  *
@@ -357,7 +357,7 @@ cleanup:
 }
 
 /**
- * The connection filter converting TLS encrypted network data into plain, unencrpyted
+ * The connection filter converting TLS encrypted network data into plain, unencrypted
  * traffic data to be processed by filters above it in the filter chain.
  *
  * Unfortunately, Apache's filter infrastructure places a heavy implementation
@@ -417,7 +417,7 @@ static apr_status_t filter_conn_input(
      * a) ask rustls_connection for decrypted data, if it has any.
      *    Note that only full records can be decrypted. We might have
      *    written TLS data to the session, but that does not mean it
-     *    can give unencryted data out again.
+     *    can give unencrypted data out again.
      * b) read TLS bytes from the network and feed them to the rustls session.
      * c) go back to a) if b) added data.
      */
@@ -620,7 +620,7 @@ static apr_status_t fout_pass_buf_to_rustls(
 
     while (len) {
         /* check if we will exceed the limit of data in rustls.
-         * rustls does not guarantuee that it will accept all data, so we
+         * rustls does not guarantee that it will accept all data, so we
          * iterate and flush when needed. */
         if (fctx->fout_bytes_in_rustls + (apr_off_t)len > (apr_off_t)fctx->fout_max_in_rustls) {
             rv = fout_pass_rustls_to_tls(fctx);
@@ -795,7 +795,7 @@ static apr_status_t fout_append_plain(tls_filter_ctx_t *fctx, apr_bucket *b)
 
             if (APR_BUCKET_IS_FILE(b)
                 && (lbuf = malloc(b->length))) {
-                /* A file bucket is a most wonderous thing. Since the dawn of time,
+                /* A file bucket is a most wondrous thing. Since the dawn of time,
                  * it has been subject to many optimizations for efficient handling
                  * of large data in the server:
                  * - unless one reads from it, it will just consist of a file handle
@@ -810,7 +810,7 @@ static apr_status_t fout_append_plain(tls_filter_ctx_t *fctx, apr_bucket *b)
                  *   the file handle directly and uses sendfile() when the OS supports it.
                  * - But there is not sendfile() for TLS (netflix did some experiments).
                  * So.
-                 * rustls will try to collect max length traffic data into ont TLS
+                 * rustls will try to collect max length traffic data into one TLS
                  * message, but it can only work with what we gave it. If we give it buffers
                  * that fit what it wants to assemble already, its work is much easier.
                  *
@@ -949,7 +949,7 @@ int tls_filter_pre_conn_init(conn_rec *c)
      * to the filter "below" our filter. That will be other registered
      * filters and last, but not least, the network filter on the socket.
      *
-     * Therefore, wenn we need to read/write TLS data during handshake, we can
+     * Therefore, when we need to read/write TLS data during handshake, we can
      * pass the data to/call on ->next- Since ->next can change during the setup of
      * a connections (other modules register also sth.), we keep the ap_filter_t*
      * returned here, since httpd core will update the ->next whenever someone
