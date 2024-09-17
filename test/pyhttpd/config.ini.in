@@ -22,6 +22,7 @@ mpm_modules = @MPM_MODULES@
 
 [test]
 gen_dir = @abs_srcdir@/../gen
+src_dir = @abs_srcdir@/../../src
 http_port = 5002
 https_port = 5001
 proxy_port = 5003
