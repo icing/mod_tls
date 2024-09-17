@@ -1,12 +1,9 @@
- * Updates on sources after donation to the ASF Apache httpd project.
- * Fixed compatibility checks of request and connection to use
-   the master configuration and also check that the same certified
-   keys apply to both.
- * connection failures before complete read of a CLIENT_HELLO are
-   no longer answered with a TLS NOTIFY_CLOSE.
- * fixing a gcc warning about an unused variable
- * updating dockerfile to use fixed rustls-ffi version
- * updating dpckerfile to new test layout
+v0.13.0
+----------------------------------------------------------------------------------------------------
+ * align version somewhat with rustls-ffi version supported
+ * move module from Apache httpd to its own github repository
+ * fix tests to run on locally build mod_tls, no install necessary
+ * adapted to rustls-ffi thanks for @cpu.
 
 v0.8.2
 ----------------------------------------------------------------------------------------------------
