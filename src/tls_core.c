@@ -564,7 +564,6 @@ cleanup:
         rv = tls_util_rustls_error(p, rr, &err_descr);
         ap_log_error(APLOG_MARK, APLOG_ERR, rv, base_server, APLOGNO(10328)
                      "Failed to init generic hello config: [%d] %s", (int)rr, err_descr);
-        goto cleanup;
     }
     return rv;
 }
@@ -967,7 +966,6 @@ cleanup:
                      sc->server->server_hostname, (int)rr, err_descr);
         c->aborted = 1;
         cc->state = TLS_CONN_ST_DISABLED;
-        goto cleanup;
     }
     return rv;
 }
