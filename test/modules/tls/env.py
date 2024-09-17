@@ -19,7 +19,7 @@ class TlsTestSetup(HttpdTestSetup):
     def __init__(self, env: 'HttpdTestEnv'):
         super().__init__(env=env)
         self.add_source_dir(os.path.dirname(inspect.getfile(TlsTestSetup)))
-        self.add_modules(["http2", "cgid", "watchdog", "proxy_http2"])
+        self.add_modules(["http2", "cgid", "watchdog", "proxy_http2", "ssl"])
 
     def make(self):
         super().make()
@@ -144,10 +144,7 @@ class TlsTestEnv(HttpdTestEnv):
             ]),
             CertificateSpec(name="user1", client=True, single_file=True),
         ])
-        if not HttpdTestEnv.has_shared_module("tls"):
-            self.add_httpd_log_modules(['ssl'])
-        else:
-            self.add_httpd_log_modules(['tls'])
+        self.add_httpd_log_modules(['tls'])
 
 
     def setup_httpd(self, setup: TlsTestSetup = None):

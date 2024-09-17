@@ -11,12 +11,7 @@ class TestProxySSL:
     @pytest.fixture(autouse=True, scope='class')
     def _class_scope(self, env):
         # add vhosts a+b and a ssl proxy from a to b
-        if not HttpdTestEnv.has_shared_module("tls"):
-            myoptions="SSLOptions +StdEnvVars"
-            myssl="mod_ssl"
-        else:
-            myoptions="TLSOptions +StdEnvVars"
-            myssl="mod_tls"
+        myoptions="TLSOptions +StdEnvVars"
         conf = TlsTestConf(env=env, extras={
             'base': [
                 "LogLevel proxy:trace1 proxy_http:trace1 ssl:trace1 proxy_http2:trace1",
@@ -44,7 +39,7 @@ class TestProxySSL:
                 myoptions,
             ],
         })
-        conf.add_tls_vhosts(domains=[env.domain_a, env.domain_b], ssl_module=myssl)
+        conf.add_tls_vhosts(domains=[env.domain_a, env.domain_b])
         conf.install()
         assert env.apache_restart() == 0
 
@@ -79,23 +74,6 @@ class TestProxySSL:
         ("SSL_CLIENT_VERIFY", "NONE"),
     ])
     def test_tls_14_proxy_ssl_vars_const(self, env, name: str, value: str):
-        if not HttpdTestEnv.has_shared_module("tls"):
-            return
-        r = env.tls_get(env.domain_b, f"/proxy-ssl/vars.py?name={name}")
-        assert r.exit_code == 0, r.stderr
-        assert r.json == {name: value}, r.stdout
-
-    @pytest.mark.parametrize("name, value", [
-        ("SERVER_NAME", "b.mod-tls.test"),
-        ("SSL_SESSION_RESUMED", "Initial"),
-        ("SSL_SECURE_RENEG", "true"),
-        ("SSL_COMPRESS_METHOD", "NULL"),
-        ("SSL_CIPHER_EXPORT", "false"),
-        ("SSL_CLIENT_VERIFY", "NONE"),
-    ])
-    def test_tls_14_proxy_ssl_vars_const(self, env, name: str, value: str):
-        if HttpdTestEnv.has_shared_module("tls"):
-            return
         r = env.tls_get(env.domain_b, f"/proxy-ssl/vars.py?name={name}")
         assert r.exit_code == 0, r.stderr
         assert r.json == {name: value}, r.stdout
@@ -105,20 +83,6 @@ class TestProxySSL:
         ("SSL_VERSION_LIBRARY", r'rustls-ffi/\d+\.\d+\.\d+/rustls/\d+\.\d+(\.\d+)?'),
     ])
     def test_tls_14_proxy_ssl_vars_match(self, env, name: str, pattern: str):
-        if not HttpdTestEnv.has_shared_module("tls"):
-            return
-        r = env.tls_get(env.domain_b, f"/proxy-ssl/vars.py?name={name}")
-        assert r.exit_code == 0, r.stderr
-        assert name in r.json
-        assert re.match(pattern, r.json[name]), r.json
-
-    @pytest.mark.parametrize("name, pattern", [
-        ("SSL_VERSION_INTERFACE", r'mod_ssl/\d+\.\d+\.\d+'),
-        ("SSL_VERSION_LIBRARY", r'OpenSSL/\d+\.\d+\.\d+'),
-    ])
-    def test_tls_14_proxy_ssl_vars_match(self, env, name: str, pattern: str):
-        if HttpdTestEnv.has_shared_module("tls"):
-            return
         r = env.tls_get(env.domain_b, f"/proxy-ssl/vars.py?name={name}")
         assert r.exit_code == 0, r.stderr
         assert name in r.json

@@ -11,12 +11,7 @@ class TlsTestConf(HttpdConf):
         extras = extras if extras is not None else {}
         super().__init__(env=env, extras=extras)
 
-    def start_tls_vhost(self, domains: List[str], port=None, ssl_module=None):
-        if ssl_module is None:
-            if not self.env.has_shared_module("tls"):
-                ssl_module = "mod_ssl"
-            else:
-                ssl_module = 'mod_tls'
+    def start_tls_vhost(self, domains: List[str], port=None, ssl_module='mod_tls'):
         super().start_vhost(domains=domains, port=port, doc_root=f"htdocs/{domains[0]}", ssl_module=ssl_module)
 
     def end_tls_vhost(self):
@@ -24,7 +19,7 @@ class TlsTestConf(HttpdConf):
 
     def add_tls_vhosts(self, domains: List[str], port=None, ssl_module=None):
         for domain in domains:
-            self.start_tls_vhost(domains=[domain], port=port, ssl_module=ssl_module)
+            self.start_tls_vhost(domains=[domain], port=port, ssl_module='mod_tls')
             self.end_tls_vhost()
 
     def add_md_vhosts(self, domains: List[str], port = None):
@@ -42,12 +37,8 @@ class TlsTestConf(HttpdConf):
                     f"    MDCertificateKeyFile {pkey_file}",
                     ])
             self.add("</MDomain>")
-            if self.env.has_shared_module("tls"):
-                ssl_module= "mod_tls"
-            else:
-                ssl_module= "mod_ssl"
             super().add_vhost(domains=[domain], port=port, doc_root=f"htdocs/{domain}",
-                              with_ssl=True, with_certificates=False, ssl_module=ssl_module)
+                              with_ssl=True, with_certificates=False)
 
     def add_md_base(self, domain: str):
         self.add([

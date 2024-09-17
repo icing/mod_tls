@@ -229,13 +229,6 @@ class HttpdTestEnv:
     def get_ssl_module(cls):
         return os.environ['SSL'] if 'SSL' in os.environ else 'mod_ssl'
 
-    @classmethod
-    def has_shared_module(cls, name):
-        if cls.LIBEXEC_DIR is None:
-            env = HttpdTestEnv()  # will initialized it
-        path = os.path.join(cls.LIBEXEC_DIR, f"mod_{name}.so")
-        return os.path.isfile(path)
-
     def __init__(self, pytestconfig=None):
         self._our_dir = os.path.dirname(inspect.getfile(Dummy))
         self.config = ConfigParser(interpolation=ExtendedInterpolation())
@@ -602,11 +595,11 @@ class HttpdTestEnv:
             fd.write(f"CoreDumpDirectory {self._server_dir}\n")
             fd.write('\n')
             if self._verbosity >= 3:
-                fd.write(f"LogLevel trace7 ssl:trace6\n")
+                fd.write(f"LogLevel trace7\n")
                 fd.write(f"DumpIoOutput on\n")
                 fd.write(f"DumpIoInput on\n")
             elif self._verbosity >= 2:
-                fd.write(f"LogLevel debug core:trace5 {self.mpm_module}:trace5 ssl:trace5 http:trace5\n")
+                fd.write(f"LogLevel debug core:trace5 {self.mpm_module}:trace5 http:trace5\n")
             elif self._verbosity >= 1:
                 fd.write(f"LogLevel info\n")
             else:

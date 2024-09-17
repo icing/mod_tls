@@ -45,19 +45,3 @@ class TestProto:
         s = socket.create_connection(('localhost', env.https_port))
         time.sleep(0.1)
         s.close()
-
-    def test_tls_05_proto_ssl_close(self, env):
-        conf = TlsTestConf(env=env, extras={
-            'base': "LogLevel ssl:debug",
-            env.domain_a: "SSLProtocol TLSv1.3",
-            env.domain_b: "SSLProtocol TLSv1.2",
-        })
-        for d in [env.domain_a, env.domain_b]:
-            conf.add_vhost(domains=[d], port=env.https_port)
-        conf.install()
-        assert env.apache_restart() == 0
-        s = socket.create_connection(('localhost', env.https_port))
-        time.sleep(0.1)
-        s.close()
-
-

@@ -10,7 +10,7 @@ class TestProxy:
     @pytest.fixture(autouse=True, scope='class')
     def _class_scope(self, env):
         conf = TlsTestConf(env=env, extras={
-            'base': "LogLevel proxy:trace1 proxy_http:trace1 ssl:trace1",
+            'base': "LogLevel proxy:trace1 proxy_http:trace1 tls:trace1",
             env.domain_b: [
                 "ProxyPreserveHost on",
                 f'ProxyPass "/proxy/" "http://127.0.0.1:{env.http_port}/"',

@@ -5,8 +5,6 @@ import pytest
 from .conf import TlsTestConf
 from pyhttpd.env import HttpdTestEnv
 
-@pytest.mark.skipif(condition=not HttpdTestEnv.has_shared_module("tls"), reason="no mod_tls available")
-
 
 class TestProxyMixed:
 
