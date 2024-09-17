@@ -192,6 +192,8 @@ if test -x "$APACHECTL"; then
     AC_SUBST(DSO_MODULES)
     STATIC_MODULES="$($APACHECTL -t -D DUMP_MODULES | fgrep '(static)'| sed 's/_module.*//g'|tr -d \\n)"
     AC_SUBST(STATIC_MODULES)
+    MPM_MODULES="mpm_event mpm_worker"
+    AC_SUBST(MPM_MODULES)
 else
     AC_MSG_WARN("apachectl not found in '$BINDIR', test suite will not work!")
     APACHECTL=""
@@ -262,6 +264,7 @@ AC_CONFIG_FILES([
     src/tls_version.h
     src/Makefile
     test/Makefile
+    test/clients/Makefile
     test/pyhttpd/config.ini
 ])
 

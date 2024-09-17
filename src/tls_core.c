@@ -507,8 +507,8 @@ static const rustls_certified_key *extract_client_hello_values(
     ap_log_cerror(APLOG_MARK, APLOG_TRACE2, 0, c, "extract client hello values");
     if (!cc) goto cleanup;
     cc->client_hello_seen = 1;
-    if (hello->sni_name.len > 0) {
-        cc->sni_hostname = apr_pstrndup(c->pool, hello->sni_name.data, hello->sni_name.len);
+    if (hello->server_name.len > 0) {
+        cc->sni_hostname = apr_pstrndup(c->pool, hello->server_name.data, hello->server_name.len);
         ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, c, "sni detected: %s", cc->sni_hostname);
     }
     else {
@@ -764,8 +764,10 @@ static apr_status_t init_outgoing_connection(conn_rec *c)
     tls_conf_proxy_t *pc;
     const apr_array_header_t *ciphersuites = NULL;
     apr_array_header_t *tls_versions = NULL;
+    rustls_web_pki_server_cert_verifier_builder *verifier_builder = NULL;
+    struct rustls_server_cert_verifier *verifier = NULL;
     rustls_client_config_builder *builder = NULL;
-    rustls_root_cert_store *ca_store = NULL;
+    const rustls_root_cert_store *ca_store = NULL;
     const char *hostname = NULL, *alpn_note = NULL;
     rustls_result rr = RUSTLS_RESULT_OK;
     apr_status_t rv = APR_SUCCESS;
@@ -778,7 +780,7 @@ static apr_status_t init_outgoing_connection(conn_rec *c)
     hostname = apr_table_get(c->notes, "proxy-request-hostname");
     alpn_note = apr_table_get(c->notes, "proxy-request-alpn-protos");
     ap_log_error(APLOG_MARK, APLOG_TRACE1, 0, c->base_server,
-        "setup_outgoing: to %s [ALPN: %s] from configration in %s"
+        "setup_outgoing: to %s [ALPN: %s] from configuration in %s"
         " using CA %s", hostname, alpn_note, pc->defined_in->server_hostname, pc->proxy_ca);
 
     rv = get_proxy_ciphers(&ciphersuites, c->pool, pc);
@@ -809,7 +811,10 @@ static apr_status_t init_outgoing_connection(conn_rec *c)
     if (pc->proxy_ca && strcasecmp(pc->proxy_ca, "default")) {
         rv = tls_cert_root_stores_get(pc->global->stores, pc->proxy_ca, &ca_store);
         if (APR_SUCCESS != rv) goto cleanup;
-        rustls_client_config_builder_use_roots(builder, ca_store);
+        verifier_builder = rustls_web_pki_server_cert_verifier_builder_new(ca_store);
+        rr = rustls_web_pki_server_cert_verifier_builder_build(verifier_builder, &verifier);
+        if (RUSTLS_RESULT_OK != rr) goto cleanup;
+        rustls_client_config_builder_set_server_verifier(builder, verifier);
     }
 
 #if TLS_MACHINE_CERTS
@@ -881,6 +886,7 @@ static apr_status_t init_outgoing_connection(conn_rec *c)
     rustls_connection_set_userdata(cc->rustls_connection, c);
 
 cleanup:
+    if (verifier_builder != NULL) rustls_web_pki_server_cert_verifier_builder_free(verifier_builder);
     if (builder != NULL) rustls_client_config_builder_free(builder);
     if (RUSTLS_RESULT_OK != rr) {
         const char *err_descr = NULL;
@@ -1125,10 +1131,10 @@ static apr_status_t build_server_connection(rustls_connection **pconnection,
             rustls_server_config_builder_set_client_verifier(builder, verifier);
         }
         else {
-            const rustls_client_cert_verifier_optional *verifier;
+            const rustls_client_cert_verifier *verifier;
             rv = tls_cert_client_verifiers_get_optional(sc->global->verifiers, sc->client_ca, &verifier);
             if (APR_SUCCESS != rv) goto cleanup;
-            rustls_server_config_builder_set_client_verifier_optional(builder, verifier);
+            rustls_server_config_builder_set_client_verifier(builder, verifier);
         }
     }
 
@@ -1185,7 +1191,7 @@ apr_status_t tls_core_conn_seen_client_hello(conn_rec *c)
     int sni_match = 0;
 
     /* The initial rustls generic session has been fed the client hello and
-     * we have extraced SNI and ALPN values (so present).
+     * we have extracted SNI and ALPN values (so present).
      * Time to select the actual server_rec and application protocol that
      * will be used on this connection. */
     ap_assert(cc);

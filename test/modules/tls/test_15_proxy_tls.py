@@ -1,10 +1,12 @@
-import re
 from datetime import timedelta
 
 import pytest
 
 from .conf import TlsTestConf
+from .env import TlsTestEnv
+from pyhttpd.env import HttpdTestEnv
 
+@pytest.mark.skipif(condition=not HttpdTestEnv.has_shared_module("tls"), reason="no mod_tls available")
 
 class TestProxyTLS:
 
@@ -45,16 +47,24 @@ class TestProxyTLS:
         conf.install()
         assert env.apache_restart() == 0
 
-    def test_15_proxy_tls_get(self, env):
+    def test_tls_15_proxy_tls_get(self, env):
         data = env.tls_get_json(env.domain_b, "/proxy-tls/index.json")
         assert data == {'domain': env.domain_b}
 
-    def test_15_proxy_tls_get_local(self, env):
+    def test_tls_15_proxy_tls_get_local(self, env):
         # does not work, since SSLProxy* not configured
         data = env.tls_get_json(env.domain_b, "/proxy-local/index.json")
         assert data is None
+        #
+        env.httpd_error_log.ignore_recent(
+            lognos = [
+                "AH01961",  # failed to enable ssl support [Hint: if using mod_ssl, see SSLProxyEngine]
+                "AH00961"   # failed to enable ssl support (mod_proxy)
+            ]
+        )
 
-    def test_15_proxy_tls_h2_get(self, env):
+    @pytest.mark.skipif(condition=TlsTestEnv.is_unsupported, reason="h2 not supported here")
+    def test_tls_15_proxy_tls_h2_get(self, env):
         r = env.tls_get(env.domain_b, "/proxy-h2-tls/index.json")
         assert r.exit_code == 0
         assert r.json == {'domain': env.domain_b}, f"{r.stdout}"
@@ -69,21 +79,19 @@ class TestProxyTLS:
         ("SSL_CIPHER_EXPORT", "false"),
         ("SSL_CLIENT_VERIFY", "NONE"),
     ])
-    def test_15_proxy_tls_h1_vars(self, env, name: str, value: str):
+    def test_tls_15_proxy_tls_h1_vars(self, env, name: str, value: str):
         r = env.tls_get(env.domain_b, f"/proxy-tls/vars.py?name={name}")
         assert r.exit_code == 0, r.stderr
         assert r.json == {name: value}, r.stdout
 
     @pytest.mark.parametrize("name, value", [
         ("SERVER_NAME", "b.mod-tls.test"),
-        ("SERVER_NAME", "b.mod-tls.test"),
-        ("SERVER_NAME", "b.mod-tls.test"),
-        ("SERVER_NAME", "b.mod-tls.test"),
         ("SSL_PROTOCOL", "TLSv1.3"),
         ("SSL_CIPHER", "TLS_CHACHA20_POLY1305_SHA256"),
         ("SSL_SESSION_RESUMED", "Initial"),
     ])
-    def test_15_proxy_tls_h2_vars(self, env, name: str, value: str):
+    @pytest.mark.skipif(condition=TlsTestEnv.is_unsupported, reason="h2 not supported here")
+    def test_tls_15_proxy_tls_h2_vars(self, env, name: str, value: str):
         r = env.tls_get(env.domain_b, f"/proxy-h2-tls/vars.py?name={name}")
         assert r.exit_code == 0, r.stderr
         assert r.json == {name: value}, r.stdout

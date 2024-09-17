@@ -3,8 +3,9 @@ import os
 import pytest
 
 from .conf import TlsTestConf
+from pyhttpd.env import HttpdTestEnv
 
-
+@pytest.mark.skipif(condition=not HttpdTestEnv.has_shared_module("tls"), reason="no mod_tls available")
 class TestProxyMachineCert:
 
     @pytest.fixture(autouse=True, scope='class')
@@ -54,7 +55,7 @@ class TestProxyMachineCert:
         conf.install()
         assert env.apache_restart() == 0
 
-    def test_17_proxy_machine_cert_get_a(self, env):
+    def test_tls_17_proxy_machine_cert_get_a(self, env):
         data = env.tls_get_json(env.domain_a, "/proxy-tls/index.json")
         assert data == {'domain': env.domain_a}
 
@@ -63,7 +64,7 @@ class TestProxyMachineCert:
         ("SSL_CLIENT_VERIFY", "SUCCESS"),
         ("REMOTE_USER", "user1"),
     ])
-    def test_17_proxy_machine_cert_vars(self, env, name: str, value: str):
+    def test_tls_17_proxy_machine_cert_vars(self, env, name: str, value: str):
         r = env.tls_get(env.domain_a, f"/proxy-tls/vars.py?name={name}")
         assert r.exit_code == 0, r.stderr
         assert r.json == {name: value}, r.stdout

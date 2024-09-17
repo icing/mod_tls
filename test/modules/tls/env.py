@@ -3,13 +3,9 @@ import logging
 import os
 import re
 import subprocess
-import sys
-import time
 
 from datetime import timedelta, datetime
-from http.client import HTTPConnection
 from typing import List, Optional, Dict, Tuple, Union
-from urllib.parse import urlparse
 
 from pyhttpd.certs import CertificateSpec
 from pyhttpd.env import HttpdTestEnv, HttpdTestSetup
@@ -56,6 +52,28 @@ class TlsCipher:
 
 
 class TlsTestEnv(HttpdTestEnv):
+
+    CURL_SUPPORTS_TLS_1_3 = None
+
+    @classmethod
+    @property
+    def is_unsupported(cls):
+        mpm_module = f"mpm_{os.environ['MPM']}" if 'MPM' in os.environ else 'mpm_event'
+        return mpm_module == 'mpm_prefork'
+
+    @classmethod
+    def curl_supports_tls_1_3(cls) -> bool:
+        if cls.CURL_SUPPORTS_TLS_1_3 is None:
+            # Unfortunately, there is no reliable, platform-independant
+            # way to verify that TLSv1.3 is properly supported by curl.
+            #
+            # p = subprocess.run(['curl', '--tlsv1.3', 'https://shouldneverexistreally'],
+            #                    stderr=subprocess.PIPE, stdout=subprocess.PIPE)
+            # return code 6 means the site could not be resolved, but the
+            # tls parameter was recognized
+            cls.CURL_SUPPORTS_TLS_1_3 = False
+        return cls.CURL_SUPPORTS_TLS_1_3
+
 
     # current rustls supported ciphers in their order of preference
     # used to test cipher selection, see test_06_ciphers.py
@@ -117,7 +135,10 @@ class TlsTestEnv(HttpdTestEnv):
             ]),
             CertificateSpec(name="user1", client=True, single_file=True),
         ])
-        self.add_httpd_log_modules(['tls'])
+        if not HttpdTestEnv.has_shared_module("tls"):
+            self.add_httpd_log_modules(['ssl'])
+        else:
+            self.add_httpd_log_modules(['tls'])
 
 
     def setup_httpd(self, setup: TlsTestSetup = None):
@@ -133,11 +154,11 @@ class TlsTestEnv(HttpdTestEnv):
     def domain_b(self) -> str:
         return self._domain_b
 
-    def tls_get(self, domain, paths: Union[str, List[str]], options: List[str] = None) -> ExecResult:
+    def tls_get(self, domain, paths: Union[str, List[str]], options: List[str] = None, no_stdout_list = False) -> ExecResult:
         if isinstance(paths, str):
             paths = [paths]
         urls = [f"https://{domain}:{self.https_port}{path}" for path in paths]
-        return self.curl_raw(urls=urls, options=options)
+        return self.curl_raw(urls=urls, options=options, no_stdout_list=no_stdout_list)
 
     def tls_get_json(self, domain: str, path: str, options=None):
         r = self.tls_get(domain=domain, paths=path, options=options)
@@ -158,14 +179,6 @@ class TlsTestEnv(HttpdTestEnv):
             args.extend(extra_args)
         args.extend([])
         return self.openssl(args)
-
-    CURL_SUPPORTS_TLS_1_3 = None
-
-    def curl_supports_tls_1_3(self) -> bool:
-        if self.CURL_SUPPORTS_TLS_1_3 is None:
-            r = self.tls_get(self.domain_a, "/index.json", options=["--tlsv1.3"])
-            self.CURL_SUPPORTS_TLS_1_3 = r.exit_code == 0
-        return self.CURL_SUPPORTS_TLS_1_3
 
     OPENSSL_SUPPORTED_PROTOCOLS = None
 

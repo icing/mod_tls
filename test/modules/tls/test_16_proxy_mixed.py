@@ -1,6 +1,11 @@
+import time
+
 import pytest
 
 from .conf import TlsTestConf
+from pyhttpd.env import HttpdTestEnv
+
+@pytest.mark.skipif(condition=not HttpdTestEnv.has_shared_module("tls"), reason="no mod_tls available")
 
 
 class TestProxyMixed:
@@ -9,7 +14,7 @@ class TestProxyMixed:
     def _class_scope(self, env):
         conf = TlsTestConf(env=env, extras={
             'base': [
-                "LogLevel proxy:trace1 proxy_http:trace1 ssl:trace1 proxy_http2:trace1",
+                "LogLevel proxy:trace1 proxy_http:trace1 ssl:trace1 proxy_http2:trace1 http2:debug",
                 "ProxyPreserveHost on",
             ],
             env.domain_a: [
@@ -34,10 +39,12 @@ class TestProxyMixed:
         conf.install()
         assert env.apache_restart() == 0
 
-    def test_16_proxy_mixed_ssl_get(self, env):
+    def test_tls_16_proxy_mixed_ssl_get(self, env, repeat):
         data = env.tls_get_json(env.domain_b, "/proxy-ssl/index.json")
         assert data == {'domain': env.domain_b}
 
-    def test_16_proxy_mixed_tls_get(self, env):
+    def test_tls_16_proxy_mixed_tls_get(self, env, repeat):
         data = env.tls_get_json(env.domain_a, "/proxy-tls/index.json")
+        if data is None:
+            time.sleep(300)
         assert data == {'domain': env.domain_a}
