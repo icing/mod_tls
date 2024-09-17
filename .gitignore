@@ -37,8 +37,6 @@ m4
 .cache
 build/
 __pycache__
-test/test.ini
-test/conf/httpd.conf
-test/conf/modules.conf
+test/pyhttpd/config.ini
 test/gen
 .idea
