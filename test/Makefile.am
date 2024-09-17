@@ -16,6 +16,15 @@
 
 .PHONY: test loadtest
 
+EXTRA_DIST     = modules pyhttpd clients
+
+dist-hook:
+	rm -rf $(distdir)/pyhttpd/htdocs/test1/apache.org-files
+	rm -rf $(distdir)/pyhttpd/mod_aptest/.libs
+	rm -rf $(distdir)/pyhttpd/__pycache__
+	rm -rf $(distdir)/modules/*/__pycache__
+
+
 test:
 	pytest
 
