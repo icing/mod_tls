@@ -1,23 +1,18 @@
-# `mod_tls` - memory safety for TLS in Apache
+# `mod_tls` - rust based TLS for Apache httpd
 
 This repository contains `mod_tls`, a module for Apache httpd that uses
 [rustls](https://github.com/ctz/rustls) to provide a memory safe TLS
 implementation in Rust.
 
-This project is sponsored by the [ISRG](https://www.abetterinternet.org). 
-[Read what they said about it.](https://www.abetterinternet.org/post/memory-safe-tls-apache/).
-
-
 ## Status
 
-In development/beta test. See [beta testing](#beta-testing) for instructions how to use the recent release.
-
-You need Apache httpd version 2.4.48 or newer to run this module. Also you need [rustls-ffi](https://github.com/rustls/rustls-ffi), either the `main` branch or a version at least 0.8.2.
+The current state is compatible with **rustls-ffi v0.13.0** and needs at least Apache 2.4.48 for the 
+necessary infrastructure. A new release with support for rustls-ffi v0.14.0 is in the making.
 
 `mod_tls` gives you:
  
  * a memory safe TLS via [rustls](https://docs.rs/rustls/0.19.1/rustls/).
- * TLS v1.2 and TLS v1.3, features as supported in [rustls](https://docs.rs/rustls/0.19.1/rustls/).
+ * TLS v1.2 and TLS v1.3
  * Configuration similar to Apache's own `mod_ssl`.
  * Similar performance as `mod_ssl`, better in some areas.
  * Frontend TLS for your clients
@@ -32,8 +27,8 @@ There is a [comparison table with mod_ssl functionality](#comparison-with-mod_ss
 
 ## Platforms
 
+ * rustls-ffi v0.13.0
  * Apache 2.4.48 or later
- * OS: wherever apache and (c)rustls are available
  * build system: autoconf/automake
 
 ### Installation from source
@@ -49,107 +44,6 @@ Run the usual autoconf/automake magic incantations.
 > ./configure --with-apxs=<path to apxs>
 > make
 ```
-
-### Docker Test Image
-
-There is support for building a Docker image based on `debian sid` to run the test suite in.
-
-```
-> docker-compose build debian-test
-> docker-compose run debian-test
-```
-
-This clones the git repository `rustls-ffi` and builds a copy of the local `mod_tls` sources. If you want to setup your own build on this platform, you'll find the instructions in `docker/debian-test/bin/update.sh`.
-
-## Beta Testing
-
-The releases v0.7.x are beta release that lets you run `mod_tls` inside the Apache web server. What your need:
-
-* [Apache httpd](https://httpd.apache.org) 2.4.48 (earlier versions will **not** work). 
-* [rustls-ffi](https://github.com/rustls/rustls-ffi) 0.7.0
-
-#### What to Expect
-
-* Frontend TLS (v1.2 + v1.3) for the clients connecting to Apache
-* ACME certificates (via Apache's `mod_md`)
-* OCSP stapling (via Apache's `mod_md`)
-* TLS session handling
-* multiple certificates per virtual host, SNI, ALPN
-
-#### Detailed Instructions
-
-At the time of this writing Apache 2.4.48 was not generally available as package, but expect that to change soon. When you have it, it usually is accompanied by a `apache2-dev` package that includes all header files and binaries to build `mod_tls`.
-
-When you have that, you need to checkout and build `rustls-ffi`. It has [its own build instructions](https://github.com/rustls/rustls-ffi#build). Basically, you need the `Rust` tool set installed and the run `make` which will pull in the components needed.
-
-After you have the `apache2-dev` package, the tool `apxs` is installed (also when you build apache2 from source yourself). `apxs` is useful to give information about the environment and parameters apache2 was built with. For example:
-
-```
-> apxs -q exec_prefix
-/usr
-```
-will tell you the directory underneath everything else is placed. When you have built `rustls-ffi` you need to install it in this location with
-
-```
-rustls-ffi> make install DESTDIR=/usr
-```
-
-which copies the header file and library. Then get the `mod_tls` release, unpack it somewhere and run:
-
-```
-mod_tls-0.7.x> ./configure
-```
-
-It should find the `apxs` tool in the path. If not, you can give it:
-
-```
-mod_tls-0.7.x> ./configure --with-apxs=/usr/bin/apxs
-...
-    Version:        0.7.x shared 11:0:6
-    Host type:      x86_64-pc-linux-gnu
-    Install prefix: /usr
-    APXS:           /usr/bin/apxs
-    HTTPD-VERSION:  2.4.48
-    C compiler:     gcc => gcc 
-    CFLAGS:         -g -O2
-    LDFLAGS:         -L/usr/lib -Wl,--gc-sections -lpthread -ldl
-    CPPFLAGS:        -I/usr/include/apache2 -I/usr/include/apr-1.0
-```
-Something similar will be printed at the end of the configuration. Then you just:
-
-```
-mod_tls-0.7.x> make install
-```
-
-This places the built module in Apache's `modules` directory. You can check:
-
-```
-> apxs -q exp_libexecdir
-/usr/lib/apache2/modules
-> ls -l /usr/lib/apache2/modules/mod_tls*
-lrwxrwxrwx 1 sei users       16 Jun  7 14:01 /usr/lib/apache2/modules/mod_tls.so -> mod_tls.so.0.0.0
--rwxr-xr-x 1 sei users 23785144 Jun  7 14:01 /usr/lib/apache2/modules/mod_tls.so.0.0.0
-```
-
-To load it into the server, you then add a line to a `httpd` configuration file. Some installations have a `modules.conf` file where you add:
-
-```
-LoadModule tls_module           "/usr/lib/apache2/modules/mod_tls.so"
-```
-Some installations do it differently. `Debian` has a directory `/etc/apache2/mods-available` where you create 2 files `mod_tls.conf` and `mod_tls.load`. The first one can be empty, the second one just has the `LoadModule` instruction as shown above. To enable the module, you then type:
-
-```
-> /usr/sbin/a2enmod tls
-```
-which creates some symlinks in `/etc/apache2/mods-enabled`.
-
-Then you start/reload your server. If your server logs on level `info` you will see an entry like:
-
-```
-[2021-06-07 ...] [tls:info] [pid ...] AH: mod_tls/0.7.x (crustls/0.6.1/rustls/0.19.0), initializing...
-```
-
-And otherwise it will just do nothing! You need to configure where in your server `mod_tls` should be active and there are several [descriptions below](#configuration) on how to do that.
 
 #### OCSP Stapling with mod_tls
 
@@ -168,34 +62,23 @@ handler by [`mod_status`](https://httpd.apache.org/docs/2.4/mod/mod_status.html)
 
 ## Tests
 
-### Functional Tests
-
 If you want to run the test suite, you need:
 
  * `curl` and `openssl` in your path
- * Some Python packages: `pytest`, `pyopenssl`
+ * Some Python packages: `pytest`, `cryptography`
 
 ```
 > make test
 ```
 
-### Load Tests
+## History
 
-There are load tests for putting the module under a bit of pressure and getting some numbers.
-All benchmarks are limited in how they can be applied to reality. It is terribly easy in 
-these limited tests to hit a sweet spot on your system where CPU+Disc caches align and 
-you see wonderful numbers. But they will not apply to a production server.
+This project has been sponsored in 2020 by the [ISRG](https://www.abetterinternet.org)
+([Read what they said about it.](https://www.abetterinternet.org/post/memory-safe-tls-apache/)). It had been added as an *experimental* module into the Apache httpd project. However, the `rustls-ffi`API proved to be unstable, mostly due to `rustls` own ongoing development. This requires rework of `mod_tls` on new releases and the schedule of that does not fit into the release schedule of the httpd project.
 
-To run these, you nee:
+In September 2024, I chose to give the module a standalone github location with its own releases and removed it from the Apache httpd project again. This will make maintenance and participation easier.
 
- * `h2load` from the exceptional [nghttp2](https://nghttp2.org).
- * Python package: `tqdm`
-
-```
-> make loadtest
-```
-
-This runs one test. There are several defined in `test/load_test.py` which you can invoke via arguments.
+Should rustls one day become stable, we can consider merging it to the httpd project again.
 
 ## Comparison with `mod_ssl`
 
