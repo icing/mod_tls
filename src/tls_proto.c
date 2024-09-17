@@ -448,14 +448,13 @@ tls_proto_conf_t *tls_proto_init(apr_pool_t *pool, server_rec *s)
     conf->supported_cipher_ids = apr_array_make(pool, 10, sizeof(apr_uint16_t));
     conf->rustls_ciphers_by_id = apr_hash_make(pool);
     i = 0;
-    while ((rustls_suite = rustls_all_ciphersuites_get_entry(i++))) {
+    while ((rustls_suite = rustls_default_crypto_provider_ciphersuites_get(i++))) {
         id = rustls_supported_ciphersuite_get_suite(rustls_suite);
         rcipher = apr_pcalloc(pool, sizeof(*rcipher));
         rcipher->id = id;
         rcipher->rustls_suite = rustls_suite;
         APR_ARRAY_PUSH(conf->supported_cipher_ids, apr_uint16_t) = id;
         apr_hash_set(conf->rustls_ciphers_by_id, &rcipher->id, sizeof(apr_uint16_t), rcipher);
-
     }
 
     return conf;
