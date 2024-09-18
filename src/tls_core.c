@@ -553,8 +553,8 @@ static apr_status_t setup_hello_config(apr_pool_t *p, server_rec *base_server, t
         rr = RUSTLS_RESULT_PANIC; goto cleanup;
     }
     rustls_server_config_builder_set_hello_callback(builder, extract_client_hello_values);
-    gc->rustls_hello_config = rustls_server_config_builder_build(builder);
-    if (!gc->rustls_hello_config) {
+    rr = rustls_server_config_builder_build(builder, &gc->rustls_hello_config);
+    if (NULL == gc->rustls_hello_config) {
         rr = RUSTLS_RESULT_PANIC; goto cleanup;
     }
 
@@ -564,7 +564,6 @@ cleanup:
         rv = tls_util_rustls_error(p, rr, &err_descr);
         ap_log_error(APLOG_MARK, APLOG_ERR, rv, base_server, APLOGNO(10328)
                      "Failed to init generic hello config: [%d] %s", (int)rr, err_descr);
-        goto cleanup;
     }
     return rv;
 }
@@ -762,6 +761,8 @@ static apr_status_t init_outgoing_connection(conn_rec *c)
 {
     tls_conf_conn_t *cc = tls_conf_conn_get(c);
     tls_conf_proxy_t *pc;
+    rustls_crypto_provider_builder *custom_provider_builder = NULL;
+    const rustls_crypto_provider *custom_provider = NULL;
     const apr_array_header_t *ciphersuites = NULL;
     apr_array_header_t *tls_versions = NULL;
     rustls_web_pki_server_cert_verifier_builder *verifier_builder = NULL;
@@ -793,9 +794,20 @@ static apr_status_t init_outgoing_connection(conn_rec *c)
 
     if (ciphersuites && ciphersuites->nelts > 0
         && tls_versions && tls_versions->nelts >= 0) {
+        rr = rustls_crypto_provider_builder_new_from_default(&custom_provider_builder);
+        if (RUSTLS_RESULT_OK != rr) goto cleanup;
+
+        rr = rustls_crypto_provider_builder_set_cipher_suites(
+                custom_provider_builder,
+                (const struct rustls_supported_ciphersuite *const *)ciphersuites->elts,
+                (size_t)ciphersuites->nelts);
+        if (RUSTLS_RESULT_OK != rr) goto cleanup;
+
+        rr = rustls_crypto_provider_builder_build(custom_provider_builder, &custom_provider);
+        if (RUSTLS_RESULT_OK != rr) goto cleanup;
+
         rr = rustls_client_config_builder_new_custom(
-            (const struct rustls_supported_ciphersuite *const *)ciphersuites->elts,
-            (size_t)ciphersuites->nelts,
+            custom_provider,
             (const uint16_t *)tls_versions->elts, (size_t)tls_versions->nelts,
             &builder);
         if (RUSTLS_RESULT_OK != rr) goto cleanup;
@@ -878,7 +890,8 @@ static apr_status_t init_outgoing_connection(conn_rec *c)
         }
     }
 
-    cc->rustls_client_config = rustls_client_config_builder_build(builder);
+    rr = rustls_client_config_builder_build(builder, &cc->rustls_client_config);
+    if (RUSTLS_RESULT_OK != rr) goto cleanup;
     builder = NULL;
 
     rr = rustls_client_connection_new(cc->rustls_client_config, hostname, &cc->rustls_connection);
@@ -886,6 +899,8 @@ static apr_status_t init_outgoing_connection(conn_rec *c)
     rustls_connection_set_userdata(cc->rustls_connection, c);
 
 cleanup:
+    if (custom_provider_builder != NULL) rustls_crypto_provider_builder_free(custom_provider_builder);
+    if (custom_provider != NULL) rustls_crypto_provider_free(custom_provider);
     if (verifier_builder != NULL) rustls_web_pki_server_cert_verifier_builder_free(verifier_builder);
     if (builder != NULL) rustls_client_config_builder_free(builder);
     if (RUSTLS_RESULT_OK != rr) {
@@ -896,7 +911,6 @@ cleanup:
                      cc->server->server_hostname, hostname, (int)rr, err_descr);
         c->aborted = 1;
         cc->state = TLS_CONN_ST_DISABLED;
-        goto cleanup;
     }
     return rv;
 }
@@ -1065,6 +1079,8 @@ static apr_status_t build_server_connection(rustls_connection **pconnection,
 {
     tls_conf_conn_t *cc = tls_conf_conn_get(c);
     tls_conf_server_t *sc;
+    rustls_crypto_provider_builder *custom_provider_builder = NULL;
+    const rustls_crypto_provider *custom_provider = NULL;
     const apr_array_header_t *tls_versions = NULL;
     rustls_server_config_builder *builder = NULL;
     const rustls_server_config *config = NULL;
@@ -1103,9 +1119,20 @@ static apr_status_t build_server_connection(rustls_connection **pconnection,
 
     if (sc->ciphersuites && sc->ciphersuites->nelts > 0
         && tls_versions && tls_versions->nelts >= 0) {
+        rr = rustls_crypto_provider_builder_new_from_default(&custom_provider_builder);
+        if (RUSTLS_RESULT_OK != rr) goto cleanup;
+
+        rr = rustls_crypto_provider_builder_set_cipher_suites(
+                custom_provider_builder,
+                (const struct rustls_supported_ciphersuite *const *)sc->ciphersuites->elts,
+                (size_t)sc->ciphersuites->nelts);
+        if (RUSTLS_RESULT_OK != rr) goto cleanup;
+
+        rr = rustls_crypto_provider_builder_build(custom_provider_builder, &custom_provider);
+        if (RUSTLS_RESULT_OK != rr) goto cleanup;
+
         rr = rustls_server_config_builder_new_custom(
-            (const struct rustls_supported_ciphersuite *const *)sc->ciphersuites->elts,
-            (size_t)sc->ciphersuites->nelts,
+            custom_provider,
             (const uint16_t *)tls_versions->elts, (size_t)tls_versions->nelts,
             &builder);
         if (RUSTLS_RESULT_OK != rr) goto cleanup;
@@ -1147,7 +1174,8 @@ static apr_status_t build_server_connection(rustls_connection **pconnection,
     rv = tls_cache_init_server(builder, sc->server);
     if (APR_SUCCESS != rv) goto cleanup;
 
-    config = rustls_server_config_builder_build(builder);
+    rr = rustls_server_config_builder_build(builder, &config);
+    if (RUSTLS_RESULT_OK != rr) goto cleanup;
     builder = NULL;
     if (!config) {
         rv = APR_ENOMEM; goto cleanup;
@@ -1158,6 +1186,8 @@ static apr_status_t build_server_connection(rustls_connection **pconnection,
     rustls_connection_set_userdata(rconnection, c);
 
 cleanup:
+    if (custom_provider_builder != NULL) rustls_crypto_provider_builder_free(custom_provider_builder);
+    if (custom_provider != NULL) rustls_crypto_provider_free(custom_provider);
     if (rr != RUSTLS_RESULT_OK) {
         const char *err_descr = NULL;
         rv = tls_util_rustls_error(c->pool, rr, &err_descr);
@@ -1258,7 +1288,6 @@ apr_status_t tls_core_conn_post_handshake(conn_rec *c)
 {
     tls_conf_conn_t *cc = tls_conf_conn_get(c);
     tls_conf_server_t *sc = tls_conf_server_get(cc->server);
-    const rustls_supported_ciphersuite *rsuite;
     const rustls_certificate *cert;
     apr_status_t rv = APR_SUCCESS;
 
@@ -1273,15 +1302,7 @@ apr_status_t tls_core_conn_post_handshake(conn_rec *c)
     cc->tls_protocol_id = rustls_connection_get_protocol_version(cc->rustls_connection);
     cc->tls_protocol_name = tls_proto_get_version_name(sc->global->proto,
         cc->tls_protocol_id, c->pool);
-    rsuite = rustls_connection_get_negotiated_ciphersuite(cc->rustls_connection);
-    if (!rsuite) {
-        rv = APR_EGENERAL;
-        ap_log_error(APLOG_MARK, APLOG_ERR, rv, cc->server, APLOGNO(10343)
-                     "post handshake, but rustls does not report negotiated cipher suite: %s",
-                     cc->server->server_hostname);
-        goto cleanup;
-    }
-    cc->tls_cipher_id = rustls_supported_ciphersuite_get_suite(rsuite);
+    cc->tls_cipher_id = rustls_connection_get_negotiated_ciphersuite(cc->rustls_connection);
     cc->tls_cipher_name = tls_proto_get_cipher_name(sc->global->proto,
         cc->tls_cipher_id, c->pool);
     ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, c, "post_handshake %s: %s [%s]",

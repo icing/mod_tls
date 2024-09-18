@@ -253,7 +253,7 @@ static rustls_result tls_cache_get(
     tls_cache_unlock(sc->global);
     if (APR_SUCCESS != rv) goto not_found;
     cc->session_id_cache_hit = 1;
-    *out_n = count;
+    *out_n = (size_t)vlen;
     return RUSTLS_RESULT_OK;
 
 not_found:
