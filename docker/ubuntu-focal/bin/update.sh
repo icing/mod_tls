@@ -2,6 +2,7 @@
 
 TOP=/abetterinternet
 DATADIR=$TOP/data
+RUSTLS_VERSION=0.14.0
 
 fail() {
   echo "$@"
@@ -42,8 +43,8 @@ rm -rf rustls-ffi
 git clone https://github.com/rustls/rustls-ffi.git rustls-ffi
 cd rustls-ffi
 git fetch origin
-git checkout tags/v0.8.2
-make install DESTDIR=$PREFIX || fail
+git checkout "tags/v$RUSTLS_VERSION"
+make install DESTDIR=$PREFIX CRYPTO_PROVIDER=ring || fail
 
 cd "$TOP/mod_tls" ||fail
 if needs_update .installed .; then
