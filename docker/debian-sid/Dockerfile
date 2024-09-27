@@ -2,7 +2,7 @@ FROM debian:sid
 
 RUN apt-get update; apt-get upgrade -y
 RUN apt-get install -y apt-listchanges \
-      make openssl libssl-dev libcurl4 libcurl4-openssl-dev \
+      make openssl libssl-dev libcurl4t64 libcurl4-openssl-dev \
       gcc subversion git cargo python3 iputils-ping \
       libapr1-dev libaprutil1-dev libnghttp2-dev pip \
       autoconf libtool libtool-bin libpcre3-dev libjansson-dev curl rsync nghttp2-client
