@@ -9,7 +9,7 @@ RUN apt-get install -y apt-listchanges \
 
 RUN apt-get install -y python3-pytest python3-tqdm python3-pycurl python3-cryptography
 
-RUN apt-get install -y apache2 apache2-dev libapache2-mod-md
+RUN apt-get install -y apache2 apache2-dev
 RUN apt-get install -y cbindgen
 
 COPY docker/debian-sid/bin/* /abetterinternet/bin/

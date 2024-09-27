@@ -10,7 +10,7 @@ RUN apt-get install -y apt-listchanges \
 
 RUN apt-get install -y python3-pytest python3-tqdm python3-pycurl python3-cryptography
 
-RUN apt-get install -y apache2 apache2-dev libapache2-mod-md
+RUN apt-get install -y apache2 apache2-dev
 
 COPY docker/ubuntu-focal/bin/* /abetterinternet/bin/
 COPY configure.ac Makefile.am NEWS README* AUTHORS ChangeLog COPYING LICENSE /abetterinternet/mod_tls/
