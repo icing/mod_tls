@@ -47,12 +47,12 @@ jobs:
       fail-fast: false
       matrix:
         build:
-          - name: rustls ${{ matrix.build.rustls-version }}
+          - name: rustls 0.14.1
             install_packages:
             install_steps: pytest
             rustls-version: 0.14.1
 
-          #- name: rustls ${{ matrix.build.rustls-version }}
+          #- name: rustls main
           #  install_packages:
           #  install_steps: pytest
           #  rustls-version: main
