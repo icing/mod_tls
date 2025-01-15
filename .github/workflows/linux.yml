@@ -40,7 +40,7 @@ env:
 
 jobs:
   linux:
-    name: ${{ matrix.name }}
+    name: ${{ matrix.build.name }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -78,7 +78,7 @@ jobs:
 
       - name: 'build rustls'
         run: |
-          git clone --quiet --depth=1 -b v${{ env.rustls-version }} --recursive https://github.com/rustls/rustls-ffi.git
+          git clone --quiet --depth=1 -b v${{ matrix.build.rustls-version }} --recursive https://github.com/rustls/rustls-ffi.git
           cd rustls-ffi
           make DESTDIR=$HOME/rustls install
 
