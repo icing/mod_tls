@@ -12,17 +12,18 @@ libexecdir = @libexecdir@
 
 apr_bindir = @APR_BINDIR@
 apxs = @bindir@/apxs
-apachectl = @sbindir@/apachectl
+httpd = @HTTPD@
 
 [httpd]
 version = @HTTPD_VERSION@
 name = @progname@
 dso_modules = @DSO_MODULES@
-mpm_modules = @MPM_MODULES@
+static_modules = @STATIC_MODULES@
+mpm_modules = mpm_event mpm_worker
 
 [test]
+src_dir = @abs_top_srcdir@
 gen_dir = @abs_srcdir@/../gen
-src_dir = @abs_srcdir@/../../src
 http_port = 5002
 https_port = 5001
 proxy_port = 5003

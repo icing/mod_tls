@@ -1,0 +1,104 @@
+# Copyright 2025 Stefan Eissing (https://dev-icing.de)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+name: Linux
+
+'on':
+  push:
+    branches:
+      - master
+      - '*/ci'
+    paths-ignore:
+      - '**/*.md'
+  pull_request:
+    branches:
+      - master
+    paths-ignore:
+      - '**/*.md'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+permissions: {}
+
+env:
+  MARGS: "-j5"
+  CFLAGS: "-g"
+
+jobs:
+  linux:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        build:
+          - name: rustls ${{ matrix.build.rustls-version }}
+            install_packages:
+            install_steps: pytest
+            rustls-version: 0.14.1
+
+          #- name: rustls ${{ matrix.build.rustls-version }}
+          #  install_packages:
+          #  install_steps: pytest
+          #  rustls-version: main
+
+    steps:
+      - name: 'install prereqs'
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-suggests --no-install-recommends \
+            libtool autoconf automake pkgconf apache2 apache2-dev openssl \
+            curl nghttp2-client libssl-dev libjansson-dev libcurl4-openssl-dev \
+            ${{ matrix.build.install_packages }}
+          python3 -m venv $HOME/venv
+
+      - uses: actions/checkout@v4
+
+      - name: 'install rust'
+        run: |
+          cd $HOME
+          curl -sSf --compressed https://sh.rustup.rs/ | sh -s -- -y
+          source $HOME/.cargo/env
+          rustup toolchain install nightly
+
+      - name: 'build rustls'
+        run: |
+          git clone --quiet --depth=1 -b v${{ env.rustls-version }} --recursive https://github.com/rustls/rustls-ffi.git
+          cd rustls-ffi
+          make DESTDIR=$HOME/rustls install
+
+      - name: 'install test prereqs'
+        run: |
+          [ -x "$HOME/venv/bin/activate" ] && source $HOME/venv/bin/activate
+          python3 -m pip install -r test/requirements.txt
+
+      - name: 'configure'
+        run: |
+          autoreconf -fi
+          ./configure --enable-werror --with-rustls=$HOME/rustls
+
+      - name: 'build'
+        run: make V=1
+
+      - name: pytest
+        if: contains(matrix.build.install_steps, 'pytest')
+        env:
+          PYTEST_ADDOPTS: "--color=yes"
+        run: |
+          [ -x "$HOME/venv/bin/activate" ] && source $HOME/venv/bin/activate
+          pytest -v

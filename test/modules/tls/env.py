@@ -20,16 +20,8 @@ class TlsTestSetup(HttpdTestSetup):
         super().__init__(env=env)
         self.add_source_dir(os.path.dirname(inspect.getfile(TlsTestSetup)))
         self.add_modules(["http2", "cgid", "watchdog", "proxy_http2", "ssl"])
+        self.add_local_module("tls", "src/.libs/mod_tls.so")
 
-    def make(self):
-        super().make()
-        self._add_mod_tls()
-
-    def _add_mod_tls(self):
-        modules_conf = os.path.join(self.env.server_dir, 'conf/modules.conf')
-        with open(modules_conf, 'a') as fd:
-            # load our test module which is not installed
-            fd.write(f"LoadModule tls_module   \"{self.env.src_dir}/.libs/mod_tls.so\"\n")
 
 class TlsCipher:
 
