@@ -40,18 +40,21 @@ env:
 
 jobs:
   linux:
-    name: ${{ matrix.build.name }}
+    name: ${{ matrix.build.name }} (${{ matrix.crypto }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
+        rust:
+          - stable
+        crypto:
+          - ring
         build:
           - name: rustls 0.14.1 (ring)
             install_packages:
             install_steps: pytest
             rustls-version: 0.14.1
-            crypto-provider: ring
 
           #- name: rustls main
           #  install_packages:
@@ -70,20 +73,16 @@ jobs:
 
       - uses: actions/checkout@v4
 
-      - name: 'install rust'
-        run: |
-          cd $HOME
-          curl -sSf --compressed https://sh.rustup.rs/ | sh -s -- -y
-          source $HOME/.cargo/env
-          rustup toolchain install nightly
+      - name: Install ${{ matrix.rust }} toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
 
       - name: 'build rustls'
-        env:
-          CRYPTO_PROVIDER: ${{matrix.build.crypto-provider}}
         run: |
           git clone --quiet --depth=1 -b v${{ matrix.build.rustls-version }} --recursive https://github.com/rustls/rustls-ffi.git
           cd rustls-ffi
-          make DESTDIR=$HOME/rustls install
+          make DESTDIR=$HOME/rustls CRYPTO_PROVIDER=${{ matrix.crypto }} install
 
       - name: 'install test prereqs'
         run: |
