@@ -85,7 +85,7 @@ jobs:
         if: matrix.rustls-version != 'main'
         run: |
           cd rustls-ffi
-          make DESTDIR=$HOME/rustls CRYPTO_PROVIDER=${{ matrix.crypto }} install
+          make DESTDIR=$HOME/rustls-ffi/build/rust CRYPTO_PROVIDER=${{ matrix.crypto }} install
 
       - name: Install cargo-c
         if: matrix.rustls-version == 'main'
@@ -108,8 +108,6 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=$HOME/rustls \
             -S librustls -B build
           cmake --build build --config "Release"
-          cmake --install build -v
-          find $HOME/rustls
 
       - name: 'install test prereqs'
         run: |
@@ -119,7 +117,7 @@ jobs:
       - name: 'configure'
         run: |
           autoreconf -fi
-          ./configure --enable-werror --with-rustls=$HOME/rustls
+          ./configure --enable-werror --with-rustls=$HOME/rustls-ffi/build/rust
 
       - name: 'build'
         run: make V=1
