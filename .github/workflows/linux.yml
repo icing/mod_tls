@@ -47,10 +47,11 @@ jobs:
       fail-fast: false
       matrix:
         build:
-          - name: rustls 0.14.1
+          - name: rustls 0.14.1 (ring)
             install_packages:
             install_steps: pytest
             rustls-version: 0.14.1
+            crypto-provider: ring
 
           #- name: rustls main
           #  install_packages:
@@ -63,7 +64,7 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y --no-install-suggests --no-install-recommends \
             libtool autoconf automake pkgconf apache2 apache2-dev openssl \
-            curl nghttp2-client libssl-dev libjansson-dev libcurl4-openssl-dev \
+            curl nghttp2-client libssl-dev \
             ${{ matrix.build.install_packages }}
           python3 -m venv $HOME/venv
 
@@ -77,6 +78,8 @@ jobs:
           rustup toolchain install nightly
 
       - name: 'build rustls'
+        env:
+          CRYPTO_PROVIDER: ${{matrix.build.crypto-provider}}
         run: |
           git clone --quiet --depth=1 -b v${{ matrix.build.rustls-version }} --recursive https://github.com/rustls/rustls-ffi.git
           cd rustls-ffi
