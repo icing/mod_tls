@@ -103,11 +103,11 @@ jobs:
           cmake \
             -DCRYPTO_PROVIDER=${{matrix.crypto}} \
             -DDYN_LINK=on \
-            -DCMAKE_BUILD_TYPE=Relase \
+            -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX=$HOME/rustls \
             -S librustls -B build
           cmake --build build --config "Release"
-          cmake --install build
+          cmake --install build --config "Release"
 
       - name: 'install test prereqs'
         run: |
