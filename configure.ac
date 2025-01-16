@@ -227,18 +227,18 @@ AC_SUBST(LOAD_WATCHDOG)
 export BUILD_SUBDIRS="src"
 
 if test x"$request_rustls" != "xcheck"; then
-    LDFLAGS="$LDFLAGS -L$request_rustls/lib";
+    LDFLAGS="$LDFLAGS -L$request_rustls/lib -Wl,-rpath,$request_rustls/lib";
     CFLAGS="$CFLAGS -I$request_rustls/include";
     CPPFLAGS="$CPPFLAGS -I$request_rustls/include";
 fi
 
 # Need some additional things for rustls linkage. This seems platform specific.
 if test $(uname) = "Darwin"; then
-    CRUSTLS_LDFLAGS="-Wl,-dead_strip -framework Security -framework Foundation"
+    RUSTLS_LDFLAGS="-Wl,-dead_strip -framework Security -framework Foundation"
 else
-    CRUSTLS_LDFLAGS="-Wl,--gc-sections -lpthread -ldl"
+    RUSTLS_LDFLAGS="-Wl,--gc-sections -lpthread -ldl"
 fi
-LDFLAGS="$LDFLAGS $CRUSTLS_LDFLAGS"
+LDFLAGS="$LDFLAGS $RUSTLS_LDFLAGS"
 
 # verify that we can link rustls now
 # commented: problem running on debian
