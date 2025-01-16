@@ -50,6 +50,7 @@ jobs:
           - stable
         crypto:
           - ring
+          - aws-lc-rs
         build:
           - name: rustls 0.14.1
             install_packages:
