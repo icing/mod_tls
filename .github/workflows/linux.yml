@@ -1,0 +1,129 @@
+# Copyright 2025 Stefan Eissing (https://dev-icing.de)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+name: Linux
+
+'on':
+  push:
+    branches:
+      - master
+      - '*/ci'
+    paths-ignore:
+      - '**/*.md'
+  pull_request:
+    branches:
+      - master
+    paths-ignore:
+      - '**/*.md'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+permissions: {}
+
+env:
+  MARGS: "-j5"
+  CFLAGS: "-g"
+
+jobs:
+  linux:
+    name: ${{ matrix.build.name }} (rustls-ffi ${{matrix.rustls-version}} ${{ matrix.crypto }} ${{matrix.rust}})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        rust:
+          - stable
+          - nightly
+        crypto:
+          - ring
+          # aws-lc-sys v0.21.1 is not building due to compiler warnings
+          # - aws-lc-rs
+        rustls-version:
+          - v0.14.1
+          - main
+        build:
+          - name: mod_tls
+            install_packages:
+
+    steps:
+      - name: 'install prereqs'
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-suggests --no-install-recommends \
+            libtool autoconf automake pkgconf cmake apache2 apache2-dev openssl \
+            curl nghttp2-client libssl-dev \
+            ${{ matrix.build.install_packages }}
+          python3 -m venv $HOME/venv
+
+      - uses: actions/checkout@v4
+
+      - name: Install ${{ matrix.rust }} toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+
+      - name: 'checkout rustls-ffi'
+        run: |
+          cd $HOME/
+          git clone --quiet --depth=1 -b ${{ matrix.rustls-version }} --recursive https://github.com/rustls/rustls-ffi.git
+
+      - name: 'build rustls-ffi (Makefile)'
+        if: matrix.rustls-version != 'main'
+        run: |
+          cd $HOME/rustls-ffi
+          make DESTDIR=$HOME/rustls-ffi/build/rust CRYPTO_PROVIDER=${{ matrix.crypto }} install
+
+      - name: Install cargo-c
+        if: matrix.rustls-version == 'main'
+        env:
+          # Version picked for MSRV compat.
+          LINK: https://github.com/lu-zero/cargo-c/releases/latest/download/
+          CARGO_C_FILE: cargo-c-x86_64-unknown-linux-musl.tar.gz
+        run: |
+          curl -L $LINK/$CARGO_C_FILE | tar xz -C ~/.cargo/bin
+
+      - name: 'build rustls-ffi (cmake)'
+        if: matrix.rustls-version == 'main'
+        run: |
+          cd $HOME/rustls-ffi
+          cmake \
+            -DCRYPTO_PROVIDER=${{matrix.crypto}} \
+            -DDYN_LINK=on \
+            -DCMAKE_BUILD_TYPE=Release \
+            -S librustls -B build
+          cmake --build build --config "Release"
+
+      - name: 'install test prereqs'
+        run: |
+          [ -x "$HOME/venv/bin/activate" ] && source $HOME/venv/bin/activate
+          python3 -m pip install -r test/requirements.txt
+
+      - name: 'configure'
+        run: |
+          autoreconf -fi
+          ./configure --enable-werror --with-rustls=$HOME/rustls-ffi/build/rust
+
+      - name: 'build'
+        run: make V=1
+
+      - name: pytest
+        env:
+          PYTEST_ADDOPTS: "--color=yes"
+        run: |
+          [ -x "$HOME/venv/bin/activate" ] && source $HOME/venv/bin/activate
+          pytest -v

@@ -8,9 +8,8 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
 from .env import TlsTestEnv
 
 
-def pytest_report_header(config, startdir):
+def pytest_report_header(config):
     _x = config
-    _x = startdir
     env = TlsTestEnv()
     return "mod_tls [apache: {aversion}({prefix})]".format(
         prefix=env.prefix,
