@@ -40,7 +40,7 @@ env:
 
 jobs:
   linux:
-    name: ${{ matrix.build.name }} (${{ matrix.crypto }})
+    name: ${{ matrix.build.name }} (rustls ${{matrix.rustls-version}}, crypto=${{ matrix.crypto }}, rust=${{matrix.rust}})
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -48,19 +48,17 @@ jobs:
       matrix:
         rust:
           - stable
+          - nightly
         crypto:
           - ring
-          - aws-lc-rs
+          # aws-lc-sys v0.21.1 is not building due to compiler warnings
+          # - aws-lc-rs
+        rustls-version:
+          - 0.14.1
+          - main
         build:
-          - name: rustls 0.14.1
+          - name: mod_tls
             install_packages:
-            install_steps: pytest
-            rustls-version: 0.14.1
-
-          #- name: rustls main
-          #  install_packages:
-          #  install_steps: pytest
-          #  rustls-version: main
 
     steps:
       - name: 'install prereqs'
@@ -99,7 +97,6 @@ jobs:
         run: make V=1
 
       - name: pytest
-        if: contains(matrix.build.install_steps, 'pytest')
         env:
           PYTEST_ADDOPTS: "--color=yes"
         run: |
