@@ -85,14 +85,12 @@ jobs:
       - name: 'build rustls-ffi (Makefile)'
         if: matrix.rustls-version != 'main'
         run: |
-          git clone --quiet --depth=1 -b ${{ matrix.rustls-version }} --recursive https://github.com/rustls/rustls-ffi.git
           cd rustls-ffi
           make DESTDIR=$HOME/rustls CRYPTO_PROVIDER=${{ matrix.crypto }} install
 
       - name: 'build rustls-ffi (cmake)'
         if: matrix.rustls-version == 'main'
         run: |
-          git clone --quiet --depth=1 -b ${{ matrix.rustls-version }} --recursive https://github.com/rustls/rustls-ffi.git
           cd rustls-ffi
           cmake \
             -DCRYPTO_PROVIDER=${{matrix.crypto}} \
