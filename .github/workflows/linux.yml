@@ -79,7 +79,7 @@ jobs:
 
       - name: 'build rustls'
         run: |
-          git clone --quiet --depth=1 -b v${{ matrix.build.rustls-version }} --recursive https://github.com/rustls/rustls-ffi.git
+          git clone --quiet --depth=1 -b v${{ matrix.rustls-version }} --recursive https://github.com/rustls/rustls-ffi.git
           cd rustls-ffi
           make DESTDIR=$HOME/rustls CRYPTO_PROVIDER=${{ matrix.crypto }} install
 
