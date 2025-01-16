@@ -79,12 +79,13 @@ jobs:
 
       - name: 'checkout rustls-ffi'
         run: |
+          cd $HOME/
           git clone --quiet --depth=1 -b ${{ matrix.rustls-version }} --recursive https://github.com/rustls/rustls-ffi.git
 
       - name: 'build rustls-ffi (Makefile)'
         if: matrix.rustls-version != 'main'
         run: |
-          cd rustls-ffi
+          cd $HOME/rustls-ffi
           make DESTDIR=$HOME/rustls-ffi/build/rust CRYPTO_PROVIDER=${{ matrix.crypto }} install
 
       - name: Install cargo-c
@@ -99,13 +100,11 @@ jobs:
       - name: 'build rustls-ffi (cmake)'
         if: matrix.rustls-version == 'main'
         run: |
-          cd rustls-ffi
-          mkdir -p $HOME/rustls
+          cd $HOME/rustls-ffi
           cmake \
             -DCRYPTO_PROVIDER=${{matrix.crypto}} \
             -DDYN_LINK=on \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX=$HOME/rustls \
             -S librustls -B build
           cmake --build build --config "Release"
 
