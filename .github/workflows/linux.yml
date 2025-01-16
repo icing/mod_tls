@@ -100,6 +100,7 @@ jobs:
         if: matrix.rustls-version == 'main'
         run: |
           cd rustls-ffi
+          mkdir -p $HOME/rustls
           cmake \
             -DCRYPTO_PROVIDER=${{matrix.crypto}} \
             -DDYN_LINK=on \
@@ -107,7 +108,8 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=$HOME/rustls \
             -S librustls -B build
           cmake --build build --config "Release"
-          cmake --install build
+          cmake --install build \
+            -DCMAKE_INSTALL_PREFIX=$HOME/rustls \
           find $HOME/rustls
 
       - name: 'install test prereqs'
