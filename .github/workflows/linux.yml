@@ -87,6 +87,15 @@ jobs:
           cd rustls-ffi
           make DESTDIR=$HOME/rustls CRYPTO_PROVIDER=${{ matrix.crypto }} install
 
+      - name: Install cargo-c
+        if: matrix.rustls-version == 'main'
+        env:
+          # Version picked for MSRV compat.
+          LINK: https://github.com/lu-zero/cargo-c/releases/download/v0.10.0
+          CARGO_C_FILE: cargo-c-x86_64-unknown-linux-musl.tar.gz
+        run: |
+          curl -L $LINK/$CARGO_C_FILE | tar xz -C ~/.cargo/bin
+
       - name: 'build rustls-ffi (cmake)'
         if: matrix.rustls-version == 'main'
         run: |
