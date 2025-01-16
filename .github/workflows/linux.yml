@@ -51,7 +51,7 @@ jobs:
         crypto:
           - ring
         build:
-          - name: rustls 0.14.1 (ring)
+          - name: rustls 0.14.1
             install_packages:
             install_steps: pytest
             rustls-version: 0.14.1
