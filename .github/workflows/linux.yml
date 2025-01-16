@@ -54,7 +54,7 @@ jobs:
           # aws-lc-sys v0.21.1 is not building due to compiler warnings
           # - aws-lc-rs
         rustls-version:
-          - 0.14.1
+          - v0.14.1
           - main
         build:
           - name: mod_tls
@@ -79,7 +79,7 @@ jobs:
 
       - name: 'build rustls'
         run: |
-          git clone --quiet --depth=1 -b v${{ matrix.rustls-version }} --recursive https://github.com/rustls/rustls-ffi.git
+          git clone --quiet --depth=1 -b ${{ matrix.rustls-version }} --recursive https://github.com/rustls/rustls-ffi.git
           cd rustls-ffi
           make DESTDIR=$HOME/rustls CRYPTO_PROVIDER=${{ matrix.crypto }} install
 
