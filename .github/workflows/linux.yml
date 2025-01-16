@@ -40,7 +40,7 @@ env:
 
 jobs:
   linux:
-    name: ${{ matrix.build.name }} (rustls ${{matrix.rustls-version}}, crypto=${{ matrix.crypto }}, rust=${{matrix.rust}})
+    name: ${{ matrix.build.name }} (rustls-ffi ${{matrix.rustls-version}} ${{ matrix.crypto }} ${{matrix.rust}})
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -78,7 +78,6 @@ jobs:
           toolchain: ${{ matrix.rust }}
 
       - name: 'checkout rustls-ffi'
-        if: matrix.rustls-version != 'main'
         run: |
           git clone --quiet --depth=1 -b ${{ matrix.rustls-version }} --recursive https://github.com/rustls/rustls-ffi.git
 
