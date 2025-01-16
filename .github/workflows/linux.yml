@@ -107,7 +107,8 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=$HOME/rustls \
             -S librustls -B build
           cmake --build build --config "Release"
-          cmake --install build --config "Release"
+          cmake --install build
+          find $HOME/rustls
 
       - name: 'install test prereqs'
         run: |
