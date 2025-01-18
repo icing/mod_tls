@@ -52,7 +52,7 @@ jobs:
         crypto:
           - ring
           # aws-lc-sys v0.21.1 is not building due to compiler warnings
-          # - aws-lc-rs
+          - aws-lc-rs
         rustls-version:
           - v0.14.1
           - main
@@ -86,7 +86,7 @@ jobs:
         if: matrix.rustls-version != 'main'
         run: |
           cd $HOME/rustls-ffi
-          make DESTDIR=$HOME/rustls-ffi/build/rust CRYPTO_PROVIDER=${{ matrix.crypto }} install
+          make CFLAGS="" DESTDIR=$HOME/rustls-ffi/build/rust CRYPTO_PROVIDER=${{ matrix.crypto }} install
 
       - name: Install cargo-c
         if: matrix.rustls-version == 'main'
