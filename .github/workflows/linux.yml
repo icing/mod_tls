@@ -96,16 +96,17 @@ jobs:
         run: |
           curl -L $LINK/$CARGO_C_FILE | tar xz -C ~/.cargo/bin
 
-      - name: 'build rustls-ffi (cmake)'
+      - name: 'build rustls-ffi (cargo-c)'
         if: matrix.rustls-version == 'main'
         run: |
           cd $HOME/rustls-ffi
-          cmake \
-            -DCRYPTO_PROVIDER=${{matrix.crypto}} \
-            -DDYN_LINK=on \
-            -DCMAKE_BUILD_TYPE=Release \
-            -S librustls -B build
-          cmake --build build --config "Release"
+          cargo capi install \
+            --libdir lib \
+            --prefix "$HOME/rustls-ffi/build/rust" \
+            --release \
+            --locked \
+            --no-default-features \
+            --features ${{ matrix.crypto }}
 
       - name: 'install test prereqs'
         run: |
