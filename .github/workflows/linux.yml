@@ -52,7 +52,7 @@ jobs:
         crypto:
           - ring
           # aws-lc-sys v0.21.1 is not building due to compiler warnings
-          # - aws-lc-rs
+          - aws-lc-rs
         rustls-version:
           - v0.14.1
           - main
@@ -86,27 +86,27 @@ jobs:
         if: matrix.rustls-version != 'main'
         run: |
           cd $HOME/rustls-ffi
-          make DESTDIR=$HOME/rustls-ffi/build/rust CRYPTO_PROVIDER=${{ matrix.crypto }} install
+          make CFLAGS="" DESTDIR=$HOME/rustls-ffi/build/rust CRYPTO_PROVIDER=${{ matrix.crypto }} install
 
       - name: Install cargo-c
         if: matrix.rustls-version == 'main'
         env:
-          # Version picked for MSRV compat.
           LINK: https://github.com/lu-zero/cargo-c/releases/latest/download/
           CARGO_C_FILE: cargo-c-x86_64-unknown-linux-musl.tar.gz
         run: |
           curl -L $LINK/$CARGO_C_FILE | tar xz -C ~/.cargo/bin
 
-      - name: 'build rustls-ffi (cmake)'
+      - name: 'build rustls-ffi (cargo-c)'
         if: matrix.rustls-version == 'main'
         run: |
           cd $HOME/rustls-ffi
-          cmake \
-            -DCRYPTO_PROVIDER=${{matrix.crypto}} \
-            -DDYN_LINK=on \
-            -DCMAKE_BUILD_TYPE=Release \
-            -S librustls -B build
-          cmake --build build --config "Release"
+          cargo capi install \
+            --libdir lib \
+            --prefix "$HOME/rustls-ffi/build/rust" \
+            --release \
+            --locked \
+            --no-default-features \
+            --features ${{ matrix.crypto }}
 
       - name: 'install test prereqs'
         run: |
