@@ -6,8 +6,8 @@ implementation in Rust.
 
 ## Status
 
-The current state is compatible with **rustls-ffi v0.14.0** and needs at least Apache 2.4.48 for the 
-necessary infrastructure.
+The current state is compatible with **rustls-ffi v0.14.0 or newer** 
+and needs at least Apache 2.4.48 for the necessary infrastructure.
 
 `mod_tls` gives you:
  
@@ -27,7 +27,7 @@ There is a [comparison table with mod_ssl functionality](#comparison-with-mod_ss
 
 ## Platforms
 
- * rustls-ffi v0.14.0
+ * rustls-ffi v0.14.0 or newer
  * Apache 2.4.48 or later
  * build system: autoconf/automake
 
