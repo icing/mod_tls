@@ -77,6 +77,9 @@ jobs:
         with:
           toolchain: ${{ matrix.rust }}
 
+      - name: Install cargo-c
+        run: cargo install cargo-c
+
       - name: 'checkout rustls-ffi'
         run: |
           cd $HOME/
