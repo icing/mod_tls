@@ -488,7 +488,6 @@ static apr_status_t filter_conn_input(
 
         /* Second attempt: if we still have nothing, try reading TLS data from network */
         if (rlen == 0 && APR_BRIGADE_EMPTY(fctx->fin_plain_bb)) {
-            apr_off_t fin_bytes_before = fctx->fin_bytes_in_rustls;
             /* Limit the amount of data we read and pass to rustls at once to avoid
              * overwhelming rustls. Read at most one TLS record at a time to ensure
              * rustls can process it. This is especially important when fin_tls_bb
@@ -509,9 +508,11 @@ static apr_status_t filter_conn_input(
             }
 
             /* After reading TLS data, always try reading from rustls.
-             * rustls_connection_process_new_packets may have processed old data.
-             * Only try if we actually read new TLS data (fin_bytes_in_rustls increased). */
-            if (fctx->fin_bytes_in_rustls > fin_bytes_before && APR_BRIGADE_EMPTY(fctx->fin_plain_bb)) {
+             * rustls_connection_process_new_packets may have processed data and
+             * made decrypted data available. We should always try to read it,
+             * even if fin_bytes_in_rustls didn't increase (e.g., if we processed
+             * data that was already buffered in rustls). */
+            if (APR_BRIGADE_EMPTY(fctx->fin_plain_bb)) {
                 in_buf_len = APR_BUCKET_BUFF_SIZE;
                 in_buf = ap_calloc(in_buf_len, sizeof(char));
                 rr = rustls_connection_read(fctx->cc->rustls_connection,
