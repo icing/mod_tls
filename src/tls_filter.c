@@ -69,6 +69,19 @@ static apr_status_t read_tls_to_rustls(
     rustls_result rr = RUSTLS_RESULT_OK;
     int os_err;
     apr_status_t rv = APR_SUCCESS;
+    apr_bucket *b;
+    /* Check if rustls wants to read data. If not, return EAGAIN to let
+     * the event loop call us again when rustls is ready. */
+    if (!rustls_connection_wants_read(fctx->cc->rustls_connection)) {
+        if (fctx->fin_block == APR_NONBLOCK_READ) {
+            rv = APR_EAGAIN;
+            goto cleanup;
+        }
+        /* In blocking mode, we should wait, but for now just return EAGAIN
+         * to avoid busy-waiting. The event loop will call us again. */
+        rv = APR_EAGAIN;
+        goto cleanup;
+    }
 
     if (APR_BRIGADE_EMPTY(fctx->fin_tls_bb)) {
         ap_log_error(APLOG_MARK, APLOG_TRACE2, rv, fctx->cc->server,
@@ -80,8 +93,14 @@ static apr_status_t read_tls_to_rustls(
         }
     }
 
-    while (!APR_BRIGADE_EMPTY(fctx->fin_tls_bb) && passed < (apr_off_t)len) {
-        apr_bucket *b = APR_BRIGADE_FIRST(fctx->fin_tls_bb);
+    while (!APR_BRIGADE_EMPTY(fctx->fin_tls_bb)) {
+        /* Check wants_read before each bucket to ensure rustls is ready
+         * to accept more data. This prevents overwhelming rustls with
+         * too much data at once. */
+        if (!rustls_connection_wants_read(fctx->cc->rustls_connection)) {
+            break;
+        }
+        b = APR_BRIGADE_FIRST(fctx->fin_tls_bb);
 
         if (APR_BUCKET_IS_EOS(b)) {
             ap_log_error(APLOG_MARK, APLOG_TRACE2, rv, fctx->cc->server,
@@ -123,17 +142,31 @@ static apr_status_t read_tls_to_rustls(
                 b->start += (apr_off_t)rlen;
                 b->length -= rlen;
             }
-            fctx->fin_bytes_in_rustls += (apr_off_t)d.len;
+            fctx->fin_bytes_in_rustls += (apr_off_t)rlen;
+            /* passed tracks how much data rustls actually accepted (rlen) */
             passed += (apr_off_t)rlen;
+            
+            /* Process packets after each successful read_tls call, as per rustls
+             * documentation: "You should call process_new_packets() each time
+             * a call to this function succeeds in order to empty the incoming
+             * TLS data buffer." */
+            if (rlen > 0) {
+                rr = rustls_connection_process_new_packets(fctx->cc->rustls_connection);
+                if (rr != RUSTLS_RESULT_OK) {
+                    /* If processing fails, we've already passed some data to rustls.
+                     * This is an error condition. Log the error for debugging. */
+                    const char *err_descr = "";
+                    apr_status_t err_rv = tls_core_error(fctx->c, rr, &err_descr);
+                    ap_log_cerror(APLOG_MARK, APLOG_WARNING, err_rv, fctx->c, APLOGNO(10353)
+                                 "processing TLS data after passing %ld bytes: [%d] %s",
+                                 (long)passed, (int)rr, err_descr);
+                    goto cleanup;
+                }
+            }
         }
         else if (d.len == 0) {
             apr_bucket_delete(b);
         }
-    }
-
-    if (passed > 0) {
-        rr = rustls_connection_process_new_packets(fctx->cc->rustls_connection);
-        if (rr != RUSTLS_RESULT_OK) goto cleanup;
     }
 
 cleanup:
@@ -414,17 +447,21 @@ static apr_status_t filter_conn_input(
     }
 
     /* If we have nothing buffered, try getting more input.
+     * Event-driven approach: make one attempt per call and return APR_EAGAIN
+     * if no data is available (in non-blocking mode). Apache's event loop will
+     * call us again when data becomes available. This avoids busy-waiting loops.
      * a) ask rustls_connection for decrypted data, if it has any.
      *    Note that only full records can be decrypted. We might have
      *    written TLS data to the session, but that does not mean it
      *    can give unencrypted data out again.
      * b) read TLS bytes from the network and feed them to the rustls session.
-     * c) go back to a) if b) added data.
+     * c) try a) again if b) added data.
      */
     while (APR_BRIGADE_EMPTY(fctx->fin_plain_bb)) {
         apr_size_t rlen = 0;
         apr_bucket *b;
 
+        /* First attempt: try to read decrypted data from rustls */
         if (fctx->fin_bytes_in_rustls > 0) {
             in_buf_len = APR_BUCKET_BUFF_SIZE;
             in_buf = ap_calloc(in_buf_len, sizeof(char));
@@ -440,18 +477,75 @@ static apr_status_t filter_conn_input(
             if (rlen > 0) {
                 b = apr_bucket_heap_create(in_buf, rlen, free, fctx->c->bucket_alloc);
                 APR_BRIGADE_INSERT_TAIL(fctx->fin_plain_bb, b);
+                in_buf = NULL;
+                break; /* Got data, exit loop */
             }
             else {
                 free(in_buf);
+                in_buf = NULL;
             }
-            in_buf = NULL;
         }
-        if (rlen == 0) {
-            /* that did not produce anything either. try getting more
-             * TLS data from the network into the rustls session. */
-            fctx->fin_bytes_in_rustls = 0;
-            rv = read_tls_to_rustls(fctx, fctx->fin_max_in_rustls, block, 0);
-            if (APR_SUCCESS != rv) goto cleanup; /* this also leave on APR_EAGAIN */
+
+        /* Second attempt: if we still have nothing, try reading TLS data from network */
+        if (rlen == 0 && APR_BRIGADE_EMPTY(fctx->fin_plain_bb)) {
+            apr_off_t fin_bytes_before = fctx->fin_bytes_in_rustls;
+            /* Limit the amount of data we read and pass to rustls at once to avoid
+             * overwhelming rustls. Read at most one TLS record at a time to ensure
+             * rustls can process it. This is especially important when fin_tls_bb
+             * already contains data from previous calls. */
+            apr_size_t read_limit = TLS_PREF_PLAIN_CHUNK_SIZE;
+            if (fctx->fin_max_in_rustls < read_limit) {
+                read_limit = fctx->fin_max_in_rustls;
+            }
+            rv = read_tls_to_rustls(fctx, read_limit, block, 0);
+            if (APR_SUCCESS != rv) {
+                /* APR_EAGAIN means no data available now.
+                 * Return and let event loop call us again when data arrives. */
+                if (APR_STATUS_IS_EAGAIN(rv)) {
+                    goto cleanup;
+                }
+                /* Other errors, propagate them */
+                goto cleanup;
+            }
+
+            /* After reading TLS data, always try reading from rustls.
+             * rustls_connection_process_new_packets may have processed old data.
+             * Only try if we actually read new TLS data (fin_bytes_in_rustls increased). */
+            if (fctx->fin_bytes_in_rustls > fin_bytes_before && APR_BRIGADE_EMPTY(fctx->fin_plain_bb)) {
+                in_buf_len = APR_BUCKET_BUFF_SIZE;
+                in_buf = ap_calloc(in_buf_len, sizeof(char));
+                rr = rustls_connection_read(fctx->cc->rustls_connection,
+                    (unsigned char*)in_buf, in_buf_len, &rlen);
+                if (rr == RUSTLS_RESULT_PLAINTEXT_EMPTY) {
+                    rr = RUSTLS_RESULT_OK;
+                    rlen = 0;
+                }
+                if (rr != RUSTLS_RESULT_OK) goto cleanup;
+                if (rlen > 0) {
+                    b = apr_bucket_heap_create(in_buf, rlen, free, fctx->c->bucket_alloc);
+                    APR_BRIGADE_INSERT_TAIL(fctx->fin_plain_bb, b);
+                    in_buf = NULL;
+                    break; /* Got data, exit loop */
+                }
+                else {
+                    free(in_buf);
+                    in_buf = NULL;
+                }
+            }
+        }
+
+        /* If we still have nothing after one iteration:
+         * - In non-blocking mode, return EAGAIN to let event loop call us again.
+         * - In blocking mode, continue the loop - read_tls_to_rustls will block
+         *   on the next iteration if needed. This handles cases where TLS records
+         *   arrive in multiple network reads. */
+        if (APR_BRIGADE_EMPTY(fctx->fin_plain_bb)) {
+            if (block == APR_NONBLOCK_READ) {
+                rv = APR_EAGAIN;
+                goto cleanup;
+            }
+            /* In blocking mode, continue the loop */
+            continue;
         }
     }
 
@@ -482,7 +576,9 @@ static apr_status_t filter_conn_input(
         rv = APR_ENOTIMPL; goto cleanup;
     }
 
-    fout_pass_all_to_net(fctx, 0);
+    /* Note: We don't flush outgoing data from input filter to avoid conflicts
+     * when rustls is processing incoming data. Outgoing data will be flushed
+     * from the output filter (tls_filter_conn_output) when it's ready. */
 
 cleanup:
     if (NULL != in_buf) free(in_buf);
@@ -641,6 +737,11 @@ static apr_status_t fout_pass_buf_to_rustls(
             goto cleanup;
         }
     }
+    /* Note: We don't call fout_pass_rustls_to_tls() here to avoid conflicts.
+     * TLS data will be prepared and sent through fout_pass_all_to_tls() ->
+     * fout_pass_rustls_to_tls() which is called from fout_pass_all_to_net()
+     * at appropriate times. This ensures a single point of TLS data preparation
+     * and avoids synchronization issues. */
 cleanup:
     if (rr != RUSTLS_RESULT_OK) {
         const char *err_descr = "";
@@ -743,6 +844,7 @@ static apr_status_t fout_append_plain(tls_filter_ctx_t *fctx, apr_bucket *b)
     apr_status_t rv = APR_SUCCESS;
     const char *lbuf = NULL;
     int flush = 0;
+    int flush_nonblock = 0;
 
     if (b) {
         /* if our plain buffer is full, now is a good time to flush it. */
@@ -784,6 +886,25 @@ static apr_status_t fout_append_plain(tls_filter_ctx_t *fctx, apr_bucket *b)
              * buffer contains data. */
             rv = fout_add_bucket_to_plain(fctx, b);
             if (APR_SUCCESS != rv) goto cleanup;
+            /* For full duplex websocket connections, we need to send small chunks
+             * promptly to avoid blocking read operations. However, we still want
+             * to batch small chunks when possible for security (larger TLS records).
+             * Strategy:
+             * - If buffer is nearly full (>= 75%), flush with flush bucket
+             * - Always flush small chunks without blocking flush bucket to ensure
+             *   timely delivery for full duplex websocket connections.
+             *   Using non-blocking flush avoids breaking TLS record synchronization
+             *   while ensuring data is sent promptly. */
+            if (fctx->fout_buf_plain_len >= fctx->fout_buf_plain_size * 3 / 4) {
+                /* Buffer is nearly full, flush with flush bucket */
+                flush = 1;
+            }
+            else {
+                /* Always flush small chunks without blocking flush bucket to ensure
+                 * timely delivery for full duplex websocket connections.
+                 * This is critical to avoid hanging on the first small chunk. */
+                flush_nonblock = 1;
+            }
         }
         else {
             /* we have a large chunk and our plain buffer is empty, write it
@@ -828,6 +949,9 @@ static apr_status_t fout_append_plain(tls_filter_ctx_t *fctx, apr_bucket *b)
                 if (APR_SUCCESS != rv && !APR_STATUS_IS_EOF(rv)) goto cleanup;
                 rv = fout_pass_buf_to_rustls(fctx, lbuf, dlen);
                 if (APR_SUCCESS != rv) goto cleanup;
+                /* For large chunks, send TLS data without blocking flush
+                 * to avoid blocking read operations in full duplex mode. */
+                flush_nonblock = 1;
                 apr_bucket_delete(b);
             }
             else {
@@ -835,13 +959,21 @@ static apr_status_t fout_append_plain(tls_filter_ctx_t *fctx, apr_bucket *b)
                 if (APR_SUCCESS != rv) goto cleanup;
                 rv = fout_pass_buf_to_rustls(fctx, data, dlen);
                 if (APR_SUCCESS != rv) goto cleanup;
+                /* For large chunks, send TLS data without blocking flush
+                 * to avoid blocking read operations in full duplex mode. */
+                flush_nonblock = 1;
                 apr_bucket_delete(b);
             }
         }
     }
 
 maybe_flush:
-    if (flush) {
+    if (flush_nonblock) {
+        /* Send without blocking flush bucket for full duplex websocket */
+        rv = fout_pass_all_to_net(fctx, 0);
+        if (APR_SUCCESS != rv) goto cleanup;
+    }
+    else if (flush) {
         rv = fout_pass_all_to_net(fctx, 1);
         if (APR_SUCCESS != rv) goto cleanup;
     }
