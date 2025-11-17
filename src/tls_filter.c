@@ -193,13 +193,7 @@ static apr_status_t read_tls_to_rustls(
             if (rlen > 0) {
                 rr = rustls_connection_process_new_packets(fctx->cc->rustls_connection);
                 if (rr != RUSTLS_RESULT_OK) {
-                    /* If processing fails, we've already passed some data to rustls.
-                     * This is an error condition. Log the error for debugging. */
-                    const char *err_descr = "";
-                    apr_status_t err_rv = tls_core_error(fctx->c, rr, &err_descr);
-                    ap_log_cerror(APLOG_MARK, APLOG_WARNING, err_rv, fctx->c, APLOGNO(10353)
-                                 "processing TLS data after passing %ld bytes: [%d] %s",
-                                 (long)passed, (int)rr, err_descr);
+                    /* If processing fails, we've already passed some data to rustls. */
                     goto cleanup;
                 }
             }
@@ -222,12 +216,6 @@ cleanup:
             }
             else {
                 rv = APR_ECONNRESET;
-            }
-            if (!errors_expected) {
-                const char *err_descr = "";
-                apr_status_t map_rv = tls_core_error(fctx->c, rr, &err_descr);
-                ap_log_cerror(APLOG_MARK, APLOG_WARNING, map_rv, fctx->c, APLOGNO(10353)
-                             "processing TLS data: [%d] %s", (int)rr, err_descr);
             }
         }
     }
@@ -756,18 +744,8 @@ cleanup:
     else if (APR_STATUS_IS_EAGAIN(rv) || rv == APR_FROM_OS_ERROR(EAGAIN) || rv == APR_EAGAIN) {
         /* Coerce EAGAIN only for blocking callers; propagate for non-blocking */
         if (fctx->fin_block == APR_BLOCK_READ) {
-            if (APLOGctrace4(fctx->c)) {
-                ap_log_cerror(APLOG_MARK, APLOG_TRACE4, rv, fctx->c,
-                             "tls_filter_conn_input: coerce EAGAIN->SUCCESS (blocking)");
-            }
             rv = APR_SUCCESS;
-            ap_log_cerror(APLOG_MARK, APLOG_TRACE4, rv, fctx->c,
-                         "tls_filter_conn_input: no data available");
         } else {
-            if (APLOGctrace4(fctx->c)) {
-                ap_log_cerror(APLOG_MARK, APLOG_TRACE4, rv, fctx->c,
-                             "tls_filter_conn_input: return EAGAIN (non-blocking, no data)");
-            }
             rv = APR_EAGAIN;
         }
     }
@@ -788,25 +766,10 @@ cleanup:
     /* Final guard: coerce EAGAIN only for blocking callers */
     if (APR_STATUS_IS_EAGAIN(rv) || rv == APR_FROM_OS_ERROR(EAGAIN) || rv == APR_EAGAIN) {
         if (fctx->fin_block == APR_BLOCK_READ) {
-            if (APLOGctrace4(fctx->c)) {
-                ap_log_cerror(APLOG_MARK, APLOG_TRACE4, rv, fctx->c,
-                             "tls_filter_conn_input: final coerce EAGAIN->SUCCESS (blocking)");
-            }
             rv = APR_SUCCESS;
         } else {
-            if (APLOGctrace4(fctx->c)) {
-                ap_log_cerror(APLOG_MARK, APLOG_TRACE4, rv, fctx->c,
-                             "tls_filter_conn_input: final return EAGAIN (non-blocking)");
-            }
             rv = APR_EAGAIN;
         }
-    }
-    if (APLOGctrace1(fctx->c)) {
-        int wants_r = fctx->cc->rustls_connection ? rustls_connection_wants_read(fctx->cc->rustls_connection) : 0;
-        int wants_w = fctx->cc->rustls_connection ? rustls_connection_wants_write(fctx->cc->rustls_connection) : 0;
-        ap_log_cerror(APLOG_MARK, APLOG_TRACE1, rv, fctx->c,
-                     "tls_filter_conn_input: return rv=%d rr=%d mode=%d block=%d passed=%ld wants_read=%d wants_write=%d fin_bytes_in_rustls=%ld",
-                     (int)rv, (int)rr, (int)mode, (int)block, (long)passed, wants_r, wants_w, (long)fctx->fin_bytes_in_rustls);
     }
     return rv;
 }
