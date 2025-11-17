@@ -18,6 +18,8 @@ class TestProxy:
             ]
         })
         # add vhosts a+b and a ssl proxy from a to b
+        conf.add_vhost('localhost', port=env.http_port)
+        conf.add_vhost(env.domain_b, port=env.http_port, doc_root=f"htdocs/{env.domain_b}")
         conf.add_tls_vhosts(domains=[env.domain_a, env.domain_b])
         conf.install()
         assert env.apache_restart() == 0
