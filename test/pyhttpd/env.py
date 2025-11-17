@@ -312,6 +312,7 @@ class HttpdTestEnv:
             f"test2.{self._http_tld}",
             f"test3.{self._http_tld}",
             f"cgi.{self._http_tld}",
+            "localhost",
         ], key_type='rsa4096')]
 
         self._verify_certs = False
