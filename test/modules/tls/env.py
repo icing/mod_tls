@@ -107,18 +107,6 @@ class TlsTestEnv(HttpdTestEnv):
             '    AddHandler cgi-script .py',
             '    Options +ExecCGI',
             '</Directory>',
-            f'<VirtualHost *:{self.http_port}>',
-            '    ServerName localhost',
-            '    DocumentRoot "htdocs"',
-            '</VirtualHost>',
-            f'<VirtualHost *:{self.http_port}>',
-            f'    ServerName {self.domain_a}',
-            '    DocumentRoot "htdocs/a.mod-tls.test"',
-            '</VirtualHost>',
-            f'<VirtualHost *:{self.http_port}>',
-            f'    ServerName {self.domain_b}',
-            '    DocumentRoot "htdocs/b.mod-tls.test"',
-            '</VirtualHost>',
         ])
         self.add_cert_specs([
             CertificateSpec(domains=[self.domain_a]),
