@@ -38,7 +38,7 @@ def _private_key(key_type):
     if not isinstance(key_type, ec.EllipticCurve) and key_type in EC_SUPPORTED:
         key_type = EC_SUPPORTED[key_type]
     return ec.generate_private_key(
-        curve=key_type,
+        curve=key_type(),
         backend=default_backend()
     )
 
