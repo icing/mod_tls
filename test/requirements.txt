@@ -19,3 +19,4 @@ filelock
 python-multipart
 psutil
 tqdm
+websockets
