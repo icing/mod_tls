@@ -151,6 +151,14 @@ class TlsTestEnv(HttpdTestEnv):
         r = self.tls_get(domain=domain, paths=path, options=options)
         return r.json
 
+    def check_error_log(self):
+        self.httpd_error_log.ignore_recent(
+            lognos = [
+                "AH00468",  # error closing socket in mpm_event
+            ]
+        )
+        super().check_error_log()
+
     def run_diff(self, fleft: str, fright: str) -> ExecResult:
         return self.run(['diff', '-u', fleft, fright])
 

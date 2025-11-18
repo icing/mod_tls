@@ -166,11 +166,6 @@ class TestWebSockets:
             ws.send(message)
             response = self.ws_recv_text(ws)
             assert response == message
-        env.httpd_error_log.ignore_recent(
-            lognos = [
-                "AH00468",  # error closing socket in mpm_event
-            ]
-        )
 
     # verify that our secure websocket server works
     def test_tls_18_02_wss_direct(self, env, wss_server):

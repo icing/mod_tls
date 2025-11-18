@@ -12,7 +12,6 @@ class TestProxyMixed:
     def _class_scope(self, env):
         conf = TlsTestConf(env=env, extras={
             'base': [
-                "LogLevel proxy:trace1 proxy_http:trace1 ssl:trace1 proxy_http2:trace1 http2:debug",
                 "ProxyPreserveHost on",
             ],
             env.domain_a: [
@@ -43,6 +42,4 @@ class TestProxyMixed:
 
     def test_tls_16_proxy_mixed_tls_get(self, env, repeat):
         data = env.tls_get_json(env.domain_a, "/proxy-tls/index.json")
-        if data is None:
-            time.sleep(300)
         assert data == {'domain': env.domain_a}
