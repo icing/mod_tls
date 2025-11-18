@@ -29,6 +29,7 @@ https_port = 5001
 proxy_port = 5003
 http_port2 = 5004
 ws_port = 5100
+wss_port = 5101
 http_tld = tests.httpd.apache.org
 test_dir = @abs_srcdir@
 test_src_dir = @abs_srcdir@
