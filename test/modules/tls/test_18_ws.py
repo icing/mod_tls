@@ -103,10 +103,8 @@ class TestWebSockets:
                 '</Proxy>',
             ],
             'localhost': [
-                f'ProxyPass /ws/ http://127.0.0.1:{env.ws_port}/ upgrade=websocket \\',
-                f'timeout=2 flushpackets=on',
-                f'ProxyPass /wss/ https://localhost:{env.wss_port}/ upgrade=websocket \\',
-                f'timeout=2 flushpackets=on',
+                f'ProxyPass /ws/ http://127.0.0.1:{env.ws_port}/ upgrade=websocket',
+                f'ProxyPass /wss/ https://localhost:{env.wss_port}/ upgrade=websocket',
             ],
         })
         conf.add_vhost('localhost', port=env.http_port)
