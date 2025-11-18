@@ -62,7 +62,7 @@ static rustls_io_result tls_read_callback(
  * function to handle the added data before leaving.
  */
 static apr_status_t read_tls_to_rustls(
-    tls_filter_ctx_t *fctx, apr_size_t len, apr_read_type_e block, int errors_expected)
+    tls_filter_ctx_t* fctx, apr_size_t len, apr_read_type_e block)
 {
     apr_read_type_e caller_block = block; /* preserve caller's blocking mode */
     tls_data_t d;
@@ -313,7 +313,7 @@ static apr_status_t filter_recv_client_hello(tls_filter_ctx_t *fctx)
         fctx->fin_tls_buffer_bb = apr_brigade_create(fctx->c->pool, fctx->c->bucket_alloc);
         do {
             if (rustls_connection_wants_read(fctx->cc->rustls_connection)) {
-                rv = read_tls_to_rustls(fctx, fctx->fin_max_in_rustls, APR_BLOCK_READ, 1);
+                rv = read_tls_to_rustls(fctx, fctx->fin_max_in_rustls, APR_BLOCK_READ);
                 if (APR_SUCCESS != rv) {
                     if (fctx->cc->client_hello_seen) {
                         /* We got what we needed - client hello was seen.
@@ -389,7 +389,7 @@ static apr_status_t filter_do_handshake(
                 if (APR_SUCCESS != rv) goto cleanup;
             }
             else if (rustls_connection_wants_read(fctx->cc->rustls_connection)) {
-                rv = read_tls_to_rustls(fctx, fctx->fin_max_in_rustls, APR_BLOCK_READ, 0);
+                rv = read_tls_to_rustls(fctx, fctx->fin_max_in_rustls, APR_BLOCK_READ);
                 if (APR_SUCCESS != rv) goto cleanup;
             }
         }
@@ -583,7 +583,6 @@ static apr_status_t filter_conn_input(
 
             if (should_read_tls) {
                 apr_size_t read_limit;
-                int force_read_flag;
                 apr_off_t bytes_in_rustls_before;
                 /* Avoid blocking brigade length checks; they may stall the input filter */
                 
@@ -600,18 +599,11 @@ static apr_status_t filter_conn_input(
                         read_limit = fctx->fin_max_in_rustls;
                     }
                 }
-                /* Use force_read if wants_read is false but we're in blocking mode.
-                 * This allows us to read from network even when rustls says it doesn't
-                 * want more data, which is necessary to avoid infinite loops when
-                 * plaintext hasn't appeared yet. */
-                force_read_flag = (block == APR_BLOCK_READ && 
-                                  !rustls_connection_wants_read(fctx->cc->rustls_connection) &&
-                                  (!APR_BRIGADE_EMPTY(fctx->fin_tls_bb) || fctx->fin_bytes_in_rustls > 0)) ? 1 : 0;
                 /* Track how much data we had in rustls before reading */
                 bytes_in_rustls_before = fctx->fin_bytes_in_rustls;
                 /* Do not call apr_brigade_length() here to avoid blocking */
                 
-                rv = read_tls_to_rustls(fctx, read_limit, block, force_read_flag);
+                rv = read_tls_to_rustls(fctx, read_limit, block);
                 tls_read_attempted = 1;
                 if (APR_SUCCESS != rv) {
                     if (APR_STATUS_IS_EAGAIN(rv)) {
