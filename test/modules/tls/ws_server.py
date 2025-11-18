@@ -3,6 +3,7 @@ import argparse
 import asyncio
 import logging
 import os
+import ssl
 import sys
 import time
 
@@ -75,10 +76,14 @@ async def on_async_conn(conn):
     await conn.close(code=1000, reason='')
 
 
-async def run_server(port):
-    log.info(f'starting server on port {port}')
+async def run_server(port, cert, pkey):
+    log.info(f'starting server on port {port}, cert {cert}, key {pkey}')
+    ssl_ctx = None
+    if cert and pkey:
+        ssl_ctx = ssl.SSLContext(protocol=ssl.PROTOCOL_TLS_SERVER)
+        ssl_ctx.load_cert_chain(certfile=cert, keyfile=pkey)
     async with ws_server.serve(ws_handler=on_async_conn,
-                               host="localhost", port=port):
+                               host="localhost", port=port, ssl=ssl_ctx):
         await asyncio.Future()
 
 
@@ -87,6 +92,10 @@ async def main():
                                      description="Run a websocket echo server.")
     parser.add_argument("--port", type=int,
                         default=0, help="port to listen on")
+    parser.add_argument("--cert", type=str,
+                        default=None, help="TLS certificate")
+    parser.add_argument("--key", type=str,
+                        default=None, help="TLS private key")
     args = parser.parse_args()
 
     if args.port == 0:
@@ -97,7 +106,7 @@ async def main():
         format="%(asctime)s %(message)s",
         level=logging.DEBUG,
     )
-    await run_server(args.port)
+    await run_server(args.port, args.cert, args.key)
 
 
 if __name__ == "__main__":

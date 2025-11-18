@@ -112,6 +112,7 @@ class TlsTestEnv(HttpdTestEnv):
             CertificateSpec(domains=[self.domain_a]),
             CertificateSpec(domains=[self.domain_b], key_type='secp256r1', single_file=True),
             CertificateSpec(domains=[self.domain_b], key_type='rsa4096'),
+            CertificateSpec(domains=['localhost'], key_type='rsa4096'),
             CertificateSpec(name="clientsX", sub_specs=[
                 CertificateSpec(name="user1", client=True, single_file=True),
                 CertificateSpec(name="user2", client=True, single_file=True),
