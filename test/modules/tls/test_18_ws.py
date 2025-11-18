@@ -166,6 +166,11 @@ class TestWebSockets:
             ws.send(message)
             response = self.ws_recv_text(ws)
             assert response == message
+        env.httpd_error_log.ignore_recent(
+            lognos = [
+                "AH00468",  # error closing socket in mpm_event
+            ]
+        )
 
     # verify that our secure websocket server works
     def test_tls_18_02_wss_direct(self, env, wss_server):
@@ -186,8 +191,9 @@ class TestWebSockets:
             assert response == message
 
     # verify to send secure websocket message pingpong through apache
+    # this used to fail due to borked handling of incomplete TLS
+    # records when passing data from backend to frontend connection
     def test_tls_18_04_http_wss(self, env, wss_server):
-        pytest.skip(reason='This fails, needing a fix like PR #9')
         with connect(f"ws://localhost:{env.http_port}/wss/echo/") as ws:
             message = "Hello world!"
             ws.send(message)

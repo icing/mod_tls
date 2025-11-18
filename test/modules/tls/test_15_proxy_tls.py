@@ -48,6 +48,11 @@ class TestProxyTLS:
     def test_tls_15_proxy_tls_get(self, env):
         data = env.tls_get_json(env.domain_b, "/proxy-tls/index.json")
         assert data == {'domain': env.domain_b}
+        env.httpd_error_log.ignore_recent(
+            lognos = [
+                "AH00468",  # error closing socket in mpm_event
+            ]
+        )
 
     def test_tls_15_proxy_tls_get_local(self, env):
         # does not work, since SSLProxy* not configured
