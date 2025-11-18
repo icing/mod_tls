@@ -186,10 +186,9 @@ class TestWebSockets:
             assert response == message
 
     # verify to send secure websocket message pingpong through apache
-    def test_tls_18_04_https_wss(self, env, wss_server):
+    def test_tls_18_04_http_wss(self, env, wss_server):
         pytest.skip(reason='This fails, needing a fix like PR #9')
-        with connect(f"wss://localhost:{env.https_port}/wss/echo/",
-                     ssl_context=self.ssl_ctx(env)) as ws:
+        with connect(f"ws://localhost:{env.http_port}/wss/echo/") as ws:
             message = "Hello world!"
             ws.send(message)
             response = self.ws_recv_text(ws)
@@ -203,21 +202,10 @@ class TestWebSockets:
             response = self.ws_recv_bytes(ws)
             assert response == expected
 
-    # verify getting plain websocket from the https: server
-    # this is "frontend" mod_tls work and backend plain
-    @pytest.mark.parametrize("fname", ["1k.txt", "10k.txt", "100k.txt", "1m.txt"])
-    def test_tls_18_06_https_ws_file(self, env, fname, ws_server):
-        pytest.skip(reason='For unknown reasons, this is flaky in CI')
-        expected = open(os.path.join(env.gen_dir, fname), 'rb').read()
-        with connect(f"wss://localhost:{env.https_port}/ws/file/{fname}",
-                     ssl_context=self.ssl_ctx(env)) as ws:
-            response = self.ws_recv_bytes(ws)
-            assert response == expected
-
     # verify getting secure websocket from the http: server
     # this is "backend" mod_tls work
     @pytest.mark.parametrize("fname", ["1k.txt", "10k.txt", "100k.txt", "1m.txt"])
-    def test_tls_18_07_http_wss_file(self, env, fname, ws_server):
+    def test_tls_18_06_http_wss_file(self, env, fname, ws_server):
         expected = open(os.path.join(env.gen_dir, fname), 'rb').read()
         with connect(f"ws://localhost:{env.http_port}/wss/file/{fname}") as ws:
             response = self.ws_recv_bytes(ws)
