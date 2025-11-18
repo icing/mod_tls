@@ -154,7 +154,7 @@ class TlsTestEnv(HttpdTestEnv):
     def check_error_log(self):
         self.httpd_error_log.ignore_recent(
             lognos = [
-                "AH00468",  # error closing socket in mpm_event
+                "AH00468",  # error closing socket in mpm_event, a little sus
             ]
         )
         super().check_error_log()
