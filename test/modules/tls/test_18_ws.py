@@ -138,10 +138,9 @@ class TestWebSockets:
         yield ws_server
         ws_server.stop()
 
-    def ssl_ctx(self):
+    def ssl_ctx(self, env):
         ssl_ctx = ssl.SSLContext(protocol=ssl.PROTOCOL_TLS_CLIENT)
-        ssl_ctx.check_hostname = False
-        ssl_ctx.verify_mode = ssl.VerifyMode.CERT_NONE
+        ssl_ctx.load_verify_locations(cafile=env.ca.cert_file)
         return ssl_ctx
 
     def ws_recv_text(self, ws):
@@ -170,8 +169,8 @@ class TestWebSockets:
 
     # verify that our secure websocket server works
     def test_tls_18_02_wss_direct(self, env, wss_server):
-        with connect(f"wss://127.0.0.1:{env.wss_port}/echo",
-                     ssl_context=self.ssl_ctx()) as ws:
+        with connect(f"wss://localhost:{env.wss_port}/echo",
+                     ssl_context=self.ssl_ctx(env)) as ws:
             message = "Hello world!"
             ws.send(message)
             response = self.ws_recv_text(ws)
@@ -189,7 +188,7 @@ class TestWebSockets:
     def test_tls_18_04_https_wss(self, env, wss_server):
         pytest.skip(reason='This fails, needing a fix like PR #9')
         with connect(f"wss://localhost:{env.https_port}/wss/echo/",
-                     ssl_context=self.ssl_ctx()) as ws:
+                     ssl_context=self.ssl_ctx(env)) as ws:
             message = "Hello world!"
             ws.send(message)
             response = self.ws_recv_text(ws)
@@ -209,7 +208,7 @@ class TestWebSockets:
     def test_tls_18_06_https_ws_file(self, env, fname, ws_server):
         expected = open(os.path.join(env.gen_dir, fname), 'rb').read()
         with connect(f"wss://localhost:{env.https_port}/ws/file/{fname}",
-                     ssl_context=self.ssl_ctx()) as ws:
+                     ssl_context=self.ssl_ctx(env)) as ws:
             response = self.ws_recv_bytes(ws)
             assert response == expected
 
@@ -219,6 +218,6 @@ class TestWebSockets:
     def test_tls_18_07_https_wss_file(self, env, fname, ws_server):
         expected = open(os.path.join(env.gen_dir, fname), 'rb').read()
         with connect(f"wss://localhost:{env.https_port}/wss/file/{fname}",
-                     ssl_context=self.ssl_ctx()) as ws:
+                     ssl_context=self.ssl_ctx(env)) as ws:
             response = self.ws_recv_bytes(ws)
             assert response == expected
