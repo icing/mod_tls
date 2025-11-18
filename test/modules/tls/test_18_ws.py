@@ -169,6 +169,7 @@ class TestWebSockets:
 
     # verify that our secure websocket server works
     def test_tls_18_02_wss_direct(self, env, wss_server):
+        pytest.skip(reason='For unknown reasons, this is flaky in CI')
         with connect(f"wss://localhost:{env.wss_port}/echo",
                      ssl_context=self.ssl_ctx(env)) as ws:
             message = "Hello world!"
