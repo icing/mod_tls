@@ -275,6 +275,7 @@ class HttpdTestEnv:
         self._https_port = int(self.config.get('test', 'https_port'))
         self._proxy_port = int(self.config.get('test', 'proxy_port'))
         self._ws_port = int(self.config.get('test', 'ws_port'))
+        self._wss_port = int(self.config.get('test', 'wss_port'))
         self._http_tld = self.config.get('test', 'http_tld')
         self._test_dir = self.config.get('test', 'test_dir')
         self._clients_dir = os.path.join(os.path.dirname(self._test_dir), 'clients')
@@ -403,6 +404,10 @@ class HttpdTestEnv:
     @property
     def ws_port(self) -> int:
         return self._ws_port
+
+    @property
+    def wss_port(self) -> int:
+        return self._wss_port
 
     @property
     def http_tld(self) -> str:
