@@ -24,7 +24,8 @@ class TestTimeout:
     def test_tls_09_timeout_handshake(self, env):
         # in domain_b root, the StdEnvVars is switch on
         s = socket.create_connection(('localhost', env.https_port))
-        s.send(b'1234')
+        # something that looks like a ClientHello
+        s.send(bytes.fromhex('3c37121e'))
         s.settimeout(0.0)
         try:
             s.recv(1024)
