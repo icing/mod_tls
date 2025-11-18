@@ -71,76 +71,19 @@ static apr_status_t read_tls_to_rustls(
     rustls_result rr = RUSTLS_RESULT_OK;
     int os_err;
     apr_status_t rv = APR_SUCCESS;
-    apr_bucket *b;
-    int force_read = 0; /* Flag to force reading even if wants_read is false */
-    apr_read_type_e read_block;
-    /* Check if rustls wants to read data. If not, we may still need to read
-     * from the network in blocking mode if we have incomplete TLS records
-     * (indicated by fin_bytes_in_rustls > 0). */
-    if (!rustls_connection_wants_read(fctx->cc->rustls_connection)) {
-        if (block == APR_NONBLOCK_READ) {
-            rv = APR_EAGAIN;
-            goto cleanup;
-        }
-        /* In blocking mode, if we have data in rustls, it means rustls is
-         * processing incomplete TLS records and needs more network data to
-         * complete them. We should continue reading from the network even
-         * though wants_read is false. */
-        if (fctx->fin_data_pending) {
-            /* Rustls has incomplete records, continue to read from network.
-             * Set force_read flag to ignore wants_read check in the loop. */
-            force_read = 1;
-        }
-        else {
-            /* Rustls is not ready and we have no data buffered inside rustls.
-             * In non-blocking mode, indicate try again; in blocking mode, just
-             * proceed to read from the network (below) and block as needed. */
-            if (block == APR_NONBLOCK_READ) {
-                rv = APR_EAGAIN;
-                goto cleanup;
-            }
-            /* For blocking mode: do not error here; let the code below perform
-             * a blocking ap_get_brigade() to fetch more TLS bytes. */
-        }
-    }
 
     if (APR_BRIGADE_EMPTY(fctx->fin_tls_bb)) {
         ap_log_error(APLOG_MARK, APLOG_TRACE2, rv, fctx->cc->server,
             "read_tls_to_rustls, get data from network, block=%d", block);
-        /* If force_read is set, we need to read from network in blocking mode
-         * even if wants_read is false, to complete incomplete TLS records. */
-        read_block = block;
-        if (force_read && fctx->fin_block != APR_NONBLOCK_READ) {
-            read_block = APR_BLOCK_READ;
-        }
         rv = ap_get_brigade(fctx->fin_ctx->next, fctx->fin_tls_bb,
-                            AP_MODE_READBYTES, read_block, (apr_off_t)len);
+                            AP_MODE_READBYTES, block, (apr_off_t)len);
         if (APR_SUCCESS != rv) {
-            /* In blocking mode, do not propagate EAGAIN upward; allow caller loop to retry */
-            if (read_block == APR_BLOCK_READ && APR_STATUS_IS_EAGAIN(rv)) {
-                rv = APR_SUCCESS;
-            }
-            else {
-                goto cleanup;
-            }
+            goto cleanup;
         }
     }
 
     while (!APR_BRIGADE_EMPTY(fctx->fin_tls_bb)) {
-        /* Do not feed too much in a single call: keep to ~one TLS record
-         * so that upper logic can interleave decrypt/flush for WS full-duplex. */
-        if (passed >= (apr_off_t)TLS_REC_MAX_SIZE) {
-            break;
-        }
-        /* Check wants_read before each bucket to ensure rustls is ready
-         * to accept more data. This prevents overwhelming rustls with
-         * too much data at once. However, if force_read is set, we ignore
-         * this check because we need to read more data to complete incomplete
-         * TLS records. */
-        if (!force_read && !rustls_connection_wants_read(fctx->cc->rustls_connection)) {
-            break;
-        }
-        b = APR_BRIGADE_FIRST(fctx->fin_tls_bb);
+        apr_bucket *b = APR_BRIGADE_FIRST(fctx->fin_tls_bb);
 
         if (APR_BUCKET_IS_EOS(b)) {
             ap_log_error(APLOG_MARK, APLOG_TRACE2, rv, fctx->cc->server,
@@ -166,11 +109,11 @@ static apr_status_t read_tls_to_rustls(
 
             os_err = rustls_connection_read_tls(fctx->cc->rustls_connection,
                                 tls_read_callback, &d, &rlen);
+            fctx->fin_data_pending = TRUE;
             if (os_err) {
                 rv = APR_FROM_OS_ERROR(os_err);
                 goto cleanup;
             }
-            fctx->fin_data_pending = TRUE;
 
             if (fctx->fin_tls_buffer_bb) {
                 /* we buffer for later replay on the 'real' rustls_connection */
