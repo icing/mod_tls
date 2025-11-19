@@ -1,3 +1,9 @@
+v0.15.0
+----------------------------------------------------------------------------------------------------
+ * Fixed a but that stalled data from the client to not reach a proxied backend
+   when mod_tls was used for the proxy connection. Thanks for @makavity for the
+   help on this.
+
 v0.14.0
 ----------------------------------------------------------------------------------------------------
  * Updated to rustls-ffi 0.14.0 by @cpu.
