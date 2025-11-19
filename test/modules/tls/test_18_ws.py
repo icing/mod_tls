@@ -150,6 +150,8 @@ class TestWebSockets:
                 msg += ws.recv()
             except websockets.exceptions.ConnectionClosedOK:
                 return msg
+            except websockets.exceptions.ConnectionClosedError:
+                return msg
 
     def ws_recv_bytes(self, ws):
         msg = b''
@@ -157,6 +159,8 @@ class TestWebSockets:
             try:
                 msg += ws.recv()
             except websockets.exceptions.ConnectionClosedOK:
+                return msg
+            except websockets.exceptions.ConnectionClosedError:
                 return msg
 
     # verify the our plain websocket server works
@@ -187,7 +191,7 @@ class TestWebSockets:
 
     # verify to send secure websocket message pingpong through apache
     def test_tls_18_04_http_wss(self, env, wss_server):
-        pytest.skip(reason='This fails, needing a fix like PR #9')
+        # pytest.skip(reason='This fails, needing a fix like PR #9')
         with connect(f"ws://localhost:{env.http_port}/wss/echo/") as ws:
             message = "Hello world!"
             ws.send(message)

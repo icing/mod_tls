@@ -1305,7 +1305,7 @@ apr_status_t tls_core_conn_post_handshake(conn_rec *c)
     cc->tls_cipher_id = rustls_connection_get_negotiated_ciphersuite(cc->rustls_connection);
     cc->tls_cipher_name = tls_proto_get_cipher_name(sc->global->proto,
         cc->tls_cipher_id, c->pool);
-    ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, c, "post_handshake %s: %s [%s]",
+    ap_log_cerror(APLOG_MARK, APLOG_TRACE1, 0, c, "[OUT] TLS handshake %s: %s [%s]",
         cc->server->server_hostname, cc->tls_protocol_name, cc->tls_cipher_name);
 
     cert = rustls_connection_get_peer_certificate(cc->rustls_connection, 0);

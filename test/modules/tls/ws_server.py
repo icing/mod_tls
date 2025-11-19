@@ -9,6 +9,7 @@ import time
 
 import websockets.server as ws_server
 from websockets.exceptions import ConnectionClosedError
+from websockets.exceptions import ConnectionClosedOK
 
 log = logging.getLogger(__name__)
 
@@ -38,8 +39,11 @@ async def on_async_conn(conn):
     log.info(f'connection for {pcomps}')
     if pcomps[0] == 'echo':
         log.info(f'/echo endpoint')
-        for message in await conn.recv():
-            await conn.send(message)
+        try:
+            for message in await conn.recv():
+                await conn.send(message)
+        except ConnectionClosedOK:
+            pass
     elif pcomps[0] == 'text':
         await conn.send('hello!')
     elif pcomps[0] == 'file':
