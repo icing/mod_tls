@@ -28,7 +28,6 @@ struct tls_filter_ctx_t {
     apr_bucket_brigade *fin_tls_bb;      /* TLS encrypted, incoming network data */
     apr_bucket_brigade *fin_tls_buffer_bb; /* TLS encrypted, incoming network data buffering */
     apr_bucket_brigade *fin_plain_bb;    /* decrypted, incoming traffic data */
-    apr_off_t fin_bytes_in_rustls;       /* # of input TLS bytes in rustls_connection */
     apr_read_type_e fin_block;           /* Do we block on input reads or not? */
 
     ap_filter_t *fout_ctx;               /* Apache's entry into the output filter chain */
@@ -43,6 +42,8 @@ struct tls_filter_ctx_t {
     apr_size_t fout_max_in_rustls;        /* how much plain bytes we like in rustls */
     apr_size_t fout_max_bucket_size;      /* how large bucket chunks we handle before splitting */
     apr_size_t fout_auto_flush_size;      /* on much outoing TLS data we flush to network */
+    int fin_data_pending;                 /* rustls as unencrypted TSL data in input */
+    int fin_eof;                          /* encountered EOF on receiving data */
 };
 
 /**
